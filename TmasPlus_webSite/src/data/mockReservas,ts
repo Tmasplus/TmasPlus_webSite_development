@@ -1,0 +1,23 @@
+export type CorporateBooking = {
+  id: string;
+  empresa: string;
+  solicitante: string;
+  fecha: string;
+  monto: number;
+  estado: "pendiente" | "confirmada" | "en_progreso" | "completada" | "cancelada";
+};
+
+export const BOOKINGS_MOCK: CorporateBooking[] = Array.from({ length: 35 }).map((_, i) => {
+  const id = `${i + 1}`.padStart(3, "0");
+  const estadoOptions: CorporateBooking["estado"][] = ["pendiente", "confirmada", "en_progreso", "completada", "cancelada"];
+  const estado = estadoOptions[i % estadoOptions.length];
+
+  return {
+    id,
+    empresa: `Empresa ${id}`,
+    solicitante: `Solicitante ${id}`,
+    fecha: new Date(2023, (i % 12), (i % 28) + 1).toISOString(), // Fecha generada aleatoriamente dentro del año 2023
+    monto: Math.floor(Math.random() * 5000) + 1000, // Monto aleatorio entre 1000 y 6000
+    estado,
+  };
+});
