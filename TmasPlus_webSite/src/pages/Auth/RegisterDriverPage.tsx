@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from '@/config/supabase';
 import { StepIndicator } from '@/components/registration/StepIndicator';
 import { Step1PersonalData } from '@/components/registration/Step1PersonalData';
 import { Step2Documents } from '@/components/registration/Step2Documents';
 import { Step3Vehicle } from '@/components/registration/Step3Vehicle';
 import { Step4Company } from '@/components/registration/Step4Company';
 import { DriversService } from '@/services/drivers.service';
+import { UsersService } from '@/services/users.service';
 import { toast } from '@/utils/toast';
 import logo from '@/assets/Logo-v3.png';
 import type {
@@ -30,49 +32,26 @@ const ALL_STEPS = [
 const needsStep4 = (s3: Step3Data) =>
     s3.serviceType === 'servicio_especial' || s3.serviceType === 'taxi_plus';
 
-// ==================== PANTALLA DE ÉXITO ====================
-const SuccessScreen: React.FC<{ onGoLogin: () => void }> = ({ onGoLogin }) => (
-    <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="flex flex-col items-center text-center gap-5 py-4"
-    >
-        <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-            <svg className="w-10 h-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-        </div>
-        <div>
-            <h2 className="text-xl font-bold text-[#002f45]">¡Registro exitoso!</h2>
-            <p className="text-sm text-slate-500 mt-2 max-w-xs">
-                Tu solicitud fue enviada. Un administrador revisará tu información y aprobará tu cuenta pronto.
-            </p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 w-full text-left">
-            <p className="text-xs text-blue-800 font-semibold mb-1">¿Qué sigue?</p>
-            <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
-                <li>El equipo T+Plus verificará tus documentos</li>
-                <li>Recibirás notificación cuando tu cuenta sea aprobada</li>
-                <li>Podrás usar la app móvil una vez aprobado</li>
-            </ul>
-        </div>
-        <button
-            onClick={onGoLogin}
-            className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors"
-        >
-            Ir al inicio de sesión
-        </button>
-    </motion.div>
-);
+type PageState =
+    | 'LOADING'
+    | 'STEP_1'
+    | 'VERIFY_WAIT'
+    | 'RESUME_REGISTRATION'
+    | 'ALREADY_REGISTERED'
+    | 'SUCCESS_APP_ONLY'
+    | 'LINK_EXPIRED';
 
-// ==================== PÁGINA PRINCIPAL ====================
 export const RegisterDriverPage: React.FC = () => {
     const navigate = useNavigate();
 
+    // Estado de la Máquina
+    const [pageState, setPageState] = useState<PageState>('LOADING');
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(false);
-    const [success, setSuccess] = useState(false);
+    const [countdown, setCountdown] = useState(15);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+    // Datos de los formularios
     const [step1, setStep1] = useState<Step1Data>({});
     const [step2, setStep2] = useState<Step2Data>({});
     const [step3, setStep3] = useState<Step3Data>({});
@@ -85,12 +64,84 @@ export const RegisterDriverPage: React.FC = () => {
     const goNext = () => setCurrentStep((s) => s + 1);
     const goBack = () => setCurrentStep((s) => s - 1);
 
-    const handleSubmit = async (companyData?: CompanyData) => {
+    // ==================== LÓGICA DE DETECCIÓN DE SESIÓN ====================
+    useEffect(() => {
+        checkSessionStatus();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                checkSessionStatus(session.user.id);
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    const checkSessionStatus = async (userIdOverride?: string) => {
+        try {
+            // Verificar si el link de confirmación ya expiró o fue usado
+            const hash = window.location.hash || window.location.search;
+            if (hash.includes('error_description=')) {
+                setPageState('LINK_EXPIRED');
+                return;
+            }
+
+            const { data: { session } } = await supabase.auth.getSession();
+            const uid = userIdOverride || session?.user?.id;
+
+            if (!uid) {
+                setPageState('STEP_1');
+                return;
+            }
+
+            // 🚨 ARREGLO 406: Buscar al usuario real en la tabla por su auth_id
+            const dbUser = await UsersService.getUserByAuthId(uid);
+
+            if (!dbUser) {
+                setPageState('STEP_1');
+                return;
+            }
+
+            setCurrentUserId(dbUser.id); // Guardamos el UUID real de la tabla users
+
+            // Validar si le faltan documentos usando el ID real
+            const validation = await DriversService.validateRequiredDocuments(dbUser.id);
+
+            if (!validation.valid) {
+                setPageState('RESUME_REGISTRATION');
+                setCurrentStep(2);
+            } else {
+                setPageState('ALREADY_REGISTERED');
+                await supabase.auth.signOut();
+            }
+        } catch (error) {
+            console.error('Error checking session:', error);
+            setPageState('STEP_1');
+        }
+    };
+
+    // ==================== TEMPORIZADOR DE REDIRECCIÓN ====================
+    useEffect(() => {
+        // Usamos ReturnType para que TypeScript infiera dinámicamente el tipo correcto 
+        // dependiendo de si está compilando para web o para otro entorno.
+        let timer: ReturnType<typeof setTimeout>;
+
+        if (pageState === 'SUCCESS_APP_ONLY' && countdown > 0) {
+            timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+        } else if (pageState === 'SUCCESS_APP_ONLY' && countdown === 0) {
+            supabase.auth.signOut().then(() => navigate('/login'));
+        }
+
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    }, [pageState, countdown, navigate]);
+
+    // ==================== MANEJADORES DE SUBMIT ====================
+    const handleStep1Submit = async () => {
         try {
             setLoading(true);
-
-            const result = await DriversService.registerDriver({
-                // Paso 1
+            await DriversService.registerStep1({
                 email: step1.email!.trim().toLowerCase(),
                 password: step1.password!,
                 first_name: step1.first_name!.trim(),
@@ -98,6 +149,21 @@ export const RegisterDriverPage: React.FC = () => {
                 mobile: step1.mobile!.trim(),
                 city: step1.city!,
                 referral_code: step1.referral_code?.trim() || undefined,
+            });
+            setPageState('VERIFY_WAIT');
+        } catch (error: any) {
+            // Mostrar la advertencia en la UI si el dato ya existe
+            toast.error(error.message || 'Error al validar la información. Verifica tus datos.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleFinalSubmit = async (companyData?: CompanyData) => {
+        if (!currentUserId) return;
+        try {
+            setLoading(true);
+            const result = await DriversService.completeDriverRegistration(currentUserId, {
                 // Paso 2
                 license_number: step2.license_number!.trim(),
                 cedula_frente: step2.cedula_frente!,
@@ -118,23 +184,24 @@ export const RegisterDriverPage: React.FC = () => {
             });
 
             if (result.success) {
-                toast.success('¡Conductor registrado exitosamente!');
-                setSuccess(true);
+                toast.success('¡Documentación subida exitosamente!');
+                setPageState('SUCCESS_APP_ONLY');
             } else {
-                toast.error(result.message || 'Error al registrar conductor');
+                toast.error(result.message || 'Error al completar el registro');
             }
         } catch (error) {
-            console.error('Registration error:', error);
+            console.error('Final Registration error:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    // Paso 3 finaliza: si necesita empresa, va al paso 4; si no, registra directo
     const handleStep3Next = () => {
         if (showStep4) goNext();
-        else handleSubmit();
+        else handleFinalSubmit();
     };
+
+    if (pageState === 'LOADING') return <div className="min-h-screen bg-[#002f45] flex justify-center items-center"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white"></div></div>;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#002f45] to-[#00a7f5] px-4 py-8">
@@ -146,59 +213,96 @@ export const RegisterDriverPage: React.FC = () => {
                 transition={{ duration: 0.5 }}
                 className="relative z-10 w-full max-w-xl bg-white rounded-2xl shadow-xl p-7"
             >
-                {/* Header */}
                 <div className="flex flex-col items-center mb-6">
                     <img src={logo} alt="T+ Logo" className="w-14 h-14 mb-2" />
                     <h1 className="text-xl font-bold text-[#002f45]">Registro de Conductor</h1>
-                    <p className="text-xs text-slate-500 mt-1">Completa los pasos para unirte a T+Plus</p>
                 </div>
 
-                {/* Indicador de pasos */}
-                {!success && (
-                    <StepIndicator steps={visibleSteps} currentStep={currentStep} />
-                )}
-
-                {/* Contenido animado */}
                 <AnimatePresence mode="wait">
-                    {success ? (
-                        <motion.div key="success" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}>
-                            <SuccessScreen onGoLogin={() => navigate('/login')} />
+                    {/* ESTADO: ESPERA DE VERIFICACIÓN DE CORREO */}
+                    {pageState === 'VERIFY_WAIT' && (
+                        <motion.div key="verify" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-6">
+                            <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <h2 className="text-lg font-bold text-[#002f45]">Verifica tu Correo</h2>
+                            <p className="text-sm text-slate-500 mt-2">Hemos enviado un enlace a <b>{step1.email}</b>. Haz clic en el enlace para validar tu identidad y continuar con el registro.</p>
+                            <p className="text-xs text-slate-400 mt-4">Puedes cerrar esta ventana. Cuando verifiques tu correo, retomarás el proceso desde donde lo dejaste.</p>
                         </motion.div>
-                    ) : (
-                        <motion.div key={currentStep} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.22 }}>
-                            {currentStep === 1 && (
-                                <Step1PersonalData data={step1} onChange={setStep1} onNext={goNext} loading={loading} />
+                    )}
+
+                    {/* ESTADO: YA REGISTRADO Y VERIFICADO (BLOQUEO WEB) */}
+                    {pageState === 'ALREADY_REGISTERED' && (
+                        <motion.div key="already" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-6">
+                            <div className="w-16 h-16 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                            </div>
+                            <h2 className="text-lg font-bold text-[#002f45]">Cuenta Verificada</h2>
+                            <p className="text-sm text-slate-500 mt-2">Tu cuenta ya está registrada y verificada en nuestro sistema.</p>
+                            <p className="text-sm font-semibold text-red-500 mt-4">Recuerda: El acceso para conductores es exclusivamente a través de la App Móvil.</p>
+                            <button onClick={() => navigate('/login')} className="mt-6 w-full py-3 bg-[#002f45] text-white rounded-xl font-semibold text-sm">Volver al Inicio</button>
+                        </motion.div>
+                    )}
+
+                    {/* ESTADO: ENLACE USADO O EXPIRADO */}
+                    {pageState === 'LINK_EXPIRED' && (
+                        <motion.div key="expired" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-6">
+                            <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <h2 className="text-lg font-bold text-[#002f45]">Enlace Inválido o Usado</h2>
+                            <p className="text-sm text-slate-500 mt-2">Este enlace de verificación ya fue utilizado o ha expirado.</p>
+                            <p className="text-xs text-slate-400 mt-4">Si ya verificaste tu cuenta previamente, por favor inicia sesión para continuar con tu registro.</p>
+                            <button onClick={() => navigate('/login')} className="mt-6 w-full py-3 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors">
+                                Ir al Inicio de Sesión
+                            </button>
+                        </motion.div>
+                    )}
+
+                    {/* ESTADO: ÉXITO TOTAL (APP ONLY REDIRECT) */}
+                    {pageState === 'SUCCESS_APP_ONLY' && (
+                        <motion.div key="success" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-6">
+                            <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                            </div>
+                            <h2 className="text-lg font-bold text-[#002f45]">¡Documentos Enviados!</h2>
+                            <p className="text-sm text-slate-500 mt-2">Tu solicitud está en revisión. Te notificaremos cuando tu perfil sea aprobado.</p>
+                            <div className="mt-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
+                                <p className="text-sm font-bold text-sky-800">Uso Exclusivo en App</p>
+                                <p className="text-xs text-sky-600 mt-1">Como conductor, toda tu operativa y acceso se realiza desde la App Móvil de T+Plus. El portal web es solo administrativo.</p>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-6">Redirigiendo al inicio en {countdown} segundos...</p>
+                        </motion.div>
+                    )}
+
+                    {/* ESTADO: FORMULARIOS (PASO 1 o RETOMAR REGISTRO 2,3,4) */}
+                    {(pageState === 'STEP_1' || pageState === 'RESUME_REGISTRATION') && (
+                        <motion.div key="forms" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                            {pageState === 'RESUME_REGISTRATION' && (
+                                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-center">
+                                    <p className="text-xs text-green-700 font-semibold">✓ Correo verificado. Completa tus documentos.</p>
+                                </div>
                             )}
-                            {currentStep === 2 && (
-                                <Step2Documents data={step2} onChange={setStep2} onNext={goNext} onBack={goBack} loading={loading} />
-                            )}
-                            {currentStep === 3 && (
-                                <Step3Vehicle data={step3} onChange={setStep3} onNext={handleStep3Next} onBack={goBack} loading={loading} />
-                            )}
-                            {currentStep === 4 && (
-                                <Step4Company data={step4} onChange={setStep4} onSubmit={() => handleSubmit(step4)} onBack={goBack} loading={loading} />
-                            )}
+                            <StepIndicator steps={visibleSteps} currentStep={currentStep} />
+                            <div className="mt-6">
+                                {currentStep === 1 && <Step1PersonalData data={step1} onChange={setStep1} onNext={handleStep1Submit} loading={loading} />}
+                                {currentStep === 2 && <Step2Documents data={step2} onChange={setStep2} onNext={goNext} onBack={goBack} loading={loading} />}
+                                {currentStep === 3 && <Step3Vehicle data={step3} onChange={setStep3} onNext={handleStep3Next} onBack={goBack} loading={loading} />}
+                                {currentStep === 4 && <Step4Company data={step4} onChange={setStep4} onSubmit={() => handleFinalSubmit(step4)} onBack={goBack} loading={loading} />}
+                            </div>
                         </motion.div>
                     )}
                 </AnimatePresence>
 
-                {/* Footer links */}
-                {!success && (
+                {(pageState === 'STEP_1' || pageState === 'RESUME_REGISTRATION') && (
                     <p className="mt-6 text-center text-xs text-slate-400">
-                        ¿Ya tienes cuenta?{' '}
-                        <button type="button" onClick={() => navigate('/login')} disabled={loading} className="text-sky-600 hover:underline font-medium">
-                            Inicia sesión
+                        ¿Ya tienes cuenta activa?{' '}
+                        <button type="button" onClick={() => navigate('/login')} className="text-sky-600 hover:underline font-medium">
+                            Descarga la App
                         </button>
                     </p>
                 )}
-                <p className="mt-2 text-center text-xs text-slate-400">
-                    © {new Date().getFullYear()} T+PLUS. Todos los derechos reservados.
-                </p>
             </motion.div>
-
-            {!success && (
-                <p className="relative z-10 mt-4 text-xs text-white/60">Paso {currentStep} de {totalSteps}</p>
-            )}
         </div>
     );
 };

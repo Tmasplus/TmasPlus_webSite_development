@@ -3,10 +3,8 @@ import type { User, Session } from '@supabase/supabase-js';
 import type { UserRow } from '@/config/database.types';
 import { AuthService, type LoginCredentials, type AuthResponse } from '@/services/auth.service';
 import { ErrorHandler } from '@/utils/errorHandler';
+import { toast } from '@/utils/toast';
 
-/**
- * Interfaz del estado de autenticación
- */
 interface AuthState {
   user: User | null;
   session: Session | null;
@@ -15,9 +13,6 @@ interface AuthState {
   isAuthenticated: boolean;
 }
 
-/**
- * Interfaz del contexto de autenticación
- */
 interface AuthContextValue extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
@@ -25,9 +20,6 @@ interface AuthContextValue extends AuthState {
   checkAuth: () => Promise<boolean>;
 }
 
-/**
- * Estado inicial
- */
 const initialState: AuthState = {
   user: null,
   session: null,
@@ -36,35 +28,15 @@ const initialState: AuthState = {
   isAuthenticated: false,
 };
 
-/**
- * Context de autenticación
- */
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-/**
- * Props del provider
- */
-interface AuthProviderProps {
-  children: React.ReactNode;
-}
-
-/**
- * Provider de autenticación para T+Plus Dashboard
- * Maneja el estado global de autenticación de administradores
- */
-export function AuthProvider({ children }: AuthProviderProps) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>(initialState);
 
-  /**
-   * Actualiza el estado de autenticación
-   */
   const updateAuthState = useCallback((updates: Partial<AuthState>) => {
     setState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  /**
-   * Verifica la autenticación al montar el componente
-   */
   const checkAuth = useCallback(async (): Promise<boolean> => {
     try {
       updateAuthState({ isLoading: true });
@@ -76,17 +48,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const isAuthenticated = !!(session && user && profile);
       const isAdmin = profile?.user_type === 'admin' && profile?.approved && !profile?.blocked;
 
+      // 🚨 EXCEPCIÓN ESTRATÉGICA: Permitir mini-sesión solo en la ruta de registro
+      const isRegisteringDriver = window.location.pathname.includes('/register-driver');
+
       if (isAuthenticated && !isAdmin) {
-        // Si está autenticado pero no es admin, cerrar sesión
-        await AuthService.logout();
-        updateAuthState({
-          user: null,
-          session: null,
-          profile: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
-        return false;
+        if (isRegisteringDriver) {
+          // Permitir sesión temporal para que termine de subir documentos
+          updateAuthState({ user, session, profile, isAuthenticated: true, isLoading: false });
+          return true;
+        } else {
+          // Si intenta entrar al dashboard u otra zona, lo expulsamos y avisamos
+          await AuthService.logout();
+          toast.error('Acceso denegado: Los conductores solo pueden iniciar sesión en la App Móvil de T+Plus.');
+          updateAuthState({ ...initialState, isLoading: false });
+          return false;
+        }
       }
 
       updateAuthState({
@@ -100,70 +76,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return isAuthenticated && isAdmin;
     } catch (error) {
       console.error('Error checking auth:', error);
-      updateAuthState({
-        user: null,
-        session: null,
-        profile: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
+      updateAuthState({ ...initialState, isLoading: false });
       return false;
     }
   }, [updateAuthState]);
 
-  /**
-   * Login de administrador
-   */
-  const login = useCallback(
-    async (credentials: LoginCredentials): Promise<void> => {
-      try {
-        updateAuthState({ isLoading: true });
+  const login = useCallback(async (credentials: LoginCredentials): Promise<void> => {
+    try {
+      updateAuthState({ isLoading: true });
+      const authResponse: AuthResponse = await AuthService.loginAdmin(credentials);
 
-        const authResponse: AuthResponse = await AuthService.loginAdmin(credentials);
+      // Si el login es manual desde /login y no es admin, la validación se hace en checkAuth
+      updateAuthState({
+        user: authResponse.user,
+        session: authResponse.session,
+        profile: authResponse.profile,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+      await checkAuth(); // Revalidamos reglas de negocio inmediatamente
+    } catch (error) {
+      updateAuthState({ ...initialState, isLoading: false });
+      throw error;
+    }
+  }, [updateAuthState, checkAuth]);
 
-        updateAuthState({
-          user: authResponse.user,
-          session: authResponse.session,
-          profile: authResponse.profile,
-          isAuthenticated: true,
-          isLoading: false,
-        });
-      } catch (error) {
-        updateAuthState({
-          user: null,
-          session: null,
-          profile: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
-        throw error;
-      }
-    },
-    [updateAuthState]
-  );
-
-  /**
-   * Logout
-   */
   const logout = useCallback(async (): Promise<void> => {
     try {
       await AuthService.logout();
-      updateAuthState({
-        user: null,
-        session: null,
-        profile: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
+      updateAuthState({ ...initialState, isLoading: false });
     } catch (error) {
       ErrorHandler.handleWithToast(error, 'AuthContext.logout');
       throw error;
     }
   }, [updateAuthState]);
 
-  /**
-   * Refresca el perfil del usuario actual
-   */
   const refreshProfile = useCallback(async (): Promise<void> => {
     try {
       const profile = await AuthService.getCurrentProfile();
@@ -173,46 +120,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [updateAuthState]);
 
-  /**
-   * Configura listener de cambios de autenticación
-   */
   useEffect(() => {
-    // Verificar autenticación inicial
     checkAuth();
-
-    // Listener de cambios de auth
     const unsubscribe = AuthService.onAuthStateChange(async (event, session) => {
-      if (import.meta.env.DEV) {
-        console.log('Auth state change:', event);
-      }
-
       if (event === 'SIGNED_OUT') {
-        updateAuthState({
-          user: null,
-          session: null,
-          profile: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
+        updateAuthState({ ...initialState, isLoading: false });
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         checkAuth();
       } else if (event === 'USER_UPDATED') {
         refreshProfile();
       }
     });
-
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [checkAuth, refreshProfile, updateAuthState]);
 
-  const value: AuthContextValue = {
-    ...state,
-    login,
-    logout,
-    refreshProfile,
-    checkAuth,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ ...state, login, logout, refreshProfile, checkAuth }}>{children}</AuthContext.Provider>;
 }
