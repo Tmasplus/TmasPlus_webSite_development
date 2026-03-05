@@ -35,44 +35,30 @@ export class DriversService {
     data: DriverRegistrationStep1
   ): Promise<{ userId: string; authId: string }> {
     try {
-      // Validar email único
+      // 1. Validar email único
       const emailExists = await UsersService.emailExists(data.email);
       if (emailExists) {
-        throw ErrorHandler.createError(
-          AppErrorType.VALIDATION,
-          'El email ya está registrado',
-          `Email: ${data.email}`
-        );
+        throw ErrorHandler.createError(AppErrorType.VALIDATION, 'El email ya está registrado', `Email: ${data.email}`);
       }
 
-      // Validar teléfono único
+      // 2. Validar teléfono único
       const phoneExists = await UsersService.phoneExists(data.mobile);
       if (phoneExists) {
-        throw ErrorHandler.createError(
-          AppErrorType.VALIDATION,
-          'El número de teléfono ya está registrado',
-          `Mobile: ${data.mobile}`
-        );
+        throw ErrorHandler.createError(AppErrorType.VALIDATION, 'El número de teléfono ya está registrado', `Mobile: ${data.mobile}`);
       }
 
-      // Validar código de referido si se proporciona
+      // 3. Validar código de referido si se proporciona
       let validatedReferralCode: string | null = null;
       if (data.referral_code && data.referral_code.trim() !== '') {
-        const { data: referralCodeData, error: referralError } =
-          await referralsService.validateReferralCode(data.referral_code);
-
+        const { data: referralCodeData, error: referralError } = await referralsService.validateReferralCode(data.referral_code);
         if (referralError) {
-          throw ErrorHandler.createError(
-            AppErrorType.VALIDATION,
-            'Código de referido inválido o inactivo',
-            `Referral code: ${data.referral_code}`
-          );
+          throw ErrorHandler.createError(AppErrorType.VALIDATION, 'Código de referido inválido o inactivo', `Referral code: ${data.referral_code}`);
         }
-
         validatedReferralCode = referralCodeData?.referral_code || null;
       }
 
-      // Crear usuario en Supabase Auth
+      // 4. Crear usuario inyectando TODOS los datos en los metadatos
+      // El Trigger en SQL leerá la city y el referral_id automáticamente
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
@@ -81,38 +67,19 @@ export class DriversService {
             first_name: data.first_name,
             last_name: data.last_name,
             mobile: data.mobile,
+            city: data.city,                                 // Empacamos la ciudad
+            referral_id: validatedReferralCode               // Empacamos el código validado
           },
-          // INDICADOR ESTRATÉGICO: Redirigir siempre a la página de registro
           emailRedirectTo: `${window.location.origin}/register-driver`,
         },
       });
 
       if (authError || !authData.user) {
-        throw ErrorHandler.createError(
-          AppErrorType.AUTHENTICATION,
-          'Error al crear usuario en Auth',
-          authError?.message || 'No user returned'
-        );
+        throw ErrorHandler.createError(AppErrorType.AUTHENTICATION, 'Error al crear usuario en Auth', authError?.message || 'No user returned');
       }
 
-      // Crear registro en tabla users con código de referido validado
-      const user = await UsersService.createUser({
-        auth_id: authData.user.id,
-        email: data.email,
-        first_name: data.first_name,
-        last_name: data.last_name,
-        mobile: data.mobile,
-        city: data.city,
-        user_type: 'driver',
-        approved: false,
-        blocked: false,
-        driver_active_status: false,
-        wallet_balance: 0,
-        referral_id: validatedReferralCode, // ✅ Código validado
-      });
-
       return {
-        userId: user.id,
+        userId: authData.user.id,
         authId: authData.user.id,
       };
     } catch (error) {
