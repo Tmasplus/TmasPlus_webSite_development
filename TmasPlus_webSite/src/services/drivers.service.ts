@@ -68,7 +68,8 @@ export class DriversService {
             last_name: data.last_name,
             mobile: data.mobile,
             city: data.city,                                 // Empacamos la ciudad
-            referral_id: validatedReferralCode               // Empacamos el código validado
+            referral_id: validatedReferralCode,              // Empacamos el código validado
+            user_type: 'driver'                              // Aseguramos que el tipo de usuario sea driver
           },
           emailRedirectTo: `${window.location.origin}/register-driver`,
         },

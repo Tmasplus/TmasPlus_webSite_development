@@ -12,7 +12,7 @@ type Props<T> = {
   columns: Column<T>[];
   page: number;
   pageSize: number;
-  edit,
+  edit?: (row: T) => void;
   onPageChange: (page: number) => void;
 };
 
@@ -62,12 +62,14 @@ export function DataTable<T extends { id: string }>({
                 ))}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => edit() }
-                    >
-                      Editar
-                    </Button>
+                    {edit && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => edit(row)}
+                      >
+                        Editar
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       onClick={() => alert(`Eliminar ${row.id}`)}
