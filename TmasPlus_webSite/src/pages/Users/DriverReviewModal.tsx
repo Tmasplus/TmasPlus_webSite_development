@@ -23,6 +23,7 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
 
     useEffect(() => {
         if (!url) return;
+        let isMounted = true;
         const fetchSecureUrl = async () => {
             if (url.includes('/object/public/')) {
                 const parts = url.split('/object/public/');
@@ -31,12 +32,15 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
                 const filePath = pathParts.slice(1).join('/');
 
                 const { data } = await supabase.storage.from(bucket).createSignedUrl(filePath, 3600);
-                setSecureUrl(data?.signedUrl || url);
+                if (isMounted) setSecureUrl(data?.signedUrl || url);
             } else {
-                setSecureUrl(url);
+                if (isMounted) setSecureUrl(url);
             }
         };
         fetchSecureUrl();
+        return () => {
+            isMounted = false;
+        };
     }, [url]);
 
     return (
@@ -67,7 +71,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             setIsEditing(false);
 
             supabase.from('referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).single()
-                .then(({ data }) => {
+                .then(({ data }: { data: { referral_code: string; total_referrals: number } | null }) => {
                     if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
                     else setOwnReferral({ code: 'No asignado (Pendiente)', total: 0 });
                 });
@@ -111,8 +115,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             toast.success('Datos actualizados correctamente');
             setIsEditing(false);
             onRefresh();
-        } catch (error: any) {
-            toast.error('Error al guardar: ' + error.message);
+        } catch (error) {
+            toast.error('Error al guardar: ' + (error instanceof Error ? error.message : 'Error desconocido'));
         } finally {
             setLoading(false);
         }
@@ -192,16 +196,16 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         <span className="font-semibold text-slate-500 block">Marca / Modelo:</span>
                                         {isEditing ? (
                                             <div className="flex gap-2 mt-1">
-                                                {/* 2. SOLUCIÓN TS: Evitamos el ! usando ternarios seguros */}
-                                                <input className="border p-1 rounded w-full" value={editForm.vehicle?.make || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : undefined })} />
-                                                <input className="border p-1 rounded w-full" value={editForm.vehicle?.model || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, model: e.target.value } : undefined })} />
+                                                {/* 2. SOLUCIÓN TS: Evitamos el ! usando ternarios seguros o un cast robusto */}
+                                                <input className="border p-1 rounded w-full" value={editForm.vehicle?.make || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : { make: e.target.value } as any })} />
+                                                <input className="border p-1 rounded w-full" value={editForm.vehicle?.model || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, model: e.target.value } : { model: e.target.value } as any })} />
                                             </div>
-                                        ) : <p>{driver.vehicle.make} {driver.vehicle.model} ({driver.vehicle.year})</p>}
+                                        ) : <p>{driver.vehicle.make} {driver.vehicle.model}</p>}
                                     </div>
 
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Placa:</span>
-                                        {isEditing ? <input className="border p-1 rounded w-full mt-1 uppercase" value={editForm.vehicle?.plate || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, plate: e.target.value.toUpperCase() } : undefined })} /> : <p className="uppercase font-bold">{driver.vehicle.plate}</p>}
+                                        {isEditing ? <input className="border p-1 rounded w-full mt-1 uppercase" value={editForm.vehicle?.plate || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, plate: e.target.value.toUpperCase() } : { plate: e.target.value.toUpperCase() } as any })} /> : <p className="uppercase font-bold">{driver.vehicle.plate}</p>}
                                     </div>
                                 </div>
                             </div>

@@ -13,6 +13,7 @@ type Props<T> = {
   page: number;
   pageSize: number;
   edit?: (row: T) => void;
+  onDelete?: (row: T) => void;
   onPageChange: (page: number) => void;
 };
 
@@ -22,6 +23,7 @@ export function DataTable<T extends { id: string }>({
   page,
   pageSize,
   edit,
+  onDelete,
   onPageChange,
 }: Props<T>) {
   const total = rows.length;
@@ -72,7 +74,7 @@ export function DataTable<T extends { id: string }>({
                     )}
                     <Button
                       variant="ghost"
-                      onClick={() => alert(`Eliminar ${row.id}`)}
+                      onClick={() => onDelete ? onDelete(row) : alert(`Eliminar ${row.id}`)}
                     >
                       Eliminar
                     </Button>

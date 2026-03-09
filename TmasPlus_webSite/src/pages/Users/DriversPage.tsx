@@ -48,11 +48,11 @@ export const DriversPage: React.FC = () => {
             if (uniqueCodes.length > 0) {
                 const { data: refCodes } = await supabase.from('referral_codes').select('referral_code, driver_id').in('referral_code', uniqueCodes);
                 if (refCodes && refCodes.length > 0) {
-                    const driverIds = refCodes.map(rc => rc.driver_id);
+                    const driverIds = refCodes.map((rc: { driver_id: string, referral_code: string }) => rc.driver_id);
                     const { data: users } = await supabase.from('users').select('id, first_name, last_name').in('id', driverIds);
 
-                    refCodes.forEach(rc => {
-                        const user = users?.find(u => u.id === rc.driver_id);
+                    refCodes.forEach((rc: { driver_id: string, referral_code: string }) => {
+                        const user = users?.find((u: { id: string, first_name: string, last_name: string }) => u.id === rc.driver_id);
                         if (user) codeToNameMap[rc.referral_code] = `${user.first_name} ${user.last_name}`;
                     });
                 }
@@ -105,6 +105,22 @@ export const DriversPage: React.FC = () => {
         await DriversService.rejectDriver(id, 'Documentos inválidos', 'admin-dashboard');
         toast.success('Conductor rechazado.');
         fetchDrivers();
+    };
+
+    const handleDelete = async (driver: EnrichedDriverProfile) => {
+        if (window.confirm(`⚠️ ¿Estás seguro de que deseas ELIMINAR permanentemente a ${driver.first_name} ${driver.last_name}? Esta acción borrará sus datos y vehículo de la base de datos y no se puede deshacer.`)) {
+            try {
+                setLoading(true);
+                const { error } = await supabase.from('users').delete().eq('id', driver.id);
+                if (error) throw error;
+
+                toast.success('Conductor eliminado de la base de datos exitosamente.');
+                fetchDrivers();
+            } catch (error: any) {
+                toast.error('Error al eliminar: ' + error.message);
+                setLoading(false);
+            }
+        }
     };
 
     const columns: Column<EnrichedDriverProfile>[] = [
@@ -179,6 +195,7 @@ export const DriversPage: React.FC = () => {
                         pageSize={pageSize}
                         onPageChange={setPage}
                         edit={(driver) => setSelectedDriver(driver)}
+                        onDelete={handleDelete}
                     />
                 )}
             </Card>
