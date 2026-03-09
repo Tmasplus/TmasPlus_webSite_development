@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import type { DriverRegistrationStep1 } from '@/config/database.types';
+import { UsersService } from '@/services/users.service';
 
 interface Step1Props {
     data: Partial<DriverRegistrationStep1> & { confirmPassword?: string };
@@ -18,26 +19,53 @@ const CITIES = [
 
 export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext, loading = false }) => {
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [validating, setValidating] = useState({ email: false, mobile: false });
 
     const update = (key: string, value: string) => {
         onChange({ ...data, [key]: value });
         if (errors[key]) setErrors((e) => ({ ...e, [key]: '' }));
     };
 
+    // Validación en tiempo real para el Correo
+    const handleEmailBlur = async () => {
+        if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return;
+        setValidating(v => ({ ...v, email: true }));
+        try {
+            const exists = await UsersService.emailExists(data.email.trim().toLowerCase());
+            if (exists) setErrors(e => ({ ...e, email: 'Este correo ya está registrado en T+Plus' }));
+        } finally {
+            setValidating(v => ({ ...v, email: false }));
+        }
+    };
+
+    // Validación en tiempo real para el Teléfono
+    const handleMobileBlur = async () => {
+        if (!data.mobile || !/^\d{7,15}$/.test(data.mobile.replace(/\s/g, ''))) return;
+        setValidating(v => ({ ...v, mobile: true }));
+        try {
+            const exists = await UsersService.phoneExists(data.mobile.trim());
+            if (exists) setErrors(e => ({ ...e, mobile: 'Este número de teléfono ya está registrado' }));
+        } finally {
+            setValidating(v => ({ ...v, mobile: false }));
+        }
+    };
+
     const validate = (): boolean => {
-        const newErrors: Record<string, string> = {};
+        const newErrors: Record<string, string> = { ...errors }; // Mantener errores de duplicidad si existen
         if (!data.first_name?.trim()) newErrors.first_name = 'El nombre es requerido';
         if (!data.last_name?.trim()) newErrors.last_name = 'El apellido es requerido';
-        if (!data.email?.trim()) newErrors.email = 'El email es requerido';
+        if (!data.email?.trim()) newErrors.email = newErrors.email || 'El email es requerido';
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) newErrors.email = 'Formato de email inválido';
-        if (!data.mobile?.trim()) newErrors.mobile = 'El teléfono es requerido';
+        if (!data.mobile?.trim()) newErrors.mobile = newErrors.mobile || 'El teléfono es requerido';
         else if (!/^\d{7,15}$/.test(data.mobile.replace(/\s/g, ''))) newErrors.mobile = 'Número de teléfono inválido';
         if (!data.password) newErrors.password = 'La contraseña es requerida';
         else if (data.password.length < 6) newErrors.password = 'Mínimo 6 caracteres';
         if (!data.confirmPassword) newErrors.confirmPassword = 'Confirma tu contraseña';
         else if (data.password !== data.confirmPassword) newErrors.confirmPassword = 'Las contraseñas no coinciden';
         if (!data.city) newErrors.city = 'Selecciona una ciudad';
+
         setErrors(newErrors);
+        // Retorna verdadero solo si no hay ningún error (incluyendo los de duplicidad)
         return Object.keys(newErrors).length === 0;
     };
 
@@ -60,13 +88,19 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             </div>
 
             <div>
-                <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading} required autoComplete="email" />
-                {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
+                <div onBlur={handleEmailBlur}>
+                    <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading || validating.email} required autoComplete="email" />
+                </div>
+                {validating.email && <p className="mt-1 text-xs text-blue-500">Verificando disponibilidad...</p>}
+                {errors.email && <p className="mt-1 text-xs text-red-500 font-semibold">{errors.email}</p>}
             </div>
 
             <div>
-                <FloatingInput id="mobile" label="Teléfono móvil" type="tel" value={data.mobile ?? ''} onChange={(e) => update('mobile', e.target.value)} disabled={loading} required />
-                {errors.mobile && <p className="mt-1 text-xs text-red-500">{errors.mobile}</p>}
+                <div onBlur={handleMobileBlur}>
+                    <FloatingInput id="mobile" label="Teléfono móvil" type="tel" value={data.mobile ?? ''} onChange={(e) => update('mobile', e.target.value)} disabled={loading || validating.mobile} required />
+                </div>
+                {validating.mobile && <p className="mt-1 text-xs text-blue-500">Verificando disponibilidad...</p>}
+                {errors.mobile && <p className="mt-1 text-xs text-red-500 font-semibold">{errors.mobile}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -94,7 +128,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
                 <p className="mt-1 text-xs text-slate-400">Si un conductor te recomendó, ingresa su código aquí</p>
             </div>
 
-            <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">
+            <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading || validating.email || validating.mobile} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">
                 Continuar →
             </button>
         </div>

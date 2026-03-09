@@ -152,30 +152,30 @@ await DriversService.rejectDriver(userId, 'Documentos incompletos');
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
-│  2. Crear vehículo                                       │
-│     - Datos básicos (marca, modelo, año, etc.)         │
-│     - Asociar con conductor (driver_id)                  │
-│     - Valores por defecto:                               │
+│  2. Crear vehículo                                      │
+│     - Datos básicos (marca, modelo, año, etc.)          │
+│     - Asociar con conductor (driver_id)                 │
+│     - Valores por defecto:                              │
 │       * fuel_type: 'gasolina'                           │
-│       * transmission: 'manual'                           │
+│       * transmission: 'manual'                          │
 │       * capacity: 4                                     │
 │       * is_active: true                                 │
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
-│  3. Subir documentos (opcional)                          │
-│     - SOAT                                               │
-│     - Tarjeta de propiedad                               │
-│     - Técnico-mecánica                                   │
+│  3. Subir documentos (opcional)                         │
+│     - SOAT                                              │
+│     - Tarjeta de propiedad                              │
+│     - Técnico-mecánica                                  │
 │     - Cámara de comercio                                │
 │     - Guarda URLs en tabla cars                         │
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
 │  4. Subir imágenes (opcional)                           │
-│     - Imagen principal del vehículo                      │
+│     - Imagen principal del vehículo                     │
 │     - Guarda URL en car_image                           │
-└──────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Código de Ejemplo

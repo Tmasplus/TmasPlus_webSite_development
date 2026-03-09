@@ -8,6 +8,7 @@ import RegisterDriverPage from '@/pages/Auth/RegisterDriverPage';
 
 // Páginas protegidas
 import UsersPage from '@/pages/Users/UsersPage';
+import DriversPage from '@/pages/Users/DriversPage';
 import CorporateBookingsPage from '@/pages/Bookings/CorporateBookingsPage';
 import HomePage from '@/pages/Home/HomePage';
 import ShiftChangerPage from '@/pages/ShiftChanger/ShiftChangerPage';
@@ -60,6 +61,7 @@ export default function AppRoutes() {
         <Route path="/bookingdetails" element={<BookingDetailsPage />} />
         <Route path="/billing" element={<CompanyBillingPage />} />
         <Route path="/users/*" element={<UsersPage />} />
+        <Route path="/drivers" element={<DriversPage />} />
         <Route path="/officialview" element={<OfficialsViewPage />} />
         <Route path="/complaints" element={<ComplaintsViewPage />} />
         <Route path="/treasoffers" element={<OffersPage />} />

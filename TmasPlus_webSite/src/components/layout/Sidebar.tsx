@@ -4,7 +4,7 @@ import { MdOutlineLocalOffer, MdOutlinePriceChange, MdNotificationsNone, MdOutli
 import { TiHomeOutline } from "react-icons/ti";
 import { SlEnvolopeLetter } from "react-icons/sl";
 import { GrMoney, GrUserManager } from "react-icons/gr";
-import { LuUserRound, LuUsersRound } from "react-icons/lu";
+import { LuUserRound, LuUsersRound, LuCar } from "react-icons/lu";
 import { PiBuildingOfficeBold, PiReadCvLogoBold } from "react-icons/pi";
 import { TbCalendarPlus, TbCalendarStats, TbContract, TbExchange } from "react-icons/tb";
 import { RiSettings3Line } from "react-icons/ri";
@@ -44,8 +44,8 @@ const NavItem: React.FC<{
   const location = useLocation();
   const isActive = !!to && location.pathname.startsWith(to);
 
-  const base   = "flex items-center w-full px-3 py-2 rounded-md group transition-colors";
-  const idle   = "text-slate-700 hover:bg-primary/10 hover:text-primary-dark";
+  const base = "flex items-center w-full px-3 py-2 rounded-md group transition-colors";
+  const idle = "text-slate-700 hover:bg-primary/10 hover:text-primary-dark";
   const active = "bg-transparent border-l-4 border-primary text-primary-dark font-semibold";
 
   const content = (
@@ -118,11 +118,11 @@ export const Sidebar: React.FC<Props> = ({
           </button>
         </div> */}
 
-      {/* Perfil (solo abierto) */}
-      {/* {open && user && ( */}
+        {/* Perfil (solo abierto) */}
+        {/* {open && user && ( */}
         <div className="flex items-center mx-4 mb-4 bg-white bg-opacity-30 backdrop-blur-lg p-4 rounded-lg shadow-md">
           <img
-            src={user.profile_image || defaultProfileImage}
+            src={user?.profile_image || defaultProfileImage}
             className="w-16 h-16 rounded-full shadow-2xl object-cover"
             alt="Profile"
           />
@@ -131,148 +131,152 @@ export const Sidebar: React.FC<Props> = ({
             {/* <span className="text-slate-800 text-lg">{getDisplayName(user)}</span> */}
           </div>
         </div>
-      {/* )} */}
+        {/* )} */}
 
-      {/* Navegación */}
-      <ul className="flex flex-col items-center flex-grow space-y-2">
-        <NavItem to="/home" icon={<TiHomeOutline />} label="Inicio" isOpen={open} />
+        {/* Navegación */}
+        <ul className="flex flex-col items-center flex-grow space-y-2">
+          <NavItem to="/home" icon={<TiHomeOutline />} label="Inicio" isOpen={open} />
 
-        {/* (Opcional) Tablero si luego lo habilitas para admin */}
-        {/* {isAdmin && (
+          {/* (Opcional) Tablero si luego lo habilitas para admin */}
+          {/* {isAdmin && (
           <NavItem to="/dashboard" icon={<MdDashboard />} label="Tablero de Mando" isOpen={open} />
         )} */}
 
-        {isCompany && (
+          {isCompany && (
+            <NavItem
+              to="/shiftchanger"
+              icon={<TbExchange />}
+              label="Cambiar Turno"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/bookingHistory"
+              icon={<TbCalendarStats />}
+              label="Historial de Reservas"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/addbooking"
+              icon={<TbCalendarPlus />}
+              label="Añadir Reservas"
+              isOpen={open}
+            />
+          )}
+
+          {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
+            <NavItem
+              to="/bookingCorp"
+              icon={<PiBuildingOfficeBold />}
+              label="Reservas Corporativas"
+              isOpen={open}
+            />
+          )}
+
+          {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
+            <NavItem
+              to="/bookingdetails"
+              icon={<PiReadCvLogoBold />}
+              label="Detalle de reserva"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/billing"
+              icon={<GrMoney />}
+              label="Módulo de Facturación"
+              isOpen={open}
+            />
+          )}
+
+          {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
+            <NavItem to="/users" icon={<LuUsersRound />} label="Usuarios" isOpen={open} />
+          )}
+
+          {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
+            <NavItem to="/drivers" icon={<LuCar />} label="Conductores" isOpen={open} />
+          )}
+
+          {isCompany && isAnySubuserInTurn && hasAdminSubuserInTurn && (
+            <NavItem
+              to="/officialview"
+              icon={<GrUserManager />}
+              label="Funcionarios"
+              isOpen={open}
+            />
+          )}
+
           <NavItem
-            to="/shiftchanger"
-            icon={<TbExchange />}
-            label="Cambiar Turno"
+            to="/complaints"
+            icon={<SlEnvolopeLetter />}
+            label="Quejas"
             isOpen={open}
           />
-        )}
 
-        {isAdmin && (
+          {isAdmin && (
+            <NavItem
+              to="/treasoffers"
+              icon={<MdOutlineLocalOffer />}
+              label="Ofertas TREAS"
+              isOpen={open}
+            />
+          )}
+
+          {isDriver && (
+            <NavItem
+              to="/contracts"
+              icon={<TbContract />}
+              label="Contratos"
+              isOpen={open}
+            />
+          )}
+
+          {user?.usertype !== "company" && (
+            <NavItem to="/userprofile" icon={<LuUserRound />} label="Perfil" isOpen={open} />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/settings"
+              icon={<RiSettings3Line />}
+              label="Configuración"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/tolls"
+              icon={<MdOutlinePriceChange />}
+              label="Peajes"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/notifications"
+              icon={<MdNotificationsNone />}
+              label="Notificaciones"
+              isOpen={open}
+            />
+          )}
+
+          {/* Logout */}
           <NavItem
-            to="/bookingHistory"
-            icon={<TbCalendarStats />}
-            label="Historial de Reservas"
+            icon={<MdOutlineLogout />}
+            label="Cerrar Sesión"
             isOpen={open}
+            onClick={handleLogout}
           />
-        )}
-
-        {isAdmin && (
-          <NavItem
-            to="/addbooking"
-            icon={<TbCalendarPlus />}
-            label="Añadir Reservas"
-            isOpen={open}
-          />
-        )}
-
-        {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
-          <NavItem
-            to="/bookingCorp"
-            icon={<PiBuildingOfficeBold />}
-            label="Reservas Corporativas"
-            isOpen={open}
-          />
-        )}
-
-        {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
-          <NavItem
-            to="/bookingdetails"
-            icon={<PiReadCvLogoBold />}
-            label="Detalle de reserva"
-            isOpen={open}
-          />
-        )}
-
-        {isAdmin && (
-          <NavItem
-            to="/billing"
-            icon={<GrMoney />}
-            label="Módulo de Facturación"
-            isOpen={open}
-          />
-        )}
-
-        {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
-          <NavItem to="/users" icon={<LuUsersRound />} label="Usuarios" isOpen={open} />
-        )}
-
-        {isCompany && isAnySubuserInTurn && hasAdminSubuserInTurn && (
-          <NavItem
-            to="/officialview"
-            icon={<GrUserManager />}
-            label="Funcionarios"
-            isOpen={open}
-          />
-        )}
-
-        <NavItem
-          to="/complaints"
-          icon={<SlEnvolopeLetter />}
-          label="Quejas"
-          isOpen={open}
-        />
-
-        {isAdmin && (
-          <NavItem
-            to="/treasoffers"
-            icon={<MdOutlineLocalOffer />}
-            label="Ofertas TREAS"
-            isOpen={open}
-          />
-        )}
-
-        {isDriver && (
-          <NavItem
-            to="/contracts"
-            icon={<TbContract />}
-            label="Contratos"
-            isOpen={open}
-          />
-        )}
-
-        {user?.usertype !== "company" && (
-          <NavItem to="/userprofile" icon={<LuUserRound />} label="Perfil" isOpen={open} />
-        )}
-
-        {isAdmin && (
-          <NavItem
-            to="/settings"
-            icon={<RiSettings3Line />}
-            label="Configuración"
-            isOpen={open}
-          />
-        )}
-
-        {isAdmin && (
-          <NavItem
-            to="/tolls"
-            icon={<MdOutlinePriceChange />}
-            label="Peajes"
-            isOpen={open}
-          />
-        )}
-
-        {isAdmin && (
-          <NavItem
-            to="/notifications"
-            icon={<MdNotificationsNone />}
-            label="Notificaciones"
-            isOpen={open}
-          />
-        )}
-
-        {/* Logout */}
-        <NavItem
-          icon={<MdOutlineLogout />}
-          label="Cerrar Sesión"
-          isOpen={open}
-          onClick={handleLogout}
-        />
-      </ul>
+        </ul>
       </div>
     </aside>
   );

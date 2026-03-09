@@ -29,8 +29,8 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
         if (!data.serviceType) newErrors.serviceType = 'Selecciona el tipo de servicio';
         if (!data.vehicle?.make?.trim()) newErrors['vehicle.make'] = 'Requerido';
         if (!data.vehicle?.model?.trim()) newErrors['vehicle.model'] = 'Requerido';
-        if (!data.vehicle?.year || data.vehicle.year < 1990 || data.vehicle.year > new Date().getFullYear() + 1)
-            newErrors['vehicle.year'] = 'Año inválido';
+        // if (!data.vehicle?.year || data.vehicle.year < 1990 || data.vehicle.year > new Date().getFullYear() + 1)
+        //     newErrors['vehicle.year'] = 'Año inválido';
         if (!data.vehicle?.color?.trim()) newErrors['vehicle.color'] = 'Requerido';
         if (!data.vehicle?.plate?.trim()) newErrors['vehicle.plate'] = 'Requerido';
         if (!data.vehicle?.fuel_type) newErrors['vehicle.fuel_type'] = 'Requerido';
@@ -68,8 +68,8 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                             onClick={() => update('serviceType', opt.value)}
                             disabled={loading}
                             className={`py-2.5 px-2 rounded-xl border text-xs font-medium transition-all ${data.serviceType === opt.value
-                                    ? 'bg-[#002f45] text-white border-[#002f45]'
-                                    : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                                ? 'bg-[#002f45] text-white border-[#002f45]'
+                                : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
                                 }`}
                         >
                             {opt.label}
@@ -91,10 +91,10 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                         <FloatingInput id="model" label="Modelo" value={data.vehicle?.model ?? ''} onChange={(e) => updateVehicle('model', e.target.value)} disabled={loading} required />
                         {errors['vehicle.model'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.model']}</p>}
                     </div>
-                    <div>
+                    {/* <div>
                         <FloatingInput id="year" label="Año" type="number" value={data.vehicle?.year?.toString() ?? ''} onChange={(e) => updateVehicle('year', parseInt(e.target.value) || 0)} disabled={loading} required />
                         {errors['vehicle.year'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.year']}</p>}
-                    </div>
+                    </div> */}
                     <div>
                         <FloatingInput id="color" label="Color" value={data.vehicle?.color ?? ''} onChange={(e) => updateVehicle('color', e.target.value)} disabled={loading} required />
                         {errors['vehicle.color'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.color']}</p>}

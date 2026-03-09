@@ -35,44 +35,30 @@ export class DriversService {
     data: DriverRegistrationStep1
   ): Promise<{ userId: string; authId: string }> {
     try {
-      // Validar email único
+      // 1. Validar email único
       const emailExists = await UsersService.emailExists(data.email);
       if (emailExists) {
-        throw ErrorHandler.createError(
-          AppErrorType.VALIDATION,
-          'El email ya está registrado',
-          `Email: ${data.email}`
-        );
+        throw ErrorHandler.createError(AppErrorType.VALIDATION, 'El email ya está registrado', `Email: ${data.email}`);
       }
 
-      // Validar teléfono único
+      // 2. Validar teléfono único
       const phoneExists = await UsersService.phoneExists(data.mobile);
       if (phoneExists) {
-        throw ErrorHandler.createError(
-          AppErrorType.VALIDATION,
-          'El número de teléfono ya está registrado',
-          `Mobile: ${data.mobile}`
-        );
+        throw ErrorHandler.createError(AppErrorType.VALIDATION, 'El número de teléfono ya está registrado', `Mobile: ${data.mobile}`);
       }
 
-      // Validar código de referido si se proporciona
+      // 3. Validar código de referido si se proporciona
       let validatedReferralCode: string | null = null;
       if (data.referral_code && data.referral_code.trim() !== '') {
-        const { data: referralCodeData, error: referralError } = 
-          await referralsService.validateReferralCode(data.referral_code);
-        
+        const { data: referralCodeData, error: referralError } = await referralsService.validateReferralCode(data.referral_code);
         if (referralError) {
-          throw ErrorHandler.createError(
-            AppErrorType.VALIDATION,
-            'Código de referido inválido o inactivo',
-            `Referral code: ${data.referral_code}`
-          );
+          throw ErrorHandler.createError(AppErrorType.VALIDATION, 'Código de referido inválido o inactivo', `Referral code: ${data.referral_code}`);
         }
-  
         validatedReferralCode = referralCodeData?.referral_code || null;
       }
 
-      // Crear usuario en Supabase Auth
+      // 4. Crear usuario inyectando TODOS los datos en los metadatos
+      // El Trigger en SQL leerá la city y el referral_id automáticamente
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
@@ -81,42 +67,26 @@ export class DriversService {
             first_name: data.first_name,
             last_name: data.last_name,
             mobile: data.mobile,
+            city: data.city,                                 // Empacamos la ciudad
+            referral_id: validatedReferralCode,              // Empacamos el código validado
+            user_type: 'driver'                              // Aseguramos que el tipo de usuario sea driver
           },
+          emailRedirectTo: `${window.location.origin}/register-driver`,
         },
       });
 
       if (authError || !authData.user) {
-        throw ErrorHandler.createError(
-          AppErrorType.AUTHENTICATION,
-          'Error al crear usuario en Auth',
-          authError?.message || 'No user returned'
-        );
+        throw ErrorHandler.createError(AppErrorType.AUTHENTICATION, 'Error al crear usuario en Auth', authError?.message || 'No user returned');
       }
 
-      // Crear registro en tabla users con código de referido validado
-    const user = await UsersService.createUser({
-      auth_id: authData.user.id,
-      email: data.email,
-      first_name: data.first_name,
-      last_name: data.last_name,
-      mobile: data.mobile,
-      city: data.city,
-      user_type: 'driver',
-      approved: false,
-      blocked: false,
-      driver_active_status: false,
-      wallet_balance: 0,
-      referral_id: validatedReferralCode, // ✅ Código validado
-    });
-
-    return {
-      userId: user.id,
-      authId: authData.user.id,
-    };
-  } catch (error) {
-    throw ErrorHandler.handleWithToast(error, 'DriversService.registerStep1');
+      return {
+        userId: authData.user.id,
+        authId: authData.user.id,
+      };
+    } catch (error) {
+      throw ErrorHandler.handleWithToast(error, 'DriversService.registerStep1');
+    }
   }
-}
 
   /**
    * PASO 2: Subir documentos de conductor
@@ -315,67 +285,62 @@ export class DriversService {
   }
 
   /**
-   * Registro completo de conductor (todos los pasos en una transacción)
+   * FASE 4: Completar registro de conductor (Documentos y Vehículo)
+   * Se ejecuta de forma asíncrona DESPUÉS de que el usuario verificó su email
+   * RLS Ready: Utiliza el userId de la sesión ya autenticada
    */
-  static async registerDriver(
-    data: DriverRegistrationData
+  static async completeDriverRegistration(
+    userId: string,
+    data: Omit<DriverRegistrationData, 'email' | 'password' | 'first_name' | 'last_name' | 'mobile' | 'city' | 'referral_code'>
   ): Promise<DriverRegistrationResult> {
     try {
-      // PASO 1: Crear usuario
-      const { userId, authId } = await this.registerStep1({
-        email: data.email,
-        password: data.password,
-        first_name: data.first_name,
-        last_name: data.last_name,
-        mobile: data.mobile,
-        city: data.city,
-        referral_code: data.referral_code,
+      // 1. Validar que el usuario existe y está autenticado
+      const user = await UsersService.getUserById(userId);
+      if (!user) {
+        throw ErrorHandler.createError(
+          AppErrorType.NOT_FOUND,
+          'Usuario no encontrado para completar registro',
+          `User ID: ${userId}`
+        );
+      }
+
+      // 2. Paso 2: Subir Documentos del Conductor
+      await this.registerStep2(userId, {
+        license_number: data.license_number,
+        cedula_frente: data.cedula_frente,
+        cedula_posterior: data.cedula_posterior,
+        licencia_frente: data.licencia_frente,
+        licencia_posterior: data.licencia_posterior,
       });
 
-      try {
-        // PASO 2: Documentos de conductor
-        await this.registerStep2(userId, {
-          license_number: data.license_number,
-          cedula_frente: data.cedula_frente,
-          cedula_posterior: data.cedula_posterior,
-          licencia_frente: data.licencia_frente,
-          licencia_posterior: data.licencia_posterior,
-        });
+      // 3. Paso 3: Registrar Vehículo y sus Documentos
+      const { carId } = await this.registerStep3(userId, {
+        serviceType: data.serviceType,
+        vehicle: data.vehicle,
+        tarjeta_propiedad: data.tarjeta_propiedad,
+        soat: data.soat,
+        soat_expiry_date: data.soat_expiry_date,
+        tecnomecanica: data.tecnomecanica,
+        tecnomecanica_expiry_date: data.tecnomecanica_expiry_date,
+        camara_comercio: data.camara_comercio,
+      });
 
-        // PASO 3: Vehículo y documentos
-        const { carId } = await this.registerStep3(userId, {
-          serviceType: data.serviceType,
-          vehicle: data.vehicle,
-          tarjeta_propiedad: data.tarjeta_propiedad,
-          soat: data.soat,
-          soat_expiry_date: data.soat_expiry_date,
-          tecnomecanica: data.tecnomecanica,
-          tecnomecanica_expiry_date: data.tecnomecanica_expiry_date,
-          camara_comercio: data.camara_comercio,
-        });
+      // 4. Paso 4: Datos de empresa (opcional para servicios especiales)
+      await this.registerStep4(userId, {
+        companyData: data.companyData,
+      });
 
-        // PASO 4: Datos de empresa (opcional)
-        await this.registerStep4(userId, {
-          companyData: data.companyData,
-        });
-
-        return {
-          success: true,
-          userId,
-          carId,
-          message: 'Conductor registrado exitosamente. Pendiente de aprobación.',
-        };
-      } catch (stepError) {
-        // Rollback: eliminar usuario de Auth y BD
-        await supabase.auth.admin.deleteUser(authId);
-        await UsersService.deleteUser(userId);
-        throw stepError;
-      }
+      return {
+        success: true,
+        userId,
+        carId,
+        message: 'Documentación completada exitosamente. Pendiente de aprobación.',
+      };
     } catch (error) {
-      const appError = ErrorHandler.handleWithToast(error, 'DriversService.registerDriver');
+      const appError = ErrorHandler.handleWithToast(error, 'DriversService.completeDriverRegistration');
       return {
         success: false,
-        message: appError.message || 'Error al registrar conductor',
+        message: appError.message || 'Error al completar el registro del conductor',
         errors: {
           general: appError.technicalMessage || 'Error desconocido',
         },
@@ -460,26 +425,26 @@ export class DriversService {
  * NOTA: El trigger create_referral_on_approval se encarga automáticamente de:
  Crear el registro en la tabla referrals si tiene referral_id, Actualizar el estado a 'completed'
  */
-static async approveDriver(userId: string, approvedBy: string): Promise<UserRow> {
-  try {
-    const user = await UsersService.updateDriverApproval(userId, true);
+  static async approveDriver(userId: string, approvedBy: string): Promise<UserRow> {
+    try {
+      const user = await UsersService.updateDriverApproval(userId, true);
 
-    // Log de aprobación
-    console.log(`Driver ${userId} approved by ${approvedBy}`);
-    
-    // Verificar si tiene código de referido
-    if (user.referral_id) {
-      console.log(`Driver ${userId} was referred with code: ${user.referral_id}`);
-      console.log('Trigger create_referral_on_approval will handle referral creation');
+      // Log de aprobación
+      console.log(`Driver ${userId} approved by ${approvedBy}`);
+
+      // Verificar si tiene código de referido
+      if (user.referral_id) {
+        console.log(`Driver ${userId} was referred with code: ${user.referral_id}`);
+        console.log('Trigger create_referral_on_approval will handle referral creation');
+      }
+
+      // TODO: Enviar notificación al conductor (email/SMS)
+
+      return user;
+    } catch (error) {
+      throw ErrorHandler.handleWithToast(error, 'DriversService.approveDriver');
     }
-
-    // TODO: Enviar notificación al conductor (email/SMS)
-    
-    return user;
-  } catch (error) {
-    throw ErrorHandler.handleWithToast(error, 'DriversService.approveDriver');
   }
-}
 
 
   /**
