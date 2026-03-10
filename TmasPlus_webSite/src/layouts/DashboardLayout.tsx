@@ -11,7 +11,7 @@ const mockUser = {
   subusers: [{ InTurn: true, Name: "Administrador" }],
 };
 
-function getDisplayName(u: any) {
+function getDisplayName(_u: any) {
   return "Alejandro"; // ajusta a tu lógica real
 }
 
@@ -37,6 +37,7 @@ export default function DashboardLayout() {
           getDisplayName={getDisplayName as any}
           defaultProfileImage={defaultProfileImage}
           handleLogout={() => { localStorage.removeItem("tplus_auth"); location.href = "/login"; }}
+          navigateToWhatsApp={() => {}}
         />
         <main className="md:pl-64">
           {/* Aquí se renderiza cada página hija */}

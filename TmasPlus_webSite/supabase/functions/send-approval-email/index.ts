@@ -63,7 +63,7 @@ serve(async (req: Request) => {
 
             <td style="background-color: #002f45; padding: 30px; text-align: center; font-size: 0;">
 
-              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/vehicle-images/assets/Logo-v3.png" alt="Logo TmasPlus" style="height: 50px; vertical-align: middle; margin-right: 15px; display: inline-block;">
+              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/vehicle-images/assets/icono_tmasplus.jpeg" alt="Logo TmasPlus" style="height: 50px; vertical-align: middle; margin-right: 15px; display: inline-block;">
 
               <h1 style="color: #ffffff; margin: 0; font-size: 24px; vertical-align: middle; display: inline-block;">¡Felicidades, ${nombreConductor}!</h1>
 
