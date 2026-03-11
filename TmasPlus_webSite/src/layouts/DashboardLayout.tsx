@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Topbar } from "@/components/layout/Topbar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import defaultProfileImage from "@/assets/perfil.png";
+import { useAuth } from "@/hooks/useAuth";
 
 // 👇 Simulación: trae tu usuario real desde contexto o API
 const mockUser = {
@@ -16,6 +17,7 @@ function getDisplayName(_u: any) {
 }
 
 export default function DashboardLayout() {
+  const { logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Ejemplo: regla para company (ajusta a tu cálculo real)
@@ -36,7 +38,10 @@ export default function DashboardLayout() {
           isAnySubuserInTurn={isAnySubuserInTurn}
           getDisplayName={getDisplayName as any}
           defaultProfileImage={defaultProfileImage}
-          handleLogout={() => { localStorage.removeItem("tplus_auth"); location.href = "/login"; }}
+          handleLogout={async () => {
+            await logout();
+            window.location.href = "/login";
+          }}
           navigateToWhatsApp={() => {}}
         />
         <main className="md:pl-64">

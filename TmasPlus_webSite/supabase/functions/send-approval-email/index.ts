@@ -161,7 +161,7 @@ serve(async (req: Request) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
         body: JSON.stringify({
-          from: 'T+Plus Onboarding <onboarding@resend.dev>', // Si validaste dominio, cámbialo aquí
+          from: 'T+Plus administración <aprobaciones@tmasplus.com>', // dominio validado
           to: [emailDestino],
           subject: '¡Tu cuenta ha sido aprobada! + Código de Referido',
           html: htmlContent
