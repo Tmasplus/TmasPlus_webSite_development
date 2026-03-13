@@ -173,7 +173,10 @@ export const RegisterDriverPage: React.FC = () => {
                 // Paso 3
                 serviceType: step3.serviceType!,
                 vehicle: step3.vehicle!,
+                car_image_1: step3.car_image_1!,
+                car_image_2: step3.car_image_2!,
                 tarjeta_propiedad: step3.tarjeta_propiedad!,
+                tarjeta_propiedad_back: step3.tarjeta_propiedad_back!,
                 soat: step3.soat!,
                 soat_expiry_date: step3.soat_expiry_date!,
                 tecnomecanica: step3.tecnomecanica,

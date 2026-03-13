@@ -428,7 +428,7 @@ Sube documento de vehículo.
 Sube imagen de vehículo.
 
 **Buckets:**
-- `vehicle-images`
+- `public-site-assets`
 
 ### `getPublicUrl(bucket: string, path: string): string`
 
@@ -480,7 +480,7 @@ Obtiene el tamaño total de archivos en una carpeta.
 export const STORAGE_BUCKETS = {
   DRIVER_DOCUMENTS: 'driver-documents',
   VEHICLE_DOCUMENTS: 'vehicle-documents',
-  VEHICLE_IMAGES: 'vehicle-images',
+  VEHICLE_IMAGES: 'public-site-assets',
 };
 
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB

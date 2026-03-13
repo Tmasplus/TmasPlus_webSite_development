@@ -232,7 +232,7 @@ Las políticas RLS deben configurarse en Supabase:
 - Documentos de vehículos
 - Estructura: `{car_id}/{document_type}_{filename}`
 
-### `vehicle-images`
+### `public-site-assets`
 - Imágenes de vehículos
 - Estructura: `{car_id}/{filename}`
 

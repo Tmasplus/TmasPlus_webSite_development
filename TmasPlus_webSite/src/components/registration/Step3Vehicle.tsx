@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import { FileUpload } from '@/components/ui/FileUpload';
-import type { DriverRegistrationStep3, DriverServiceType, FuelType, TransmissionType } from '@/config/database.types';
+import type { DriverRegistrationStep3, DriverServiceType } from '@/config/database.types';
 
 interface Step3Props {
     data: Partial<DriverRegistrationStep3>;
@@ -29,15 +29,17 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
         if (!data.serviceType) newErrors.serviceType = 'Selecciona el tipo de servicio';
         if (!data.vehicle?.make?.trim()) newErrors['vehicle.make'] = 'Requerido';
         if (!data.vehicle?.model?.trim()) newErrors['vehicle.model'] = 'Requerido';
-        // if (!data.vehicle?.year || data.vehicle.year < 1990 || data.vehicle.year > new Date().getFullYear() + 1)
-        //     newErrors['vehicle.year'] = 'Año inválido';
         if (!data.vehicle?.color?.trim()) newErrors['vehicle.color'] = 'Requerido';
         if (!data.vehicle?.plate?.trim()) newErrors['vehicle.plate'] = 'Requerido';
-        if (!data.vehicle?.fuel_type) newErrors['vehicle.fuel_type'] = 'Requerido';
-        if (!data.vehicle?.transmission) newErrors['vehicle.transmission'] = 'Requerido';
         if (!data.vehicle?.capacity || data.vehicle.capacity < 1 || data.vehicle.capacity > 20)
             newErrors['vehicle.capacity'] = 'Capacidad inválida (1-20)';
-        if (!data.tarjeta_propiedad) newErrors.tarjeta_propiedad = 'Requerida';
+
+        // Validaciones de nuevos documentos
+        if (!data.car_image_1) newErrors.car_image_1 = 'Foto frontal/exterior requerida';
+        if (!data.car_image_2) newErrors.car_image_2 = 'Foto interior/placa requerida';
+        if (!data.tarjeta_propiedad) newErrors.tarjeta_propiedad = 'Frente requerido';
+        if (!data.tarjeta_propiedad_back) newErrors.tarjeta_propiedad_back = 'Reverso requerido';
+
         if (!data.soat) newErrors.soat = 'Requerido';
         if (!data.soat_expiry_date) newErrors.soat_expiry_date = 'Requerida';
         setErrors(newErrors);
@@ -50,7 +52,7 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
         <div className="space-y-5">
             <div>
                 <h2 className="text-lg font-semibold text-[#002f45]">Vehículo y Documentos</h2>
-                <p className="text-sm text-slate-500 mt-0.5">Información del vehículo con el que trabajarás</p>
+                <p className="text-sm text-slate-500 mt-0.5">Información de la máquina con la que trabajarás</p>
             </div>
 
             {/* Tipo de servicio */}
@@ -81,7 +83,7 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
 
             {/* Datos del vehículo */}
             <div className="bg-slate-50 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Datos del Vehículo</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Especificaciones</p>
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <FloatingInput id="make" label="Marca" value={data.vehicle?.make ?? ''} onChange={(e) => updateVehicle('make', e.target.value)} disabled={loading} required />
@@ -91,10 +93,6 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                         <FloatingInput id="model" label="Modelo" value={data.vehicle?.model ?? ''} onChange={(e) => updateVehicle('model', e.target.value)} disabled={loading} required />
                         {errors['vehicle.model'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.model']}</p>}
                     </div>
-                    {/* <div>
-                        <FloatingInput id="year" label="Año" type="number" value={data.vehicle?.year?.toString() ?? ''} onChange={(e) => updateVehicle('year', parseInt(e.target.value) || 0)} disabled={loading} required />
-                        {errors['vehicle.year'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.year']}</p>}
-                    </div> */}
                     <div>
                         <FloatingInput id="color" label="Color" value={data.vehicle?.color ?? ''} onChange={(e) => updateVehicle('color', e.target.value)} disabled={loading} required />
                         {errors['vehicle.color'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.color']}</p>}
@@ -103,44 +101,41 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                         <FloatingInput id="plate" label="Placa" value={data.vehicle?.plate ?? ''} onChange={(e) => updateVehicle('plate', e.target.value.toUpperCase())} disabled={loading} required />
                         {errors['vehicle.plate'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.plate']}</p>}
                     </div>
-                    <div>
-                        <FloatingInput id="capacity" label="Pasajeros" type="number" value={data.vehicle?.capacity?.toString() ?? ''} onChange={(e) => updateVehicle('capacity', parseInt(e.target.value) || 0)} disabled={loading} required />
+                    <div className="col-span-2">
+                        <FloatingInput id="capacity" label="Pasajeros (Capacidad)" type="number" value={data.vehicle?.capacity?.toString() ?? ''} onChange={(e) => updateVehicle('capacity', parseInt(e.target.value) || 0)} disabled={loading} required />
                         {errors['vehicle.capacity'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.capacity']}</p>}
                     </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+            </div>
+
+            {/* Inspección Visual del Vehículo */}
+            <div className="bg-slate-50 rounded-xl p-4 space-y-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Inspección Visual (Fotos)</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Combustible <span className="text-red-500">*</span></label>
-                        <select value={data.vehicle?.fuel_type ?? ''} onChange={(e) => updateVehicle('fuel_type', e.target.value as FuelType)} disabled={loading} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400 bg-white">
-                            <option value="">Seleccionar</option>
-                            <option value="gasolina">Gasolina</option>
-                            <option value="diesel">Diesel</option>
-                            <option value="electrico">Eléctrico</option>
-                            <option value="hibrido">Híbrido</option>
-                        </select>
-                        {errors['vehicle.fuel_type'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.fuel_type']}</p>}
+                        <FileUpload label="Foto Frontal/Exterior" value={(data.car_image_1 as File | null) ?? null} onChange={(f) => update('car_image_1', f as File)} disabled={loading} hint="Donde se vea la placa" required />
+                        {errors.car_image_1 && <p className="mt-1 text-xs text-red-500">{errors.car_image_1}</p>}
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Transmisión <span className="text-red-500">*</span></label>
-                        <select value={data.vehicle?.transmission ?? ''} onChange={(e) => updateVehicle('transmission', e.target.value as TransmissionType)} disabled={loading} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400 bg-white">
-                            <option value="">Seleccionar</option>
-                            <option value="manual">Manual</option>
-                            <option value="automatico">Automática</option>
-                        </select>
-                        {errors['vehicle.transmission'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.transmission']}</p>}
+                        <FileUpload label="Foto Interior" value={(data.car_image_2 as File | null) ?? null} onChange={(f) => update('car_image_2', f as File)} disabled={loading} hint="Estado de los asientos" required />
+                        {errors.car_image_2 && <p className="mt-1 text-xs text-red-500">{errors.car_image_2}</p>}
                     </div>
                 </div>
             </div>
 
             {/* Documentos del vehículo */}
             <div className="bg-slate-50 rounded-xl p-4 space-y-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Documentos del Vehículo</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Documentos Legales</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <FileUpload label="Tarjeta de Propiedad" value={(data.tarjeta_propiedad as File | null) ?? null} onChange={(f) => update('tarjeta_propiedad', f as File)} disabled={loading} required />
+                        <FileUpload label="Tarjeta de Propiedad (Frente)" value={(data.tarjeta_propiedad as File | null) ?? null} onChange={(f) => update('tarjeta_propiedad', f as File)} disabled={loading} required />
                         {errors.tarjeta_propiedad && <p className="mt-1 text-xs text-red-500">{errors.tarjeta_propiedad}</p>}
                     </div>
                     <div>
+                        <FileUpload label="Tarjeta de Propiedad (Reverso)" value={(data.tarjeta_propiedad_back as File | null) ?? null} onChange={(f) => update('tarjeta_propiedad_back', f as File)} disabled={loading} required />
+                        {errors.tarjeta_propiedad_back && <p className="mt-1 text-xs text-red-500">{errors.tarjeta_propiedad_back}</p>}
+                    </div>
+                    <div className="sm:col-span-2">
                         <FileUpload label="SOAT" value={(data.soat as File | null) ?? null} onChange={(f) => update('soat', f as File)} disabled={loading} required />
                         {errors.soat && <p className="mt-1 text-xs text-red-500">{errors.soat}</p>}
                     </div>
