@@ -110,6 +110,9 @@ export interface Database {
           color: string | null;
           plate: string;
           capacity: number;
+          fuel_type: string | null;
+          transmission: string | null;
+          features: Json | null;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -133,6 +136,9 @@ export interface Database {
           color?: string | null;
           plate: string;
           capacity?: number;
+          fuel_type?: string | null;
+          transmission?: string | null;
+          features?: Json | null;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -156,6 +162,9 @@ export interface Database {
           color?: string | null;
           plate?: string;
           capacity?: number;
+          fuel_type?: string | null;
+          transmission?: string | null;
+          features?: Json | null;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -424,7 +433,7 @@ export type BookingStatus =
   | 'COMPLETE'
   | 'CANCELLED';
 export type PaymentMode = 'cash' | 'wallet' | 'card';
-export type FuelType = 'gasolina' | 'diesel' | 'electrico' | 'hibrido';
+export type FuelType = 'gasolina' | 'diesel' | 'electrico' | 'hibrido' | 'gas';
 export type TransmissionType = 'manual' | 'automatico';
 export type WalletTransactionType = 'credit' | 'debit';
 
@@ -549,6 +558,8 @@ export interface DriverRegistrationStep3 {
     color: string;
     plate: string;
     capacity: number;
+    fuel_type: FuelType;
+    transmission: TransmissionType;
   };
   car_image_1: File;
   car_image_2: File;

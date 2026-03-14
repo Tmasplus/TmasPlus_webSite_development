@@ -191,6 +191,8 @@ export class DriversService {
         model: data.vehicle.model,
         color: data.vehicle.color,
         plate: data.vehicle.plate,
+        fuel_type: data.vehicle.fuel_type,
+        transmission: data.vehicle.transmission,
         capacity: data.vehicle.capacity,
         service_type: data.serviceType,
       });
@@ -276,15 +278,12 @@ export class DriversService {
       }
 
       // Guardar datos de empresa en features del vehículo
-      // NOTA: 'features' fue eliminado de la BD
-      /*
       await CarsService.updateCar(cars[0].id, {
         features: {
           ...(((cars[0] as any).features as Record<string, any>) || {}),
           companyData: data.companyData,
         } as any,
       });
-      */
 
       return true;
     } catch (error) {
@@ -374,12 +373,10 @@ export class DriversService {
 
       // Extraer companyData de features si existe
       let companyData: CompanyData | undefined;
-      /*
       if (activeVehicle && (activeVehicle as any).features) {
         const features = (activeVehicle as any).features as Record<string, any>;
         companyData = features.companyData as CompanyData | undefined;
       }
-      */
 
       const profile: DriverProfile = {
         ...user,
@@ -410,12 +407,10 @@ export class DriversService {
           const activeVehicle = vehicles && vehicles.length > 0 ? vehicles[0] : undefined;
 
           let companyData: CompanyData | undefined;
-          /*
           if (activeVehicle && (activeVehicle as any).features) {
             const features = (activeVehicle as any).features as Record<string, any>;
             companyData = features.companyData as CompanyData | undefined;
           }
-          */
 
           return {
             ...user,

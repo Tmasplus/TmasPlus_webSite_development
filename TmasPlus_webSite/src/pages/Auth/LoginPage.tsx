@@ -6,6 +6,7 @@ import { FloatingInput } from '@/components/ui/FloatingField';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from '@/utils/toast';
 import logo from '@/assets/Logo-v3.png';
+import { ForgotPasswordModal } from '@/pages/Auth/ForgotPasswordModal';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export const LoginPage: React.FC = () => {
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [openForgot, setOpenForgot] = useState(false);
 
   // Redireccionar si ya está autenticado
   useEffect(() => {
@@ -65,10 +67,7 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleForgotPassword = () => {
-    toast.info('Funcionalidad de recuperación de contraseña próximamente');
-    // TODO: Implementar recuperación de contraseña
-  };
+
 
   const handleRegister = () => {
     navigate('/register-driver');
@@ -143,14 +142,15 @@ export const LoginPage: React.FC = () => {
               />
               <span className="text-slate-700">Recordarme</span>
             </label>
-            <button
-              type="button"
-              className="text-primary-dark hover:underline disabled:opacity-50"
-              onClick={handleForgotPassword}
-              disabled={loading}
-            >
-              ¿Olvidaste tu contraseña?
-            </button>
+            <div className="flex justify-end mt-1">
+              <button 
+                type="button" 
+                onClick={() => setOpenForgot(true)} 
+                className="text-xs font-semibold text-sky-600 hover:text-sky-800"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            </div>
           </div>
 
           <Button
@@ -193,6 +193,8 @@ export const LoginPage: React.FC = () => {
           © {new Date().getFullYear()} T+PLUS. Todos los derechos reservados.
         </p>
       </motion.div>
+
+      <ForgotPasswordModal open={openForgot} onClose={() => setOpenForgot(false)} />
     </div>
   );
 };

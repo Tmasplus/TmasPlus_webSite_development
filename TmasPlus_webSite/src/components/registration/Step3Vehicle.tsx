@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import { FileUpload } from '@/components/ui/FileUpload';
-import type { DriverRegistrationStep3, DriverServiceType } from '@/config/database.types';
+import type { DriverRegistrationStep3, DriverServiceType, FuelType, TransmissionType } from '@/config/database.types';
 
 interface Step3Props {
     data: Partial<DriverRegistrationStep3>;
@@ -33,6 +33,8 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
         if (!data.vehicle?.plate?.trim()) newErrors['vehicle.plate'] = 'Requerido';
         if (!data.vehicle?.capacity || data.vehicle.capacity < 1 || data.vehicle.capacity > 20)
             newErrors['vehicle.capacity'] = 'Capacidad inválida (1-20)';
+        if (!data.vehicle?.fuel_type) newErrors['vehicle.fuel_type'] = 'Requerido';
+        if (!data.vehicle?.transmission) newErrors['vehicle.transmission'] = 'Requerido';
 
         // Validaciones de nuevos documentos
         if (!data.car_image_1) newErrors.car_image_1 = 'Foto frontal/exterior requerida';
@@ -104,6 +106,29 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                     <div className="col-span-2">
                         <FloatingInput id="capacity" label="Pasajeros (Capacidad)" type="number" value={data.vehicle?.capacity?.toString() ?? ''} onChange={(e) => updateVehicle('capacity', parseInt(e.target.value) || 0)} disabled={loading} required />
                         {errors['vehicle.capacity'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.capacity']}</p>}
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Combustible <span className="text-red-500">*</span></label>
+                        <select value={data.vehicle?.fuel_type ?? ''} onChange={(e) => updateVehicle('fuel_type', e.target.value as FuelType)} disabled={loading} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400 bg-white">
+                            <option value="">Seleccionar</option>
+                            <option value="gasolina">Gasolina</option>
+                            <option value="diesel">Diesel</option>
+                            <option value="gas">Gas (GNV)</option>
+                            <option value="electrico">Eléctrico</option>
+                            <option value="hibrido">Híbrido</option>
+                        </select>
+                        {errors['vehicle.fuel_type'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.fuel_type']}</p>}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Transmisión <span className="text-red-500">*</span></label>
+                        <select value={data.vehicle?.transmission ?? ''} onChange={(e) => updateVehicle('transmission', e.target.value as TransmissionType)} disabled={loading} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400 bg-white">
+                            <option value="">Seleccionar</option>
+                            <option value="manual">Manual</option>
+                            <option value="automatico">Automática</option>
+                        </select>
+                        {errors['vehicle.transmission'] && <p className="mt-1 text-xs text-red-500">{errors['vehicle.transmission']}</p>}
                     </div>
                 </div>
             </div>
