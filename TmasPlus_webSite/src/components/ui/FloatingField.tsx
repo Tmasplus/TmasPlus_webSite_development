@@ -24,7 +24,7 @@ export const FloatingInput: React.FC<
             "border-slate-300 focus:ring-2 focus:ring-primary focus:border-primary",
             required && !props.value && "border-red-400",
             error && "border-red-300 focus:ring-red-300 focus:border-red-300",
-            right && "pr-10"
+            !!right && "pr-10"
           )}
           {...props}
         />
