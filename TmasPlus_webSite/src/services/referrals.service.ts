@@ -174,6 +174,27 @@ class ReferralsService {
   }
 
   /**
+   * Valida asíncronamente (en tiempo real) si un código de referido existe y está activo.
+   */
+  async checkCodeValidity(code: string): Promise<boolean> {
+    try {
+      if (!code || code.trim() === '') return false;
+      
+      const { data, error } = await supabase
+        .from('referral_codes')
+        .select('id')
+        .eq('referral_code', code.trim().toUpperCase())
+        .eq('is_active', true)
+        .single();
+
+      if (error) return false;
+      return !!data;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Registra un nuevo referido
    */
   async createReferral(referralData: {

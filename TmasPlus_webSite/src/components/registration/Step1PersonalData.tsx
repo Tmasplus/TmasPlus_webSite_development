@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import type { DriverRegistrationStep1 } from '@/config/database.types';
 import { UsersService } from '@/services/users.service';
+import { referralsService } from '@/services/referrals.service';
 
 interface Step1Props {
     data: Partial<DriverRegistrationStep1> & { confirmPassword?: string };
@@ -19,7 +20,8 @@ const CITIES = [
 
 export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext, loading = false }) => {
     const [errors, setErrors] = useState<Record<string, string>>({});
-    const [validating, setValidating] = useState({ email: false, mobile: false });
+    const [validating, setValidating] = useState({ email: false, mobile: false, referral: false });
+    const [successMsg, setSuccessMsg] = useState<Record<string, string>>({});
 
     const update = (key: string, value: string) => {
         onChange({ ...data, [key]: value });
@@ -48,6 +50,22 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
         } finally {
             setValidating(v => ({ ...v, mobile: false }));
         }
+    };
+
+    // Validación en tiempo real para Referido
+    const handleReferralBlur = async () => {
+        if (!data.referral_code || data.referral_code.trim() === '') return;
+        setValidating(v => ({ ...v, referral: true }));
+        setSuccessMsg(s => ({ ...s, referral_code: '' }));
+        
+        const isValid = await referralsService.checkCodeValidity(data.referral_code);
+        
+        if (!isValid) {
+            setErrors(e => ({ ...e, referral_code: 'Código inválido o inactivo' }));
+        } else {
+            setSuccessMsg(s => ({ ...s, referral_code: '¡Código válido!' }));
+        }
+        setValidating(v => ({ ...v, referral: false }));
     };
 
     const validate = (): boolean => {
@@ -124,11 +142,22 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             </div>
 
             <div>
-                <FloatingInput id="referral_code" label="Código de referido (opcional)" value={data.referral_code ?? ''} onChange={(e) => update('referral_code', e.target.value.toUpperCase())} disabled={loading} />
-                <p className="mt-1 text-xs text-slate-400">Si un conductor te recomendó, ingresa su código aquí</p>
+                <div onBlur={handleReferralBlur}>
+                    <FloatingInput 
+                       id="referral_code" 
+                       label="Código de referido (opcional)" 
+                       value={data.referral_code ?? ''} 
+                       onChange={(e) => update('referral_code', e.target.value.toUpperCase())} 
+                       disabled={loading || validating.referral}
+                       error={errors.referral_code} 
+                       helpText={successMsg.referral_code ? "" : "Si un conductor te recomendó, ingresa su código aquí"}
+                    />
+                    {validating.referral && <p className="mt-1 text-xs text-blue-500">Verificando código...</p>}
+                    {successMsg.referral_code && <p className="mt-1 text-xs text-green-600 font-semibold">{successMsg.referral_code}</p>}
+                </div>
             </div>
 
-            <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading || validating.email || validating.mobile} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">
+            <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading || validating.email || validating.mobile || validating.referral} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">
                 Continuar →
             </button>
         </div>
