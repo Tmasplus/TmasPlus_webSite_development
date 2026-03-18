@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import type { DriverRegistrationStep1 } from '@/config/database.types';
-import { UsersService } from '@/services/users.service';
-import { referralsService } from '@/services/referrals.service';
+import { referralsService } from '@/services/referrals.service'; 
+import { supabase } from '@/config/supabase'; // Añadido para consumir el RPC seguro
 
 interface Step1Props {
     data: Partial<DriverRegistrationStep1> & { confirmPassword?: string };
@@ -18,72 +18,139 @@ const CITIES = [
     'Valledupar', 'Montería', 'Sincelejo', 'Popayán', 'Tunja',
 ];
 
+const DISPOSABLE_DOMAINS = [
+    'yopmail.com', 'mailinator.com', 'tempmail.com', '10minutemail.com',
+    'guerrillamail.com', 'sharklasers.com', 'trashmail.com', 'throwawaymail.com',
+    'temp-mail.org', 'fakeinbox.com', 'nada.ltd', 'getnada.com', 'mohmal.com'
+];
+
+const COUNTRY_CODES = [
+    { code: '+57', country: 'CO' },
+    { code: '+51', country: 'PE' },
+    { code: '+52', country: 'MX' },
+    { code: '+54', country: 'AR' },
+    { code: '+56', country: 'CL' },
+    { code: '+593', country: 'EC' },
+    { code: '+58', country: 'VE' },
+    { code: '+1', country: 'US' },
+];
+
 export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext, loading = false }) => {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [validating, setValidating] = useState({ email: false, mobile: false, referral: false });
-    const [successMsg, setSuccessMsg] = useState<Record<string, string>>({});
+    const [phonePrefix, setPhonePrefix] = useState('+57');
 
     const update = (key: string, value: string) => {
         onChange({ ...data, [key]: value });
         if (errors[key]) setErrors((e) => ({ ...e, [key]: '' }));
     };
 
-    // Validación en tiempo real para el Correo
+    // ==================== LÓGICA DE VALIDACIÓN ESTRICTA ====================
+
+    const validateEmailStrict = (email: string) => {
+        if (!email) return 'El email es requerido';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Formato inválido (ej: usuario@correo.com)';
+        
+        const domain = email.split('@')[1]?.toLowerCase();
+        if (DISPOSABLE_DOMAINS.includes(domain)) return 'No se permiten correos temporales';
+        
+        return null;
+    };
+
+    const validateMobileStrict = (mobile: string, prefix: string) => {
+        if (!mobile) return 'El teléfono es requerido';
+        
+        if (prefix === '+57') {
+            if (!mobile.startsWith('3')) return 'Debe iniciar con 3';
+            if (mobile.length !== 10) return `Debe tener 10 dígitos (tiene ${mobile.length})`;
+        } else {
+            if (mobile.length < 8 || mobile.length > 15) return 'Número inválido';
+        }
+        return null;
+    };
+
+    // ==================== HANDLERS EN TIEMPO REAL (ON BLUR) ====================
+
     const handleEmailBlur = async () => {
-        if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return;
+        const emailErr = validateEmailStrict(data.email ?? '');
+        if (emailErr) {
+            setErrors(e => ({ ...e, email: emailErr }));
+            return;
+        }
+
         setValidating(v => ({ ...v, email: true }));
         try {
-            const exists = await UsersService.emailExists(data.email.trim().toLowerCase());
-            if (exists) setErrors(e => ({ ...e, email: 'Este correo ya está registrado en T+Plus' }));
+            // Consumo del RPC seguro que ignora las reglas RLS
+            const { data: result } = await supabase.rpc('check_user_availability', {
+                p_email: data.email!.trim().toLowerCase()
+            });
+            
+            if (result?.email_exists) {
+                setErrors(e => ({ ...e, email: 'Este correo ya está registrado' }));
+            }
         } finally {
             setValidating(v => ({ ...v, email: false }));
         }
     };
 
-    // Validación en tiempo real para el Teléfono
     const handleMobileBlur = async () => {
-        if (!data.mobile || !/^\d{7,15}$/.test(data.mobile.replace(/\s/g, ''))) return;
+        const mobErr = validateMobileStrict(data.mobile ?? '', phonePrefix);
+        if (mobErr) {
+            setErrors(e => ({ ...e, mobile: mobErr }));
+            return;
+        }
+
         setValidating(v => ({ ...v, mobile: true }));
         try {
-            const exists = await UsersService.phoneExists(data.mobile.trim());
-            if (exists) setErrors(e => ({ ...e, mobile: 'Este número de teléfono ya está registrado' }));
+            // Consumo del RPC seguro que ignora las reglas RLS
+            const { data: result } = await supabase.rpc('check_user_availability', {
+                p_mobile: data.mobile!.trim()
+            });
+
+            if (result?.mobile_exists) {
+                setErrors(e => ({ ...e, mobile: 'Este número ya está registrado' }));
+            }
         } finally {
             setValidating(v => ({ ...v, mobile: false }));
         }
     };
 
-    // Validación en tiempo real para Referido
     const handleReferralBlur = async () => {
         if (!data.referral_code || data.referral_code.trim() === '') return;
         setValidating(v => ({ ...v, referral: true }));
-        setSuccessMsg(s => ({ ...s, referral_code: '' }));
         
         const isValid = await referralsService.checkCodeValidity(data.referral_code);
         
         if (!isValid) {
             setErrors(e => ({ ...e, referral_code: 'Código inválido o inactivo' }));
-        } else {
-            setSuccessMsg(s => ({ ...s, referral_code: '¡Código válido!' }));
         }
+        // Eliminado el mensaje de éxito (verde)
         setValidating(v => ({ ...v, referral: false }));
     };
 
+    // ==================== VALIDACIÓN GLOBAL AL CONTINUAR ====================
+
     const validate = (): boolean => {
-        const newErrors: Record<string, string> = { ...errors }; // Mantener errores de duplicidad si existen
+        const newErrors: Record<string, string> = { ...errors }; 
+        
         if (!data.first_name?.trim()) newErrors.first_name = 'El nombre es requerido';
         if (!data.last_name?.trim()) newErrors.last_name = 'El apellido es requerido';
-        if (!data.email?.trim()) newErrors.email = newErrors.email || 'El email es requerido';
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) newErrors.email = 'Formato de email inválido';
-        if (!data.mobile?.trim()) newErrors.mobile = newErrors.mobile || 'El teléfono es requerido';
-        else if (!/^\d{7,15}$/.test(data.mobile.replace(/\s/g, ''))) newErrors.mobile = 'Número de teléfono inválido';
+        
+        const emailErr = validateEmailStrict(data.email ?? '');
+        if (emailErr) newErrors.email = emailErr;
+
+        const mobErr = validateMobileStrict(data.mobile ?? '', phonePrefix);
+        if (mobErr) newErrors.mobile = mobErr;
+
         if (!data.password) newErrors.password = 'La contraseña es requerida';
         else if (data.password.length < 6) newErrors.password = 'Mínimo 6 caracteres';
+        
         if (!data.confirmPassword) newErrors.confirmPassword = 'Confirma tu contraseña';
         else if (data.password !== data.confirmPassword) newErrors.confirmPassword = 'Las contraseñas no coinciden';
+        
         if (!data.city) newErrors.city = 'Selecciona una ciudad';
 
         setErrors(newErrors);
-        // Retorna verdadero solo si no hay ningún error (incluyendo los de duplicidad)
         return Object.keys(newErrors).length === 0;
     };
 
@@ -95,66 +162,81 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-                <div>
-                    <FloatingInput id="first_name" label="Nombre" value={data.first_name ?? ''} onChange={(e) => update('first_name', e.target.value)} disabled={loading} required />
-                    {errors.first_name && <p className="mt-1 text-xs text-red-500">{errors.first_name}</p>}
-                </div>
-                <div>
-                    <FloatingInput id="last_name" label="Apellido" value={data.last_name ?? ''} onChange={(e) => update('last_name', e.target.value)} disabled={loading} required />
-                    {errors.last_name && <p className="mt-1 text-xs text-red-500">{errors.last_name}</p>}
-                </div>
+                <FloatingInput id="first_name" label="Nombre" value={data.first_name ?? ''} onChange={(e) => update('first_name', e.target.value)} disabled={loading} required error={errors.first_name} />
+                <FloatingInput id="last_name" label="Apellido" value={data.last_name ?? ''} onChange={(e) => update('last_name', e.target.value)} disabled={loading} required error={errors.last_name} />
+            </div>
+
+            <div onBlur={handleEmailBlur}>
+                <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading || validating.email} required autoComplete="email" error={errors.email} />
             </div>
 
             <div>
-                <div onBlur={handleEmailBlur}>
-                    <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading || validating.email} required autoComplete="email" />
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Teléfono móvil <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-2" onBlur={handleMobileBlur}>
+                    <div className="w-28 shrink-0">
+                        <select
+                            value={phonePrefix}
+                            onChange={(e) => setPhonePrefix(e.target.value)}
+                            disabled={loading || validating.mobile}
+                            className={`w-full h-[46px] rounded-xl border px-2 text-sm outline-none transition bg-white text-slate-700 ${errors.mobile ? 'border-red-400 focus:ring-red-400' : 'border-slate-300 focus:ring-2 focus:ring-sky-400'}`}
+                        >
+                            {COUNTRY_CODES.map(c => (
+                                <option key={c.code} value={c.code}>{c.country} {c.code}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex-1">
+                        <FloatingInput 
+                            id="mobile" 
+                            label="Número (sin prefijo)" 
+                            type="tel" 
+                            value={data.mobile ?? ''} 
+                            onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '');
+                                const finalVal = phonePrefix === '+57' ? val.slice(0, 10) : val.slice(0, 15);
+                                update('mobile', finalVal);
+                            }} 
+                            disabled={loading || validating.mobile} 
+                            required 
+                            error={errors.mobile}
+                        />
+                    </div>
                 </div>
-                {validating.email && <p className="mt-1 text-xs text-blue-500">Verificando disponibilidad...</p>}
-                {errors.email && <p className="mt-1 text-xs text-red-500 font-semibold">{errors.email}</p>}
-            </div>
-
-            <div>
-                <div onBlur={handleMobileBlur}>
-                    <FloatingInput id="mobile" label="Teléfono móvil" type="tel" value={data.mobile ?? ''} onChange={(e) => update('mobile', e.target.value)} disabled={loading || validating.mobile} required />
-                </div>
-                {validating.mobile && <p className="mt-1 text-xs text-blue-500">Verificando disponibilidad...</p>}
-                {errors.mobile && <p className="mt-1 text-xs text-red-500 font-semibold">{errors.mobile}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-                <div>
-                    <FloatingInput id="password" label="Contraseña" type="password" value={data.password ?? ''} onChange={(e) => update('password', e.target.value)} disabled={loading} required autoComplete="new-password" />
-                    {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
-                </div>
-                <div>
-                    <FloatingInput id="confirmPassword" label="Confirmar contraseña" type="password" value={data.confirmPassword ?? ''} onChange={(e) => update('confirmPassword', e.target.value)} disabled={loading} required autoComplete="new-password" />
-                    {errors.confirmPassword && <p className="mt-1 text-xs text-red-500">{errors.confirmPassword}</p>}
-                </div>
+                <FloatingInput id="password" label="Contraseña" type="password" value={data.password ?? ''} onChange={(e) => update('password', e.target.value)} disabled={loading} required autoComplete="new-password" error={errors.password} />
+                <FloatingInput id="confirmPassword" label="Confirmar" type="password" value={data.confirmPassword ?? ''} onChange={(e) => update('confirmPassword', e.target.value)} disabled={loading} required autoComplete="new-password" error={errors.confirmPassword} />
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ciudad <span className="text-red-500">*</span></label>
-                <select value={data.city ?? ''} onChange={(e) => update('city', e.target.value)} disabled={loading} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-400 bg-white text-slate-700">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Ciudad <span className="text-red-500">*</span>
+                </label>
+                <select 
+                    value={data.city ?? ''} 
+                    onChange={(e) => update('city', e.target.value)} 
+                    disabled={loading} 
+                    className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition bg-white text-slate-700 ${errors.city ? 'border-red-400 focus:ring-red-400' : 'border-slate-300 focus:ring-2 focus:ring-sky-400'}`}
+                >
                     <option value="">Selecciona tu ciudad</option>
                     {CITIES.map((city) => <option key={city} value={city}>{city}</option>)}
                 </select>
-                {errors.city && <p className="mt-1 text-xs text-red-500">{errors.city}</p>}
+                {errors.city && <p className="mt-1 text-xs text-red-600 font-semibold">{errors.city}</p>}
             </div>
 
-            <div>
-                <div onBlur={handleReferralBlur}>
-                    <FloatingInput 
-                       id="referral_code" 
-                       label="Código de referido (opcional)" 
-                       value={data.referral_code ?? ''} 
-                       onChange={(e) => update('referral_code', e.target.value.toUpperCase())} 
-                       disabled={loading || validating.referral}
-                       error={errors.referral_code} 
-                       helpText={successMsg.referral_code ? "" : "Si un conductor te recomendó, ingresa su código aquí"}
-                    />
-                    {validating.referral && <p className="mt-1 text-xs text-blue-500">Verificando código...</p>}
-                    {successMsg.referral_code && <p className="mt-1 text-xs text-green-600 font-semibold">{successMsg.referral_code}</p>}
-                </div>
+            <div onBlur={handleReferralBlur}>
+                <FloatingInput 
+                   id="referral_code" 
+                   label="Código de referido (opcional)" 
+                   value={data.referral_code ?? ''} 
+                   onChange={(e) => update('referral_code', e.target.value.toUpperCase())} 
+                   disabled={loading || validating.referral} 
+                   error={errors.referral_code}
+                   helpText={errors.referral_code ? "" : "Si un conductor te recomendó, ingresa su código aquí"}
+                />
             </div>
 
             <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading || validating.email || validating.mobile || validating.referral} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">

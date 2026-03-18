@@ -397,7 +397,16 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      check_user_availability: {
+        Args: {
+          p_email?: string;
+          p_mobile?: string;
+        };
+        Returns: {
+          email_exists: boolean;
+          mobile_exists: boolean;
+        };
+      };
     };
     Enums: {
       [_ in never]: never;
