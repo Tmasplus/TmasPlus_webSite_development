@@ -262,7 +262,7 @@ const handleSubmit = async (data) => {
 
 - `driver-documents` - Documentos de conductores
 - `vehicle-documents` - Documentos de vehículos
-- `vehicle-images` - Imágenes de vehículos
+- `public-site-assets` - Imágenes de vehículos
 
 ### Flujo de Upload
 

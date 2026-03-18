@@ -22,7 +22,7 @@ import { referralsService } from './referrals.service';
 
 
 /**
- * Servicio de Conductores de T+Plus Dashboard
+ * 
  * Maneja el ciclo completo de registro, aprobación y gestión de conductores
  */
 export class DriversService {
@@ -189,7 +189,6 @@ export class DriversService {
         driver_id: userId,
         make: data.vehicle.make,
         model: data.vehicle.model,
-        year: data.vehicle.year,
         color: data.vehicle.color,
         plate: data.vehicle.plate,
         fuel_type: data.vehicle.fuel_type,
@@ -200,17 +199,24 @@ export class DriversService {
 
       // Subir documentos del vehículo en paralelo
       const uploadPromises = [
+        StorageService.uploadVehicleImage(car.id, 'car_image_1', data.car_image_1),
+        StorageService.uploadVehicleImage(car.id, 'car_image_2', data.car_image_2),
         StorageService.uploadVehicleDocument(car.id, 'tarjeta_propiedad', data.tarjeta_propiedad),
+        StorageService.uploadVehicleDocument(car.id, 'tarjeta_propiedad_back', data.tarjeta_propiedad_back),
         StorageService.uploadVehicleDocument(car.id, 'soat', data.soat),
       ];
 
+      let tecnoIndex = -1;
       if (data.tecnomecanica) {
+        tecnoIndex = uploadPromises.length;
         uploadPromises.push(
           StorageService.uploadVehicleDocument(car.id, 'tecnomecanica', data.tecnomecanica)
         );
       }
 
+      let camaraIndex = -1;
       if (data.camara_comercio) {
+        camaraIndex = uploadPromises.length;
         uploadPromises.push(
           StorageService.uploadVehicleDocument(car.id, 'camara_comercio', data.camara_comercio)
         );
@@ -231,14 +237,15 @@ export class DriversService {
 
       // Actualizar vehículo con URLs de documentos
       await CarsService.updateCar(car.id, {
-        card_prop_image: uploadResults[0].url!,
-        soat_image: uploadResults[1].url!,
+        car_image_1: uploadResults[0].url!,
+        car_image_2: uploadResults[1].url!,
+        card_prop_image: uploadResults[2].url!,
+        card_prop_image_back: uploadResults[3].url!,
+        soat_image: uploadResults[4].url!,
         soat_expiry_date: data.soat_expiry_date,
-        tecnomecanica_image: data.tecnomecanica ? uploadResults[2].url! : null,
+        tecnomecanica_image: tecnoIndex !== -1 ? uploadResults[tecnoIndex].url! : null,
         tecnomecanica_expiry_date: data.tecnomecanica_expiry_date || null,
-        camara_comercio_image: data.camara_comercio
-          ? uploadResults[data.tecnomecanica ? 3 : 2].url!
-          : null,
+        camara_comercio_image: camaraIndex !== -1 ? uploadResults[camaraIndex].url! : null,
       });
 
       return { carId: car.id };
@@ -273,7 +280,7 @@ export class DriversService {
       // Guardar datos de empresa en features del vehículo
       await CarsService.updateCar(cars[0].id, {
         features: {
-          ...((cars[0].features as Record<string, any>) || {}),
+          ...(((cars[0] as any).features as Record<string, any>) || {}),
           companyData: data.companyData,
         } as any,
       });
@@ -317,7 +324,10 @@ export class DriversService {
       const { carId } = await this.registerStep3(userId, {
         serviceType: data.serviceType,
         vehicle: data.vehicle,
+        car_image_1: data.car_image_1,
+        car_image_2: data.car_image_2,
         tarjeta_propiedad: data.tarjeta_propiedad,
+        tarjeta_propiedad_back: data.tarjeta_propiedad_back,
         soat: data.soat,
         soat_expiry_date: data.soat_expiry_date,
         tecnomecanica: data.tecnomecanica,
@@ -363,8 +373,8 @@ export class DriversService {
 
       // Extraer companyData de features si existe
       let companyData: CompanyData | undefined;
-      if (activeVehicle && activeVehicle.features) {
-        const features = activeVehicle.features as Record<string, any>;
+      if (activeVehicle && (activeVehicle as any).features) {
+        const features = (activeVehicle as any).features as Record<string, any>;
         companyData = features.companyData as CompanyData | undefined;
       }
 
@@ -397,8 +407,8 @@ export class DriversService {
           const activeVehicle = vehicles && vehicles.length > 0 ? vehicles[0] : undefined;
 
           let companyData: CompanyData | undefined;
-          if (activeVehicle && activeVehicle.features) {
-            const features = activeVehicle.features as Record<string, any>;
+          if (activeVehicle && (activeVehicle as any).features) {
+            const features = (activeVehicle as any).features as Record<string, any>;
             companyData = features.companyData as CompanyData | undefined;
           }
 

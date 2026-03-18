@@ -35,9 +35,6 @@ export interface Database {
           license_number: string | null;
           license_image: string | null;
           license_image_back: string | null;
-          soat_image: string | null;
-          card_prop_image: string | null;
-          card_prop_image_bk: string | null;
           verify_id_image: string | null;
           verify_id_image_bk: string | null;
           push_token: string | null;
@@ -67,9 +64,6 @@ export interface Database {
           license_number?: string | null;
           license_image?: string | null;
           license_image_back?: string | null;
-          soat_image?: string | null;
-          card_prop_image?: string | null;
-          card_prop_image_bk?: string | null;
           verify_id_image?: string | null;
           verify_id_image_bk?: string | null;
           push_token?: string | null;
@@ -99,9 +93,6 @@ export interface Database {
           license_number?: string | null;
           license_image?: string | null;
           license_image_back?: string | null;
-          soat_image?: string | null;
-          card_prop_image?: string | null;
-          card_prop_image_bk?: string | null;
           verify_id_image?: string | null;
           verify_id_image_bk?: string | null;
           push_token?: string | null;
@@ -116,22 +107,18 @@ export interface Database {
           driver_id: string | null;
           make: string;
           model: string;
-          year: number | null;
           color: string | null;
           plate: string;
-          car_image: string | null;
-          vehicle_number: string | null;
-          vehicle_model: string | null;
-          vehicle_make: string | null;
-          vehicle_color: string | null;
-          fuel_type: string;
-          transmission: string;
           capacity: number;
-          is_active: boolean;
+          fuel_type: string | null;
+          transmission: string | null;
           features: Json | null;
+          is_active: boolean;
           created_at: string;
           updated_at: string;
-          // Campos de documentos
+          // Documentos
+          car_image_1: string | null;
+          car_image_2: string | null;
           soat_image: string | null;
           soat_expiry_date: string | null;
           card_prop_image: string | null;
@@ -146,22 +133,18 @@ export interface Database {
           driver_id?: string | null;
           make: string;
           model: string;
-          year?: number | null;
           color?: string | null;
           plate: string;
-          car_image?: string | null;
-          vehicle_number?: string | null;
-          vehicle_model?: string | null;
-          vehicle_make?: string | null;
-          vehicle_color?: string | null;
-          fuel_type?: string;
-          transmission?: string;
           capacity?: number;
-          is_active?: boolean;
+          fuel_type?: string | null;
+          transmission?: string | null;
           features?: Json | null;
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
-          // Campos de documentos
+          // Documentos
+          car_image_1?: string | null;
+          car_image_2?: string | null;
           soat_image?: string | null;
           soat_expiry_date?: string | null;
           card_prop_image?: string | null;
@@ -176,22 +159,18 @@ export interface Database {
           driver_id?: string | null;
           make?: string;
           model?: string;
-          year?: number | null;
           color?: string | null;
           plate?: string;
-          car_image?: string | null;
-          vehicle_number?: string | null;
-          vehicle_model?: string | null;
-          vehicle_make?: string | null;
-          vehicle_color?: string | null;
-          fuel_type?: string;
-          transmission?: string;
           capacity?: number;
-          is_active?: boolean;
+          fuel_type?: string | null;
+          transmission?: string | null;
           features?: Json | null;
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
-          // Campos de documentos agregados
+          // Documentos
+          car_image_1?: string | null;
+          car_image_2?: string | null;
           soat_image?: string | null;
           soat_expiry_date?: string | null;
           card_prop_image?: string | null;
@@ -418,7 +397,16 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      check_user_availability: {
+        Args: {
+          p_email?: string;
+          p_mobile?: string;
+        };
+        Returns: {
+          email_exists: boolean;
+          mobile_exists: boolean;
+        };
+      };
     };
     Enums: {
       [_ in never]: never;
@@ -454,7 +442,7 @@ export type BookingStatus =
   | 'COMPLETE'
   | 'CANCELLED';
 export type PaymentMode = 'cash' | 'wallet' | 'card';
-export type FuelType = 'gasolina' | 'diesel' | 'electrico' | 'hibrido';
+export type FuelType = 'gasolina' | 'diesel' | 'electrico' | 'hibrido' | 'gas';
 export type TransmissionType = 'manual' | 'automatico';
 export type WalletTransactionType = 'credit' | 'debit';
 
@@ -576,14 +564,16 @@ export interface DriverRegistrationStep3 {
   vehicle: {
     make: string;
     model: string;
-    year: number;
     color: string;
     plate: string;
+    capacity: number;
     fuel_type: FuelType;
     transmission: TransmissionType;
-    capacity: number;
   };
+  car_image_1: File;
+  car_image_2: File;
   tarjeta_propiedad: File;
+  tarjeta_propiedad_back: File;
   soat: File;
   soat_expiry_date: string;
   tecnomecanica?: File;

@@ -13,7 +13,8 @@ const STORAGE_CONSTANTS = {
   BUCKETS: {
     DRIVER_DOCUMENTS: 'driver-documents',
     VEHICLE_DOCUMENTS: 'vehicle-documents',
-    VEHICLE_IMAGES: 'vehicle-images',
+    VEHICLE_IMAGES: 'public-site-assets',
+    CAR_IMAGES: 'car-images',
   },
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/jpg', 'image/png'],
@@ -156,11 +157,12 @@ export class StorageService {
   /**
    * Sube imagen de vehículo
    */
-  static async uploadVehicleImage(carId: string, file: File): Promise<UploadResult> {
+  static async uploadVehicleImage(carId: string, imageType: string, file: File): Promise<UploadResult> {
     return this.uploadFile({
-      bucket: STORAGE_CONSTANTS.BUCKETS.VEHICLE_IMAGES,
+      bucket: STORAGE_CONSTANTS.BUCKETS.CAR_IMAGES,
       folder: carId,
       file,
+      filename: `${imageType}_${this.generateUniqueFilename(file.name)}`,
       allowedTypes: STORAGE_CONSTANTS.ALLOWED_IMAGE_TYPES,
     });
   }

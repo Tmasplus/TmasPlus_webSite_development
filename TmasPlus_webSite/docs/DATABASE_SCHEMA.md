@@ -71,7 +71,6 @@ Tabla de vehículos.
   driver_id: string | null;        // FK → users.id
   make: string;                   // Marca
   model: string;                  // Modelo
-  year: number | null;            // Año
   color: string | null;           // Color
   plate: string;                  // Placa (única)
   car_image: string | null;       // URL imagen principal
@@ -232,7 +231,7 @@ Las políticas RLS deben configurarse en Supabase:
 - Documentos de vehículos
 - Estructura: `{car_id}/{document_type}_{filename}`
 
-### `vehicle-images`
+### `public-site-assets`
 - Imágenes de vehículos
 - Estructura: `{car_id}/{filename}`
 

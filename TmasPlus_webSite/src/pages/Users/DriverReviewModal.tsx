@@ -47,7 +47,15 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
         <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
             <span className="text-sm font-medium text-slate-700">{label}</span>
             {secureUrl ? (
-                <a href={secureUrl} target="_blank" rel="noreferrer" className="text-sm text-sky-600 hover:text-sky-800 font-semibold">
+                <a 
+                    href={secureUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-sm text-sky-600 hover:text-sky-800 font-semibold"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                    }}
+                >
                     Ver Documento ↗
                 </a>
             ) : (
@@ -107,7 +115,10 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     make: editForm.vehicle.make,
                     model: editForm.vehicle.model,
                     plate: editForm.vehicle.plate,
-                    color: editForm.vehicle.color
+                    color: editForm.vehicle.color,
+                    fuel_type: editForm.vehicle.fuel_type,
+                    transmission: editForm.vehicle.transmission,
+                    capacity: editForm.vehicle.capacity
                 }).eq('id', driver.vehicle.id);
                 if (carError) throw carError;
             }
@@ -207,19 +218,50 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         <span className="font-semibold text-slate-500 block">Placa:</span>
                                         {isEditing ? <input className="border p-1 rounded w-full mt-1 uppercase" value={editForm.vehicle?.plate || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, plate: e.target.value.toUpperCase() } : { plate: e.target.value.toUpperCase() } as any })} /> : <p className="uppercase font-bold">{driver.vehicle.plate}</p>}
                                     </div>
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Combustible:</span>
+                                        {isEditing ? (
+                                            <select className="border p-1 rounded w-full mt-1" value={editForm.vehicle?.fuel_type || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, fuel_type: e.target.value as any } : { fuel_type: e.target.value as any } as any })}>
+                                                <option value="">Seleccionar</option>
+                                                <option value="gasolina">Gasolina</option>
+                                                <option value="diesel">Diesel</option>
+                                                <option value="gas">Gas (GNV)</option>
+                                                <option value="electrico">Eléctrico</option>
+                                                <option value="hibrido">Híbrido</option>
+                                            </select>
+                                        ) : <p className="capitalize">{driver.vehicle.fuel_type}</p>}
+                                    </div>
+
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Transmisión:</span>
+                                        {isEditing ? (
+                                            <select className="border p-1 rounded w-full mt-1" value={editForm.vehicle?.transmission || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, transmission: e.target.value as any } : { transmission: e.target.value as any } as any })}>
+                                                <option value="">Seleccionar</option>
+                                                <option value="manual">Manual</option>
+                                                <option value="automatico">Automática</option>
+                                            </select>
+                                        ) : <p className="capitalize">{driver.vehicle.transmission}</p>}
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
 
                     <div>
+                        <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Inspección de Vehículo</h3>
+                        <div className="space-y-3 mb-6">
+                            <SecureDocumentLink label="Foto Vehículo (Exterior)" url={driver.vehicle?.car_image_1} />
+                            <SecureDocumentLink label="Foto Vehículo (Interior)" url={driver.vehicle?.car_image_2} />
+                        </div>
+
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Documentos de Verificación</h3>
                         <div className="space-y-3">
                             <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} />
                             <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} />
                             <SecureDocumentLink label="Licencia (Frente)" url={driver.license_image} />
                             <SecureDocumentLink label="Licencia (Reverso)" url={driver.license_image_back} />
-                            <SecureDocumentLink label="Tarjeta de Propiedad" url={driver.vehicle?.card_prop_image} />
+                            <SecureDocumentLink label="Tarjeta de Propiedad (Frente)" url={driver.vehicle?.card_prop_image} />
+                            <SecureDocumentLink label="Tarjeta de Propiedad (Reverso)" url={driver.vehicle?.card_prop_image_back} />
                             <SecureDocumentLink label="SOAT" url={driver.vehicle?.soat_image} />
                             {driver.vehicle?.tecnomecanica_image && (
                                 <SecureDocumentLink label="Tecnomecánica" url={driver.vehicle.tecnomecanica_image} />

@@ -63,7 +63,7 @@ serve(async (req: Request) => {
 
             <td style="background-color: #002f45; padding: 30px; text-align: center; font-size: 0;">
 
-              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/vehicle-images/assets/icono_tmasplus.jpeg" alt="Logo TmasPlus" style="height: 50px; vertical-align: middle; margin-right: 15px; display: inline-block;">
+              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/public-site-assets/assets/icono_tmasplus.jpeg" alt="Logo TmasPlus" style="height: 50px; vertical-align: middle; margin-right: 15px; display: inline-block;">
 
               <h1 style="color: #ffffff; margin: 0; font-size: 24px; vertical-align: middle; display: inline-block;">¡Felicidades, ${nombreConductor}!</h1>
 
@@ -129,7 +129,7 @@ serve(async (req: Request) => {
 
             <td style="padding: 0;">
 
-              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/vehicle-images/assets/img_tmasplus1.jpeg" alt="Justo para ti... Justo para todos" style="width: 100%; height: auto; display: block;">
+              <img src="https://utofhxgzkdhljrixperh.supabase.co/storage/v1/object/public/public-site-assets/assets/img_tmasplus1.jpeg" alt="Justo para ti... Justo para todos" style="width: 100%; height: auto; display: block;">
 
             </td>
 
