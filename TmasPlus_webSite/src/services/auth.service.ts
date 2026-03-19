@@ -67,16 +67,21 @@ export class AuthService {
         );
       }
 
-      if (profile.user_type !== 'admin') {
+      // 1. Validar si es un conductor que necesita terminar su registro
+      const isUnapprovedDriver = profile.user_type === 'driver' && profile.approved === false;
+
+      // 2. Bloquear si NO es admin Y TAMPOCO es un conductor incompleto
+      if (profile.user_type !== 'admin' && !isUnapprovedDriver) {
         await supabase.auth.signOut();
         throw ErrorHandler.createError(
           AppErrorType.AUTHORIZATION,
-          'Acceso denegado. Solo administradores.',
+          'Acceso denegado. Los conductores activos deben usar la App Móvil.',
           `User type: ${profile.user_type}`
         );
       }
 
-      if (!profile.approved) {
+      // Bloquear administradores no aprobados
+      if (profile.user_type === 'admin' && !profile.approved) {
         await supabase.auth.signOut();
         throw ErrorHandler.createError(
           AppErrorType.AUTHORIZATION,
