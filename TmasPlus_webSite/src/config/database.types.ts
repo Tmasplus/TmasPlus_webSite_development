@@ -407,6 +407,38 @@ export interface Database {
           mobile_exists: boolean;
         };
       };
+      get_auth_profile: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          id: string;
+          auth_id: string | null;
+          email: string;
+          first_name: string;
+          last_name: string;
+          mobile: string | null;
+          user_type: string;
+          wallet_balance: number;
+          location: Json | null;
+          profile_image: string | null;
+          rating: number;
+          total_rides: number;
+          is_verified: boolean;
+          approved: boolean;
+          blocked: boolean;
+          referral_id: string | null;
+          city: string | null;
+          driver_active_status: boolean;
+          license_number: string | null;
+          license_image: string | null;
+          license_image_back: string | null;
+          verify_id_image: string | null;
+          verify_id_image_bk: string | null;
+          push_token: string | null;
+          user_platform: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+      };
     };
     Enums: {
       [_ in never]: never;
