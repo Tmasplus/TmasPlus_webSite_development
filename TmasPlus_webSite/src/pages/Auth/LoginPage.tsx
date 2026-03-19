@@ -7,22 +7,34 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from '@/utils/toast';
 import logo from '@/assets/Logo-v3.png';
 import { ForgotPasswordModal } from '@/pages/Auth/ForgotPasswordModal';
+import { supabase } from '@/config/supabase';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { login, isAuthenticated, isLoading: authLoading, profile } = useAuth();
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [openForgot, setOpenForgot] = useState(false);
 
-  // Redireccionar si ya está autenticado
+  // Redireccionamiento inteligente basado en el perfil del usuario
   useEffect(() => {
-    if (isAuthenticated && !authLoading) {
-      navigate('/home', { replace: true });
+    if (isAuthenticated && !authLoading && profile) {
+      if (profile.user_type === 'admin') {
+        // Si es admin, va al panel de control
+        navigate('/home', { replace: true });
+      } else if (profile.user_type === 'driver' && !profile.approved) {
+        // Si es conductor y no está aprobado, lo mandamos a reanudar su registro (Paso 2)
+        toast.info('¡Bienvenido de vuelta! Continuemos con tu registro.');
+        navigate('/register-driver', { replace: true });
+      } else {
+        // Si es un conductor ya aprobado, el panel web no es para él
+        toast.success('Cuenta activa. Por favor, ingresa desde la App Móvil de Conductores.');
+        supabase.auth.signOut(); // Cerramos la sesión web por seguridad
+      }
     }
-  }, [isAuthenticated, authLoading, navigate]);
+  }, [isAuthenticated, authLoading, profile, navigate]);
 
   const update = (k: keyof typeof form, v: string) =>
     setForm((s) => ({ ...s, [k]: v }));
@@ -143,9 +155,9 @@ export const LoginPage: React.FC = () => {
               <span className="text-slate-700">Recordarme</span>
             </label>
             <div className="flex justify-end mt-1">
-              <button 
-                type="button" 
-                onClick={() => setOpenForgot(true)} 
+              <button
+                type="button"
+                onClick={() => setOpenForgot(true)}
                 className="text-xs font-semibold text-sky-600 hover:text-sky-800"
               >
                 ¿Olvidaste tu contraseña?
