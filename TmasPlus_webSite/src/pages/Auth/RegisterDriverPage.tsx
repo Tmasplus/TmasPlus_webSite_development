@@ -11,6 +11,7 @@ import { DriversService } from '@/services/drivers.service';
 import { UsersService } from '@/services/users.service';
 import { toast } from '@/utils/toast';
 import logo from '@/assets/Logo-v3.png';
+import { useAuth } from '@/hooks/useAuth';
 import type {
     DriverRegistrationStep1,
     DriverRegistrationStep2,
@@ -56,6 +57,31 @@ export const RegisterDriverPage: React.FC = () => {
     const [step2, setStep2] = useState<Step2Data>({});
     const [step3, setStep3] = useState<Step3Data>({});
     const [step4, setStep4] = useState<CompanyData>({});
+
+    const { isAuthenticated, profile } = useAuth(); // Extraemos la sesión actual
+
+    // LA MAGIA: Interceptar conductores a medias
+    useEffect(() => {
+        // Si el usuario ya está logueado, es un conductor y NO está aprobado...
+        if (isAuthenticated && profile && profile.user_type === 'driver' && !profile.approved) {
+            
+            // 1. Rellenamos el estado del Paso 1 con los datos que ya tenemos en la BD
+            setStep1(prev => ({
+                ...prev,
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+                mobile: profile.mobile ?? undefined,
+                city: profile.city ?? undefined,
+                referral_code: profile.referral_id ?? undefined
+            }));
+
+            // 2. Forzamos el salto automático al Paso 2 (Documentos)
+            setCurrentStep(2);
+            
+            toast.info('Hemos recuperado tu progreso. Por favor, sube tus documentos.');
+        }
+    }, [isAuthenticated, profile]);
 
     const showStep4 = needsStep4(step3);
     const visibleSteps = showStep4 ? ALL_STEPS : ALL_STEPS.filter((s) => s.number !== 4);

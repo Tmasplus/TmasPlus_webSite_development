@@ -30,8 +30,9 @@ export class AuthService {
    */
   static async loginAdmin(credentials: LoginCredentials): Promise<AuthResponse> {
     try {
+      // 1. Autenticación inicial con GoTrue
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: credentials.email,
+        email: credentials.email.trim(),
         password: credentials.password,
       });
 
@@ -47,67 +48,52 @@ export class AuthService {
         );
       }
 
-      const { data: profile, error: profileError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('auth_id', authData.user.id)
-        .single();
+      // 2. Llamada al "Portero" (RPC Seguro) para obtener el perfil saltando el RLS
+      const { data: profileData, error: profileError } = await supabase.rpc('get_auth_profile');
 
-      if (profileError) {
-        await supabase.auth.signOut();
-        throw ErrorHandler.handleDatabaseError(profileError);
-      }
-
-      if (!profile) {
+      if (profileError || !profileData) {
         await supabase.auth.signOut();
         throw ErrorHandler.createError(
-          AppErrorType.DATABASE,
-          'No se encontró el perfil de usuario.',
-          `Profile not found for auth_id: ${authData.user.id}`
+          AppErrorType.NOT_FOUND,
+          'Perfil no encontrado o incompleto. Verifica tu registro.'
         );
       }
 
-      // 1. Validar si es un conductor que necesita terminar su registro
-      const isUnapprovedDriver = profile.user_type === 'driver' && profile.approved === false;
+      const profile = profileData as UserRow;
 
-      // 2. Bloquear si NO es admin Y TAMPOCO es un conductor incompleto
-      if (profile.user_type !== 'admin' && !isUnapprovedDriver) {
-        await supabase.auth.signOut();
-        throw ErrorHandler.createError(
-          AppErrorType.AUTHORIZATION,
-          'Acceso denegado. Los conductores activos deben usar la App Móvil.',
-          `User type: ${profile.user_type}`
-        );
-      }
+      // 3. Reglas de Acceso (La lógica que solicitaste)
+      const isAdmin = profile.user_type === 'admin';
+      const isUnapprovedDriver = profile.user_type === 'driver' && profile.approved !== true;
 
-      // Bloquear administradores no aprobados
-      if (profile.user_type === 'admin' && !profile.approved) {
-        await supabase.auth.signOut();
-        throw ErrorHandler.createError(
-          AppErrorType.AUTHORIZATION,
-          'Tu cuenta no ha sido aprobada.',
-          `Admin not approved: ${profile.id}`
-        );
-      }
-
+      // Si está bloqueado por el sistema
       if (profile.blocked) {
         await supabase.auth.signOut();
+        throw ErrorHandler.createError(AppErrorType.AUTHORIZATION, 'Esta cuenta ha sido suspendida.');
+      }
+
+      // Si NO es admin Y NO es un conductor pendiente de registro, SE BLOQUEA.
+      if (!isAdmin && !isUnapprovedDriver) {
+        await supabase.auth.signOut();
         throw ErrorHandler.createError(
           AppErrorType.AUTHORIZATION,
-          'Tu cuenta está bloqueada.',
-          `Admin blocked: ${profile.id}`
+          'Acceso denegado. Tu cuenta ya está activa, ingresa por la App Móvil.'
         );
       }
 
       toast.success(ToastMessages.LOGIN_SUCCESS);
 
+      // 4. Si pasa las pruebas, el login es exitoso
       return {
         user: authData.user,
         session: authData.session,
         profile,
       };
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Acceso denegado')) {
+      if (error instanceof Error && (
+        error.message.includes('Acceso denegado') ||
+        error.message.includes('suspendida') ||
+        error.message.includes('Perfil no encontrado')
+      )) {
         throw error;
       }
       throw ErrorHandler.handleWithToast(error, 'AuthService.loginAdmin');
@@ -180,23 +166,18 @@ export class AuthService {
    */
   static async getCurrentProfile(): Promise<UserRow | null> {
     try {
-      const user = await this.getCurrentUser();
-      if (!user) return null;
+      // Verificamos silenciosamente si hay sesión sin lanzar errores que rompan React
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
 
-      const { data: profile, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('auth_id', user.id)
-        .single();
+      // Consumimos el "portero" globalmente
+      const { data: profileData, error } = await supabase.rpc('get_auth_profile');
 
-      if (error) {
-        console.error('Error getting profile:', error.message);
-        return null;
-      }
-
-      return profile;
+      if (error || !profileData) return null;
+      
+      return profileData as UserRow;
     } catch (error) {
-      console.error('Unexpected error getting profile:', error);
+      console.error("Error obteniendo perfil:", error);
       return null;
     }
   }

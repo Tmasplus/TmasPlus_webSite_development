@@ -48,12 +48,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isAuthenticated = !!(session && user && profile);
       const isAdmin = profile?.user_type === 'admin' && profile?.approved && !profile?.blocked;
 
-      // 🚨 EXCEPCIÓN ESTRATÉGICA: Permitir mini-sesión solo en la ruta de registro
+      // 🚨 EXCEPCIÓN ESTRATÉGICA: Permitir mini-sesión en la ruta de registro O si es conductor a medias
       const isRegisteringDriver = window.location.pathname.includes('/register-driver');
+      const isUnapprovedDriver = profile?.user_type === 'driver' && profile?.approved !== true;
 
       if (isAuthenticated && !isAdmin) {
-        if (isRegisteringDriver) {
-          // Permitir sesión temporal para que termine de subir documentos
+        if (isRegisteringDriver || isUnapprovedDriver) {
+          // Permitir sesión temporal para que termine de subir documentos o sea redirigido
           updateAuthState({ user, session, profile, isAuthenticated: true, isLoading: false });
           return true;
         } else {
