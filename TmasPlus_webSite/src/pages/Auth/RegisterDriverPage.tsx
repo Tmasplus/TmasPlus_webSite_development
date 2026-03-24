@@ -85,7 +85,6 @@ export const RegisterDriverPage: React.FC = () => {
 
     const showStep4 = needsStep4(step3);
     const visibleSteps = showStep4 ? ALL_STEPS : ALL_STEPS.filter((s) => s.number !== 4);
-    const totalSteps = visibleSteps.length;
 
     const goNext = () => setCurrentStep((s) => s + 1);
     const goBack = () => setCurrentStep((s) => s - 1);
