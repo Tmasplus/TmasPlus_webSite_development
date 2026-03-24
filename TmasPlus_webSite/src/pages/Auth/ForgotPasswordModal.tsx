@@ -20,7 +20,7 @@ export const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         setLoading(true);
         try {
             // Esta es la función mágica de Supabase
-            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
                 redirectTo: `${window.location.origin}/update-password`,
             });
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,34 @@ export const UpdatePasswordPage: React.FC = () => {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+
+    useEffect(() => {
+      // 1. Atrapamos el código temporal de la URL
+      const queryParams = new URLSearchParams(window.location.search);
+      const code = queryParams.get('code');
+
+      if (code) {
+        // 2. Intercambiamos el código por una sesión real
+        supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+          if (error) {
+            toast.error('El enlace es inválido o ha expirado. Solicita uno nuevo.');
+            navigate('/login');
+          } else {
+            // 3. Limpiamos la URL para que no se vea el código feo y largo
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        });
+      }
+
+      // Por si Supabase usa el flujo antiguo basado en Hash (#)
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          // La sesión de recuperación se estableció exitosamente
+        }
+      });
+
+      return () => subscription.unsubscribe();
+    }, [navigate]);
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault();
