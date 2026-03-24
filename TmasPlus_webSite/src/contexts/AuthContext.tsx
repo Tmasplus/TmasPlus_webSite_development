@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     checkAuth();
-    const unsubscribe = AuthService.onAuthStateChange(async (event, session) => {
+    const unsubscribe = AuthService.onAuthStateChange(async (event) => {
       if (event === 'SIGNED_OUT') {
         updateAuthState({ ...initialState, isLoading: false });
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
