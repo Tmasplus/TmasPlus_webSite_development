@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import type { DriverRegistrationStep1 } from '@/config/database.types';
-import { referralsService } from '@/services/referrals.service'; 
-import { supabase } from '@/config/supabase'; // Añadido para consumir el RPC seguro
+import { referralsService } from '@/services/referrals.service';
+import { supabase } from '@/config/supabase';
 
 interface Step1Props {
     data: Partial<DriverRegistrationStep1> & { confirmPassword?: string };
@@ -45,21 +45,16 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
         if (errors[key]) setErrors((e) => ({ ...e, [key]: '' }));
     };
 
-    // ==================== LÓGICA DE VALIDACIÓN ESTRICTA ====================
-
     const validateEmailStrict = (email: string) => {
         if (!email) return 'El email es requerido';
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Formato inválido (ej: usuario@correo.com)';
-        
         const domain = email.split('@')[1]?.toLowerCase();
         if (DISPOSABLE_DOMAINS.includes(domain)) return 'No se permiten correos temporales';
-        
         return null;
     };
 
     const validateMobileStrict = (mobile: string, prefix: string) => {
         if (!mobile) return 'El teléfono es requerido';
-        
         if (prefix === '+57') {
             if (!mobile.startsWith('3')) return 'Debe iniciar con 3';
             if (mobile.length !== 10) return `Debe tener 10 dígitos (tiene ${mobile.length})`;
@@ -69,22 +64,17 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
         return null;
     };
 
-    // ==================== HANDLERS EN TIEMPO REAL (ON BLUR) ====================
-
     const handleEmailBlur = async () => {
         const emailErr = validateEmailStrict(data.email ?? '');
         if (emailErr) {
             setErrors(e => ({ ...e, email: emailErr }));
             return;
         }
-
         setValidating(v => ({ ...v, email: true }));
         try {
-            // Consumo del RPC seguro que ignora las reglas RLS
             const { data: result } = await supabase.rpc('check_user_availability', {
                 p_email: data.email!.trim().toLowerCase()
             });
-            
             if (result?.email_exists) {
                 setErrors(e => ({ ...e, email: 'Este correo ya está registrado' }));
             }
@@ -99,14 +89,11 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             setErrors(e => ({ ...e, mobile: mobErr }));
             return;
         }
-
         setValidating(v => ({ ...v, mobile: true }));
         try {
-            // Consumo del RPC seguro que ignora las reglas RLS
             const { data: result } = await supabase.rpc('check_user_availability', {
                 p_mobile: data.mobile!.trim()
             });
-
             if (result?.mobile_exists) {
                 setErrors(e => ({ ...e, mobile: 'Este número ya está registrado' }));
             }
@@ -118,44 +105,47 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
     const handleReferralBlur = async () => {
         if (!data.referral_code || data.referral_code.trim() === '') return;
         setValidating(v => ({ ...v, referral: true }));
-        
         const isValid = await referralsService.checkCodeValidity(data.referral_code);
-        
         if (!isValid) {
             setErrors(e => ({ ...e, referral_code: 'Código inválido o inactivo' }));
         }
-        // Eliminado el mensaje de éxito (verde)
         setValidating(v => ({ ...v, referral: false }));
     };
 
-    // ==================== VALIDACIÓN GLOBAL AL CONTINUAR ====================
-
     const validate = (): boolean => {
-        const newErrors: Record<string, string> = { ...errors }; 
-        
+        const newErrors: Record<string, string> = { ...errors };
         if (!data.first_name?.trim()) newErrors.first_name = 'El nombre es requerido';
         if (!data.last_name?.trim()) newErrors.last_name = 'El apellido es requerido';
-        
         const emailErr = validateEmailStrict(data.email ?? '');
         if (emailErr) newErrors.email = emailErr;
-
         const mobErr = validateMobileStrict(data.mobile ?? '', phonePrefix);
         if (mobErr) newErrors.mobile = mobErr;
-
         if (!data.password) newErrors.password = 'La contraseña es requerida';
         else if (data.password.length < 6) newErrors.password = 'Mínimo 6 caracteres';
-        
         if (!data.confirmPassword) newErrors.confirmPassword = 'Confirma tu contraseña';
         else if (data.password !== data.confirmPassword) newErrors.confirmPassword = 'Las contraseñas no coinciden';
-        
         if (!data.city) newErrors.city = 'Selecciona una ciudad';
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
 
+    // NUEVO: Interceptor inteligente de envío
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+
+        // Si el usuario da clic mientras se valida el onBlur, lo ignoramos un milisegundo en vez de desactivar el botón.
+        if (validating.email || validating.mobile || validating.referral) {
+            return;
+        }
+
+        if (validate()) {
+            onNext();
+        }
+    };
+
     return (
-        <div className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-4">
             <div>
                 <h2 className="text-lg font-semibold text-[#002f45]">Datos Personales</h2>
                 <p className="text-sm text-slate-500 mt-0.5">Información básica del conductor</p>
@@ -167,7 +157,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             </div>
 
             <div onBlur={handleEmailBlur}>
-                <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading || validating.email} required autoComplete="email" error={errors.email} />
+                <FloatingInput id="email" label="Correo electrónico" type="email" value={data.email ?? ''} onChange={(e) => update('email', e.target.value)} disabled={loading} required autoComplete="email" error={errors.email} helpText={validating.email ? "Verificando..." : ""} />
             </div>
 
             <div>
@@ -179,7 +169,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
                         <select
                             value={phonePrefix}
                             onChange={(e) => setPhonePrefix(e.target.value)}
-                            disabled={loading || validating.mobile}
+                            disabled={loading}
                             className={`w-full h-[46px] rounded-xl border px-2 text-sm outline-none transition bg-white text-slate-700 ${errors.mobile ? 'border-red-400 focus:ring-red-400' : 'border-slate-300 focus:ring-2 focus:ring-sky-400'}`}
                         >
                             {COUNTRY_CODES.map(c => (
@@ -188,19 +178,20 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
                         </select>
                     </div>
                     <div className="flex-1">
-                        <FloatingInput 
-                            id="mobile" 
-                            label="Número (sin prefijo)" 
-                            type="tel" 
-                            value={data.mobile ?? ''} 
+                        <FloatingInput
+                            id="mobile"
+                            label="Número (sin prefijo)"
+                            type="tel"
+                            value={data.mobile ?? ''}
                             onChange={(e) => {
                                 const val = e.target.value.replace(/\D/g, '');
                                 const finalVal = phonePrefix === '+57' ? val.slice(0, 10) : val.slice(0, 15);
                                 update('mobile', finalVal);
-                            }} 
-                            disabled={loading || validating.mobile} 
-                            required 
+                            }}
+                            disabled={loading}
+                            required
                             error={errors.mobile}
+                            helpText={validating.mobile ? "Verificando..." : ""}
                         />
                     </div>
                 </div>
@@ -215,10 +206,10 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                     Ciudad <span className="text-red-500">*</span>
                 </label>
-                <select 
-                    value={data.city ?? ''} 
-                    onChange={(e) => update('city', e.target.value)} 
-                    disabled={loading} 
+                <select
+                    value={data.city ?? ''}
+                    onChange={(e) => update('city', e.target.value)}
+                    disabled={loading}
                     className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition bg-white text-slate-700 ${errors.city ? 'border-red-400 focus:ring-red-400' : 'border-slate-300 focus:ring-2 focus:ring-sky-400'}`}
                 >
                     <option value="">Selecciona tu ciudad</option>
@@ -228,21 +219,25 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
             </div>
 
             <div onBlur={handleReferralBlur}>
-                <FloatingInput 
-                   id="referral_code" 
-                   label="Código de referido (opcional)" 
-                   value={data.referral_code ?? ''} 
-                   onChange={(e) => update('referral_code', e.target.value.toUpperCase())} 
-                   disabled={loading || validating.referral} 
-                   error={errors.referral_code}
-                   helpText={errors.referral_code ? "" : "Si un conductor te recomendó, ingresa su código aquí"}
+                <FloatingInput
+                    id="referral_code"
+                    label="Código de referido (opcional)"
+                    value={data.referral_code ?? ''}
+                    onChange={(e) => update('referral_code', e.target.value.toUpperCase())}
+                    disabled={loading}
+                    error={errors.referral_code}
+                    helpText={validating.referral ? "Verificando..." : (errors.referral_code ? "" : "Si un conductor te recomendó, ingresa su código aquí")}
                 />
             </div>
 
-            <button type="button" onClick={() => { if (validate()) onNext(); }} disabled={loading || validating.email || validating.mobile || validating.referral} className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50">
-                Continuar →
+            <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 px-4 bg-[#002f45] text-white rounded-xl font-semibold text-sm hover:bg-[#003d5a] transition-colors disabled:opacity-50"
+            >
+                {loading ? 'Procesando...' : 'Continuar →'}
             </button>
-        </div>
+        </form>
     );
 };
 

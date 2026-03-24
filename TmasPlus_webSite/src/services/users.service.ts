@@ -425,34 +425,33 @@ export class UsersService {
   }
 
   /**
-   * Verifica si un email ya está registrado
+   * Verifica si un email ya está registrado (Bypass RLS vía RPC)
    */
   static async emailExists(email: string): Promise<boolean> {
     try {
-      const user = await this.getUserByEmail(email);
-      return user !== null;
+      const { data, error } = await supabase.rpc('check_user_availability', { 
+        p_email: email.trim().toLowerCase() 
+      });
+
+      if (error) throw error;
+      return !!data?.email_exists;
     } catch (error) {
       console.error('Error checking email existence:', error);
-      return false;
+      return false; // Ante la duda, permitimos continuar para que el backend lo maneje
     }
   }
 
   /**
-   * Verifica si un teléfono ya está registrado
+   * Verifica si un teléfono ya está registrado (Bypass RLS vía RPC)
    */
   static async phoneExists(mobile: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id')
-        .eq('mobile', mobile)
-        .single();
+      const { data, error } = await supabase.rpc('check_user_availability', { 
+        p_mobile: mobile.trim() 
+      });
 
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-
-      return data !== null;
+      if (error) throw error;
+      return !!data?.mobile_exists;
     } catch (error) {
       console.error('Error checking phone existence:', error);
       return false;
