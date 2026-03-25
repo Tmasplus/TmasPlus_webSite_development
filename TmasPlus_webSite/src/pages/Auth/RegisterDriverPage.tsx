@@ -83,6 +83,32 @@ export const RegisterDriverPage: React.FC = () => {
         }
     }, [isAuthenticated, profile]);
 
+    // NUEVO: EL DISPARADOR SILENCIOSO DEL SEGUNDO CORREO (INSTRUCCIONES / RESCATE)
+    useEffect(() => {
+        // Si el usuario acaba de iniciar sesión, es un conductor y aún no está aprobado (Paso 2, 3 o 4)
+        if (isAuthenticated && profile && profile.user_type === 'driver' && !profile.approved) {
+            
+            // Usamos localStorage para asegurar que este correo se envíe UNA SOLA VEZ por dispositivo
+            const rescueEmailFlag = `rescue_email_sent_${profile.email}`;
+            const hasBeenSent = localStorage.getItem(rescueEmailFlag);
+
+            if (!hasBeenSent) {
+                localStorage.setItem(rescueEmailFlag, 'true'); // Lo marcamos como enviado
+                
+                // Disparamos el envío del "Magic Link" silenciosamente de fondo
+                supabase.auth.signInWithOtp({
+                    email: profile.email,
+                    options: {
+                        // Asegura que el botón del correo lo regrese a esta página
+                        emailRedirectTo: `${window.location.origin}/register-driver`
+                    }
+                }).then(({ error }) => {
+                    if (error) console.error("Error enviando correo de rescate:", error);
+                });
+            }
+        }
+    }, [isAuthenticated, profile]);
+
     const showStep4 = needsStep4(step3);
     const visibleSteps = showStep4 ? ALL_STEPS : ALL_STEPS.filter((s) => s.number !== 4);
 
