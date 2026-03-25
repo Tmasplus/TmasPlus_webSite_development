@@ -220,7 +220,7 @@ export const RegisterDriverPage: React.FC = () => {
         } catch (error) {
             console.error('Final Registration error:', error);
         } finally {
-            setLoading(false);
+            setLoading(false); // ESTO APAGA LA RULETA SIN IMPORTAR QUÉ PASE
         }
     };
 
