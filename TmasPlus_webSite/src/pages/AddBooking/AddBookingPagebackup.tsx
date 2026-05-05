@@ -1,15 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { motion } from "framer-motion";
-import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/MapboxAddressPicker";
-import { CarTypesService } from "@/services/carTypes.service";
-import type { CarTypeRow } from "@/config/database.types";
 
 export default function AddBookingPage() {
-  const [originLoc, setOriginLoc] = useState<Location | null>(null);
-  const [destLoc, setDestLoc] = useState<Location | null>(null);
-  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);  
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
   const [tripType, setTripType] = useState("Solo ida");
   const [vehicleType, setVehicleType] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Efectivo");
@@ -21,27 +17,11 @@ export default function AddBookingPage() {
   const [observations, setObservations] = useState("");
   const [success, setSuccess] = useState(false);
 
-  // Categories from DB
-  const [categories, setCategories] = useState<CarTypeRow[]>([]);
-
-  useEffect(() => {
-    CarTypesService.getActive().then(setCategories).catch(() => {});
-  }, []);
-
-  const origin = originLoc?.title || "";
-  const destination = destLoc?.title || "";
-
-  const handleOriginChange = useCallback((loc: Location | null) => {
-    setOriginLoc(loc);
-  }, []);
-
-  const handleDestinationChange = useCallback((loc: Location | null) => {
-    setDestLoc(loc);
-  }, []);
-
-  const handleRouteInfo = useCallback((info: RouteInfo | null) => {
-    setRouteInfo(info);
-  }, []);
+  const vehicles = [
+    { id: "car", name: "Estandar", base: 10000 },
+    { id: "premium", name: "Premium", base: 18000 },
+    { id: "van", name: "Van", base: 25000 },
+  ];
 
   const handleCalculate = () => {
     if (!origin || !destination || !vehicleType) {
@@ -49,37 +29,12 @@ export default function AddBookingPage() {
       return;
     }
 
-    const cat = categories.find((c) => c.id === vehicleType);
-    if (!cat) return;
+    const baseFare = vehicles.find((v) => v.id === vehicleType)?.base || 0;
+    let total = baseFare + (tripType === "Ida y regreso" ? baseFare * 0.8 : 0);
+    total += isScheduled ? 3000 : 0;
+    total += hours * 1500;
 
-    const distKm = routeInfo?.distanceKm ?? 0;
-    const durationHrs = (routeInfo?.durationMin ?? 0) / 60;
-
-    // Base fare + distance + time
-    let total = cat.base_price + cat.price_per_km * distKm + cat.rate_per_hour * durationHrs;
-
-    // Round trip surcharge (valor_hora * estimated wait hours)
-    if (tripType === "Ida y regreso") {
-      total += total * 0.8 + cat.valor_hora * hours;
-    }
-
-    // Scheduled surcharge — delta_aeropuerto_prog
-    if (isScheduled) {
-      total += cat.delta_aeropuerto_prog;
-    }
-
-    // Enforce minimum fare
-    total = Math.max(total, cat.min_fare);
-
-    // Convenience fee
-    if (cat.convenience_fee > 0) {
-      total +=
-        cat.convenience_fee_type === "percentage"
-          ? total * (cat.convenience_fee / 100)
-          : cat.convenience_fee;
-    }
-
-    setFare(Math.round(total));
+    setFare(total);
   };
 
   const handleSubmit = () => {
@@ -95,9 +50,8 @@ export default function AddBookingPage() {
   };
 
   const resetForm = () => {
-    setOriginLoc(null);
-    setDestLoc(null);
-    setRouteInfo(null);
+    setOrigin("");
+    setDestination("");
     setTripType("Solo ida");
     setVehicleType("");
     setPaymentMethod("Efectivo");
@@ -116,14 +70,33 @@ export default function AddBookingPage() {
       </h1>
 
       <Card className="p-6 space-y-6">
-        {/* ── Mapa con búsqueda de direcciones ── */}
-        <BookingMapView
-          origin={originLoc}
-          destination={destLoc}
-          onOriginChange={handleOriginChange}
-          onDestinationChange={handleDestinationChange}
-          onRouteInfo={handleRouteInfo}
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">
+              Dirección de origen
+            </label>
+            <input
+              type="text"
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+              placeholder="Ej: Calle 100 #15-30"
+              className="w-full p-2 border border-slate-300 rounded-lg"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">
+              Dirección de destino
+            </label>
+            <input
+              type="text"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              placeholder="Ej: Av. Boyacá #80-10"
+              className="w-full p-2 border border-slate-300 rounded-lg"
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
@@ -136,9 +109,9 @@ export default function AddBookingPage() {
               className="w-full p-2 border border-slate-300 rounded-lg"
             >
               <option value="">Seleccionar...</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
                 </option>
               ))}
             </select>

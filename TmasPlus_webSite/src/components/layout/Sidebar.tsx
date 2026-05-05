@@ -8,6 +8,7 @@ import { LuUserRound, LuUsersRound, LuCar } from "react-icons/lu";
 import { PiBuildingOfficeBold, PiReadCvLogoBold } from "react-icons/pi";
 import { TbCalendarPlus, TbCalendarStats, TbContract, TbExchange } from "react-icons/tb";
 import { RiSettings3Line } from "react-icons/ri";
+import { MdCardMembership } from "react-icons/md";
 import React from "react";
 
 type Subuser = {
@@ -234,6 +235,15 @@ export const Sidebar: React.FC<Props> = ({
               to="/contracts"
               icon={<TbContract />}
               label="Contratos"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/memberships"
+              icon={<MdCardMembership />}
+              label="Membresía"
               isOpen={open}
             />
           )}

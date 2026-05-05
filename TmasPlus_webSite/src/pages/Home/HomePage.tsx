@@ -1,21 +1,125 @@
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { classNames } from "@/utils/classNames";
-import { FaAndroid, FaApple } from "react-icons/fa";
+import { FaAndroid, FaApple, FaPen, FaTrash } from "react-icons/fa";
 import logo from "@/assets/Logo-v3.png";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { CreateCategoryModal } from "./CreateCategoryModal";
+import { CarTypesService } from "@/services/carTypes.service";
+import type { CarTypeRow } from "@/config/database.types";
 
 export default function HomePage() {
-    const [openCategory, setOpenCategory] = useState(false);
+  const [openCategory, setOpenCategory] = useState(false);
+  const [categories, setCategories] = useState<CarTypeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editItem, setEditItem] = useState<CarTypeRow | null>(null);
+
+  const fetchCategories = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await CarTypesService.getAll();
+      setCategories(data);
+    } catch (error) {
+      console.error('Error loading categories:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
+  function handleEdit(cat: CarTypeRow) {
+    setEditItem(cat);
+    setOpenCategory(true);
+  }
+
+  async function handleDelete(cat: CarTypeRow) {
+    if (!confirm(`¿Eliminar "${cat.name}"?`)) return;
+    await CarTypesService.remove(cat.id);
+    fetchCategories();
+  }
+
+  function handleCloseModal() {
+    setOpenCategory(false);
+    setEditItem(null);
+  }
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Tipos de servicios</h1>
-        <Button onClick={() => setOpenCategory(true)}>Crear nueva categoría</Button>
+        <Button onClick={() => { setEditItem(null); setOpenCategory(true); }}>
+          Crear nueva categoría
+        </Button>
       </div>
+
+      {/* Category grid */}
+      {loading ? (
+        <p className="text-slate-500 text-center py-12">Cargando categorías...</p>
+      ) : categories.length === 0 ? (
+        <p className="text-slate-400 text-center py-12">No hay categorías creadas aún.</p>
+      ) : (
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-10">
+          {categories.map((cat) => (
+            <motion.div
+              key={cat.id}
+              whileHover={{ y: -3 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+            >
+              {/* Image */}
+              <div className="h-36 bg-slate-100 flex items-center justify-center">
+                {cat.image ? (
+                  <img src={cat.image} alt={cat.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-slate-400 text-sm">Sin imagen</span>
+                )}
+              </div>
+
+              <div className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-slate-800 truncate">{cat.name}</h3>
+                  <span
+                    className={classNames(
+                      "text-xs px-2 py-0.5 rounded-full font-medium",
+                      cat.is_active
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-500"
+                    )}
+                  >
+                    {cat.is_active ? "Activa" : "Inactiva"}
+                  </span>
+                </div>
+
+                {cat.description && (
+                  <p className="text-xs text-slate-500 truncate">{cat.description}</p>
+                )}
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                  <span>Base: <b className="text-slate-700">${cat.base_price.toLocaleString()}</b></span>
+                  <span>Min Fare: <b className="text-slate-700">${cat.min_fare.toLocaleString()}</b></span>
+                  <span>Distancia: <b className="text-slate-700">${cat.price_per_km.toLocaleString()}</b></span>
+                  <span>Hora: <b className="text-slate-700">${cat.rate_per_hour.toLocaleString()}</b></span>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => handleEdit(cat)}
+                    className="flex-1 flex items-center justify-center gap-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg py-1.5 transition"
+                  >
+                    <FaPen className="text-xs" /> Editar
+                  </button>
+                  <button
+                    onClick={() => handleDelete(cat)}
+                    className="flex-1 flex items-center justify-center gap-1 text-sm text-red-600 hover:bg-red-50 rounded-lg py-1.5 transition"
+                  >
+                    <FaTrash className="text-xs" /> Eliminar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </section>
+      )}
 
       {/* Hero */}
       <section className="flex flex-col items-center text-center">
@@ -53,11 +157,9 @@ export default function HomePage() {
 
       <CreateCategoryModal
         open={openCategory}
-        onClose={() => setOpenCategory(false)}
-        onSubmit={(data) => {
-            console.log("Nueva categoría:", data);
-            setOpenCategory(false);
-        }}
+        onClose={handleCloseModal}
+        onSaved={fetchCategories}
+        editData={editItem}
       />
 
       {/* Footer */}

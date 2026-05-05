@@ -11,7 +11,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// ==================== CONFIGURACIÓN DEL CLIENTE ====================
+// ==================== CONFIGURACIÓN DEL CLIENTE PRINCIPAL ====================
 const supabaseConfig = {
   auth: {
     persistSession: true,
@@ -35,6 +35,42 @@ export const supabase: SupabaseClient<Database> = createClient<Database>(
   supabaseAnonKey,
   supabaseConfig
 );
+
+// ==================== CLIENTE SECUNDARIO (MEMBERSHIPS DB) ====================
+const supabaseSecondaryUrl = import.meta.env.VITE_SUPABASE_SECONDARY_URL;
+const supabaseSecondaryAnonKey = import.meta.env.VITE_SUPABASE_SECONDARY_ANON_KEY;
+
+if (!supabaseSecondaryUrl || !supabaseSecondaryAnonKey) {
+  console.warn(
+    '⚠️ WARNING: Supabase secondary credentials not found. Memberships feature will not work.'
+  );
+}
+
+// Separate config for secondary client with unique storage key to avoid conflicts
+const supabaseSecondaryConfig = {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: window.localStorage,
+    storageKey: 'tmasplus_dashboard_auth_secondary',
+  },
+  global: {
+    headers: {
+      'X-Client-Info': `TmasPlus-Dashboard@${import.meta.env.VITE_APP_VERSION || '1.0.0'}`,
+      'X-App-Platform': 'web-dashboard',
+      'X-App-Environment': import.meta.env.VITE_NODE_ENV || 'development',
+    },
+  },
+};
+
+export const supabaseSecondary: SupabaseClient = supabaseSecondaryUrl && supabaseSecondaryAnonKey
+  ? createClient(
+      supabaseSecondaryUrl,
+      supabaseSecondaryAnonKey,
+      supabaseSecondaryConfig
+    )
+  : null as any;
 
 // ==================== FUNCIONES DE UTILIDAD ====================
 

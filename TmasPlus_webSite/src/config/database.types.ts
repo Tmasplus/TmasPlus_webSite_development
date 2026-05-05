@@ -236,6 +236,77 @@ export interface Database {
           status?: string;
           reward_claimed?: boolean;
         };
+      };
+      car_types: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          base_price: number;
+          base_price_inter: number;
+          price_per_km: number;
+          price_per_km_inter: number;
+          rate_per_hour: number;
+          rate_per_hour_inter: number;
+          valor_hora: number;
+          min_fare: number;
+          min_fare_inter: number;
+          delta_aeropuerto: number;
+          delta_aeropuerto_prog: number;
+          convenience_fee: number;
+          convenience_fee_type: string;
+          image: string | null;
+          capacity: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          base_price?: number;
+          base_price_inter?: number;
+          price_per_km?: number;
+          price_per_km_inter?: number;
+          rate_per_hour?: number;
+          rate_per_hour_inter?: number;
+          valor_hora?: number;
+          min_fare?: number;
+          min_fare_inter?: number;
+          delta_aeropuerto?: number;
+          delta_aeropuerto_prog?: number;
+          convenience_fee?: number;
+          convenience_fee_type?: string;
+          image?: string | null;
+          capacity?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string | null;
+          base_price?: number;
+          base_price_inter?: number;
+          price_per_km?: number;
+          price_per_km_inter?: number;
+          rate_per_hour?: number;
+          rate_per_hour_inter?: number;
+          valor_hora?: number;
+          min_fare?: number;
+          min_fare_inter?: number;
+          delta_aeropuerto?: number;
+          delta_aeropuerto_prog?: number;
+          convenience_fee?: number;
+          convenience_fee_type?: string;
+          image?: string | null;
+          capacity?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
       };  
       bookings: {
         Row: {
@@ -392,6 +463,59 @@ export interface Database {
           created_at?: string;
         };
       };
+      complaints: {
+        Row: {
+          id: string;
+          user_id: string;
+          booking_id: string | null;
+          complaint_type: string;
+          subject: string;
+          body: string;
+          priority: string;
+          evidence_urls: Json;
+          status: string;
+          admin_response: string | null;
+          resolved_by: string | null;
+          resolved_at: string | null;
+          created_at: string;
+          updated_at: string;
+          user_type: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          booking_id?: string | null;
+          complaint_type: string;
+          subject: string;
+          body: string;
+          priority?: string;
+          evidence_urls?: Json;
+          status?: string;
+          admin_response?: string | null;
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          user_type: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          booking_id?: string | null;
+          complaint_type?: string;
+          subject?: string;
+          body?: string;
+          priority?: string;
+          evidence_urls?: Json;
+          status?: string;
+          admin_response?: string | null;
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          user_type?: string;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -462,6 +586,27 @@ export type BookingRow = Database['public']['Tables']['bookings']['Row'];
 export type NotificationRow = Database['public']['Tables']['notifications']['Row'];
 export type TrackingRow = Database['public']['Tables']['tracking']['Row'];
 export type WalletHistoryRow = Database['public']['Tables']['wallet_history']['Row'];
+
+export type ComplaintRow = Database['public']['Tables']['complaints']['Row'];
+export type ComplaintInsert = Database['public']['Tables']['complaints']['Insert'];
+export type ComplaintUpdate = Database['public']['Tables']['complaints']['Update'];
+
+// ==================== ENUMS DE QUEJAS ====================
+export type ComplaintType = 'queja' | 'reclamo' | 'sugerencia';
+export type ComplaintPriority = 'alta' | 'media' | 'baja';
+export type ComplaintStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
+
+export interface ComplaintFilters {
+  status?: ComplaintStatus | 'all';
+  priority?: ComplaintPriority | 'all';
+  complaint_type?: ComplaintType | 'all';
+  user_type?: 'driver' | 'customer' | 'all';
+  searchQuery?: string;
+}
+
+export interface ComplaintWithUser extends ComplaintRow {
+  user?: Pick<UserRow, 'id' | 'first_name' | 'last_name' | 'email' | 'mobile'> | null;
+}
 
 // ==================== TIPOS PERSONALIZADOS ====================
 export type UserType = 'customer' | 'driver' | 'company' | 'admin';
