@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import type { UserRow } from '@/config/database.types';
 import { AuthService, type LoginCredentials, type AuthResponse } from '@/services/auth.service';
@@ -32,14 +32,21 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>(initialState);
+  const initialCheckDone = useRef(false);
 
   const updateAuthState = useCallback((updates: Partial<AuthState>) => {
     setState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  const checkAuth = useCallback(async (): Promise<boolean> => {
+  /**
+   * Verifica la autenticación.
+   * @param silent — si es true, NO muestra el loader (para re-validaciones en segundo plano)
+   */
+  const checkAuth = useCallback(async (silent = false): Promise<boolean> => {
     try {
-      updateAuthState({ isLoading: true });
+      if (!silent) {
+        updateAuthState({ isLoading: true });
+      }
 
       const session = await AuthService.getCurrentSession();
       const user = await AuthService.getCurrentUser();
@@ -95,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: true,
         isLoading: false,
       });
-      await checkAuth(); // Revalidamos reglas de negocio inmediatamente
+      await checkAuth(false); // Revalidamos reglas de negocio inmediatamente
     } catch (error) {
       updateAuthState({ ...initialState, isLoading: false });
       throw error;
@@ -122,12 +129,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [updateAuthState]);
 
   useEffect(() => {
-    checkAuth();
-    const unsubscribe = AuthService.onAuthStateChange(async (event) => {
+    // Primera verificación: muestra loader
+    checkAuth(false).then(() => { initialCheckDone.current = true; });
+
+    const unsubscribe = AuthService.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
         updateAuthState({ ...initialState, isLoading: false });
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        checkAuth();
+      } else if (event === 'SIGNED_IN') {
+        // Login nuevo: solo mostrar loader si aún no se hizo el check inicial
+        checkAuth(!initialCheckDone.current ? false : true);
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Refresco de token (volver a la pestaña): siempre silencioso
+        checkAuth(true);
       } else if (event === 'USER_UPDATED') {
         refreshProfile();
       }
