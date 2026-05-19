@@ -14,6 +14,7 @@ import {
   type UpdateUserInput,
 } from "@/services/usersSecondary.service";
 import UserEditModal from "./UserEditModal";
+import AddUserModal from "./AddUserModal";
 
 type StatusFilter = "todos" | "activos" | "congelados";
 
@@ -36,6 +37,7 @@ export const UsersPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>("todos");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SecondaryUser | null>(null);
+  const [openAdd, setOpenAdd] = useState(false);
 
   const debouncedQuery = useDebounced(query);
 
@@ -138,6 +140,7 @@ export const UsersPage: React.FC = () => {
           <Button variant="secondary" onClick={load}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
+          <Button onClick={() => setOpenAdd(true)}>Añadir cliente</Button>
         </>
       }
     >
@@ -320,6 +323,16 @@ export const UsersPage: React.FC = () => {
         user={editing}
         onClose={() => setEditing(null)}
         onSave={handleSaveEdit}
+      />
+
+      <AddUserModal
+        open={openAdd}
+        lockedType="cliente"
+        onClose={() => setOpenAdd(false)}
+        onSubmit={() => {
+          setOpenAdd(false);
+          load();
+        }}
       />
     </Page>
   );

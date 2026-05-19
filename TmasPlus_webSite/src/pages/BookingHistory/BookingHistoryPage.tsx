@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { motion } from "framer-motion";
@@ -7,6 +7,7 @@ import {
   BookingsService,
   type BookingRecord,
 } from "@/services/bookings.service";
+import { supabaseSecondary } from "@/config/supabase";
 
 const STATUSES = [
   "TODOS",
@@ -60,22 +61,96 @@ export default function BookingHistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    "connecting" | "live" | "offline"
+  >("connecting");
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const isMountedRef = useRef(true);
+  const selectedBookingRef = useRef<BookingRecord | null>(null);
 
-  const loadBookings = async () => {
-    setLoading(true);
+  selectedBookingRef.current = selectedBooking;
+
+  const loadBookings = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await BookingsService.list();
+      if (!isMountedRef.current) return;
       setBookings(data);
+      setLastUpdate(new Date());
     } catch (e: any) {
+      if (!isMountedRef.current) return;
       setError(e?.message || "Error al cargar las reservas");
     } finally {
-      setLoading(false);
+      if (!isMountedRef.current) return;
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     loadBookings();
+
+    // Realtime: suscripción a cambios en la tabla bookings
+    let channel: ReturnType<typeof supabaseSecondary.channel> | null = null;
+    if (supabaseSecondary) {
+      channel = supabaseSecondary
+        .channel("bookings-history-realtime")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "bookings" },
+          (payload: any) => {
+            if (!isMountedRef.current) return;
+            setLastUpdate(new Date());
+            const { eventType, new: newRow, old: oldRow } = payload;
+            if (eventType === "INSERT" && newRow) {
+              setBookings((prev) => {
+                if (prev.some((b) => b.id === newRow.id)) return prev;
+                return [newRow as BookingRecord, ...prev];
+              });
+            } else if (eventType === "UPDATE" && newRow) {
+              setBookings((prev) =>
+                prev.map((b) => (b.id === newRow.id ? { ...b, ...newRow } : b))
+              );
+              if (selectedBookingRef.current?.id === newRow.id) {
+                setSelectedBooking((prev) =>
+                  prev ? { ...prev, ...newRow } : prev
+                );
+              }
+            } else if (eventType === "DELETE" && oldRow) {
+              setBookings((prev) => prev.filter((b) => b.id !== oldRow.id));
+              if (selectedBookingRef.current?.id === oldRow.id) {
+                setSelectedBooking(null);
+                setOpenModal(false);
+              }
+            }
+          }
+        )
+        .subscribe((status: string) => {
+          if (!isMountedRef.current) return;
+          if (status === "SUBSCRIBED") setRealtimeStatus("live");
+          else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
+            setRealtimeStatus("offline");
+          else if (status === "CLOSED") setRealtimeStatus("offline");
+          else setRealtimeStatus("connecting");
+        });
+    } else {
+      setRealtimeStatus("offline");
+    }
+
+    // Polling de respaldo cada 5s (mantiene la tabla viva aunque Realtime falle)
+    const pollId = window.setInterval(() => {
+      if (!isMountedRef.current) return;
+      loadBookings(true);
+    }, 5000);
+
+    return () => {
+      isMountedRef.current = false;
+      window.clearInterval(pollId);
+      if (channel && supabaseSecondary) {
+        supabaseSecondary.removeChannel(channel);
+      }
+    };
   }, []);
 
   const filteredBookings = useMemo(() => {
@@ -213,11 +288,44 @@ export default function BookingHistoryPage() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Historial de reservas
-        </h1>
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            Historial de reservas
+          </h1>
+          <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
+            <span
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium ${
+                realtimeStatus === "live"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : realtimeStatus === "connecting"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-slate-200 text-slate-600"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  realtimeStatus === "live"
+                    ? "bg-emerald-500 animate-pulse"
+                    : realtimeStatus === "connecting"
+                    ? "bg-amber-500"
+                    : "bg-slate-400"
+                }`}
+              />
+              {realtimeStatus === "live"
+                ? "En vivo"
+                : realtimeStatus === "connecting"
+                ? "Conectando..."
+                : "Sin conexión en tiempo real"}
+            </span>
+            {lastUpdate && (
+              <span>
+                Última actualización: {lastUpdate.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={loadBookings}>
+          <Button variant="secondary" onClick={() => loadBookings()}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
           <Button onClick={exportToCSV}>Exportar CSV</Button>

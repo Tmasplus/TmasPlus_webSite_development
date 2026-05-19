@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Page } from '@/components/layout/Page';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { useDebounced } from '@/hooks/useDebounced';
@@ -10,12 +11,14 @@ import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { supabase } from '@/config/supabase';
 import { DriversService } from '@/services/drivers.service';
+import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import DriverReviewModal, { type EnrichedDriverProfile } from './DriverReviewModal';
 
 // 1. SOLUCIÓN TS: Tipos estrictos para eliminar el uso de `as any`
 type StatusFilter = 'todos' | 'pendiente' | 'aprobado' | 'bloqueado';
 type ReferralFilter = 'todos' | 'con_referido';
 type SortFilter = 'fecha_desc' | 'fecha_asc' | 'nombre_asc';
+type AppAccessFilter = 'todos' | 'con_acceso' | 'sin_acceso';
 
 export const DriversPage: React.FC = () => {
     const [drivers, setDrivers] = useState<EnrichedDriverProfile[]>([]);
@@ -24,13 +27,30 @@ export const DriversPage: React.FC = () => {
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos');
     const [referralFilter, setReferralFilter] = useState<ReferralFilter>('todos');
+    const [appAccessFilter, setAppAccessFilter] = useState<AppAccessFilter>('todos');
     const [sortBy, setSortBy] = useState<SortFilter>('fecha_desc');
 
     const [page, setPage] = useState(1);
     const pageSize = 10;
     const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
 
+    const [appAccessIds, setAppAccessIds] = useState<Set<string>>(new Set());
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
+    const [bulkImporting, setBulkImporting] = useState(false);
+    const [postImportNotice, setPostImportNotice] = useState<{ count: number; names: string[]; authMissing: string[] } | null>(null);
+
     const debouncedQuery = useDebounced(query, 500);
+
+    const fetchAppAccess = useCallback(async () => {
+        try {
+            const ids = await UsersSecondaryService.listIds();
+            setAppAccessIds(ids);
+        } catch (error: any) {
+            console.warn('No se pudo cargar el estado de acceso a la App:', error?.message);
+            setAppAccessIds(new Set());
+        }
+    }, []);
 
     // 2. SOLUCIÓN WARNINGS: Memoización con useCallback
     const fetchDrivers = useCallback(async () => {
@@ -72,7 +92,10 @@ export const DriversPage: React.FC = () => {
         }
     }, [debouncedQuery]);
 
-    // useEffect ahora tiene sus dependencias perfectas
+    useEffect(() => {
+        fetchAppAccess();
+    }, [fetchAppAccess]);
+
     useEffect(() => {
         fetchDrivers();
     }, [fetchDrivers]);
@@ -84,6 +107,8 @@ export const DriversPage: React.FC = () => {
         if (statusFilter === 'aprobado') result = result.filter(d => d.approved && !d.blocked);
         if (statusFilter === 'bloqueado') result = result.filter(d => d.blocked);
         if (referralFilter === 'con_referido') result = result.filter(d => d.referral_id && d.referral_id.trim() !== '');
+        if (appAccessFilter === 'con_acceso') result = result.filter(d => appAccessIds.has(d.id));
+        if (appAccessFilter === 'sin_acceso') result = result.filter(d => !appAccessIds.has(d.id));
 
         result.sort((a, b) => {
             if (sortBy === 'nombre_asc') return a.first_name.localeCompare(b.first_name);
@@ -93,7 +118,7 @@ export const DriversPage: React.FC = () => {
         });
 
         return result;
-    }, [drivers, statusFilter, referralFilter, sortBy]);
+    }, [drivers, statusFilter, referralFilter, appAccessFilter, appAccessIds, sortBy]);
 
     const handleApprove = async (id: string) => {
         await DriversService.approveDriver(id, 'admin-dashboard');
@@ -105,6 +130,106 @@ export const DriversPage: React.FC = () => {
         await DriversService.rejectDriver(id, 'Documentos inválidos', 'admin-dashboard');
         toast.success('Conductor rechazado.');
         fetchDrivers();
+    };
+
+    const importOne = async (driver: EnrichedDriverProfile): Promise<{ ok: boolean; authCreated: boolean }> => {
+        if (!driver.email) {
+            toast.error(`${driver.first_name} ${driver.last_name} no tiene email; no se puede importar.`);
+            return { ok: false, authCreated: false };
+        }
+        try {
+            const res = await UsersSecondaryService.importDriverWithAuth({
+                id: driver.id,
+                email: driver.email,
+                first_name: driver.first_name,
+                last_name: driver.last_name,
+                mobile: driver.mobile,
+                city: (driver as any).city ?? null,
+                profile_image: (driver as any).profile_image ?? null,
+            });
+            setAppAccessIds(prev => {
+                const next = new Set(prev);
+                next.add(driver.id);
+                return next;
+            });
+            if (res.authWarning) toast.warning(`${driver.first_name}: ${res.authWarning}`);
+            return { ok: true, authCreated: res.authCreated };
+        } catch (error: any) {
+            toast.error(`Error al importar ${driver.first_name}: ${error?.message || 'desconocido'}`);
+            return { ok: false, authCreated: false };
+        }
+    };
+
+    const handleImportOne = async (driver: EnrichedDriverProfile) => {
+        setImportingIds(prev => new Set(prev).add(driver.id));
+        const res = await importOne(driver);
+        setImportingIds(prev => {
+            const next = new Set(prev);
+            next.delete(driver.id);
+            return next;
+        });
+        if (res.ok) {
+            const name = `${driver.first_name} ${driver.last_name}`;
+            toast.success(`${name} importado a la App.`);
+            setPostImportNotice({
+                count: 1,
+                names: [name],
+                authMissing: res.authCreated ? [] : [name],
+            });
+        }
+    };
+
+    const handleBulkImport = async () => {
+        const targets = drivers.filter(d => selectedIds.has(d.id) && !appAccessIds.has(d.id));
+        if (targets.length === 0) {
+            toast.error('No hay conductores válidos para importar en la selección.');
+            return;
+        }
+        if (!window.confirm(`¿Importar ${targets.length} conductor(es) a la App? Recibirán acceso de inicio de sesión.`)) return;
+
+        setBulkImporting(true);
+        let success = 0;
+        let failed = 0;
+        const importedNames: string[] = [];
+        const authMissing: string[] = [];
+        for (const d of targets) {
+            const res = await importOne(d);
+            if (res.ok) {
+                success++;
+                const name = `${d.first_name} ${d.last_name}`;
+                importedNames.push(name);
+                if (!res.authCreated) authMissing.push(name);
+            } else {
+                failed++;
+            }
+            // Pequeño respiro para no encadenar requests si quedan más
+            if (targets.length > 1) await new Promise(r => setTimeout(r, 350));
+        }
+        setBulkImporting(false);
+        setSelectedIds(new Set());
+        if (success > 0) {
+            toast.success(`${success} conductor(es) importado(s) exitosamente.`);
+            setPostImportNotice({ count: success, names: importedNames, authMissing });
+        }
+        if (failed > 0) toast.error(`${failed} importación(es) fallaron.`);
+    };
+
+    const toggleSelect = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAllVisible = (visibleRows: EnrichedDriverProfile[]) => {
+        setSelectedIds(prev => {
+            const allSelected = visibleRows.length > 0 && visibleRows.every(r => prev.has(r.id));
+            const next = new Set(prev);
+            if (allSelected) visibleRows.forEach(r => next.delete(r.id));
+            else visibleRows.forEach(r => next.add(r.id));
+            return next;
+        });
     };
 
     const handleDelete = async (driver: EnrichedDriverProfile) => {
@@ -143,13 +268,27 @@ export const DriversPage: React.FC = () => {
                 return <span className={classNames("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border", style)}>{statusText}</span>;
             }
         },
+        {
+            header: "Acceso App",
+            accessor: (r) => {
+                const hasAccess = appAccessIds.has(r.id);
+                return hasAccess
+                    ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Con acceso</span>
+                    : <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border bg-slate-50 text-slate-600 border-slate-200">Sin acceso</span>;
+            }
+        },
         { header: "Registro", accessor: (r) => r.created_at ? formatDate(r.created_at) : 'N/A' },
     ];
 
+    const pendingImportCount = useMemo(
+        () => Array.from(selectedIds).filter(id => !appAccessIds.has(id)).length,
+        [selectedIds, appAccessIds]
+    );
+
     return (
         <Page title="Gestión de Conductores">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <div className="col-span-1 md:col-span-4 lg:col-span-1">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <div className="col-span-1 md:col-span-5 lg:col-span-1">
                     <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
                     <Input placeholder="Nombre, email o teléfono..." value={query} onChange={(e) => setQuery(e.target.value)} />
                 </div>
@@ -172,6 +311,15 @@ export const DriversPage: React.FC = () => {
                     </select>
                 </div>
                 <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Acceso a la App</label>
+                    <select className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-sky-400"
+                        value={appAccessFilter} onChange={(e) => setAppAccessFilter(e.target.value as AppAccessFilter)}>
+                        <option value="todos">Cualquiera</option>
+                        <option value="con_acceso">Con acceso</option>
+                        <option value="sin_acceso">Sin acceso</option>
+                    </select>
+                </div>
+                <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Ordenar Por</label>
                     <select className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-sky-400"
                         value={sortBy} onChange={(e) => setSortBy(e.target.value as SortFilter)}>
@@ -181,6 +329,22 @@ export const DriversPage: React.FC = () => {
                     </select>
                 </div>
             </div>
+
+            {pendingImportCount > 0 && (
+                <div className="mb-4 flex items-center justify-between gap-3 p-3 rounded-xl bg-sky-50 border border-sky-200">
+                    <div className="text-sm text-sky-800">
+                        <span className="font-semibold">{pendingImportCount}</span> conductor(es) seleccionado(s) sin acceso a la App.
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="secondary" onClick={() => setSelectedIds(new Set())} disabled={bulkImporting}>
+                            Limpiar selección
+                        </Button>
+                        <Button onClick={handleBulkImport} disabled={bulkImporting}>
+                            {bulkImporting ? 'Importando...' : `Importar ${pendingImportCount} a la App`}
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             <Card title={`Conductores (${filteredAndSortedDrivers.length})`}>
                 {loading ? (
@@ -196,6 +360,23 @@ export const DriversPage: React.FC = () => {
                         onPageChange={setPage}
                         edit={(driver) => setSelectedDriver(driver)}
                         onDelete={handleDelete}
+                        selectable
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelect}
+                        onToggleSelectAll={toggleSelectAllVisible}
+                        isRowSelectable={(r) => !appAccessIds.has(r.id)}
+                        rowActions={(r) => appAccessIds.has(r.id)
+                            ? null
+                            : (
+                                <Button
+                                    onClick={() => handleImportOne(r)}
+                                    disabled={importingIds.has(r.id) || !r.email}
+                                    className="!px-3 !py-1.5 !text-xs"
+                                >
+                                    {importingIds.has(r.id) ? 'Importando...' : 'Importar a App'}
+                                </Button>
+                            )
+                        }
                     />
                 )}
             </Card>
@@ -208,6 +389,72 @@ export const DriversPage: React.FC = () => {
                 onReject={handleReject}
                 onRefresh={fetchDrivers}
             />
+
+            {postImportNotice && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPostImportNotice(null)}>
+                    <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xl shrink-0">!</div>
+                            <div>
+                                <h3 className="text-lg font-semibold text-slate-800">Importación completada — pasos pendientes</h3>
+                                <p className="text-sm text-slate-500 mt-0.5">
+                                    {postImportNotice.count === 1
+                                        ? `${postImportNotice.names[0]} fue importado a la App.`
+                                        : `${postImportNotice.count} conductores fueron importados a la App.`}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900 space-y-2">
+                            <p className="font-medium">⚠ Aún falta darles credenciales reales:</p>
+                            <p>
+                                Se creó una cuenta en la App con una <strong>contraseña temporal aleatoria</strong>, así que
+                                el conductor todavía no puede iniciar sesión con su clave habitual.
+                            </p>
+                            <p>Para que pueda entrar, elige una opción:</p>
+                            <ul className="list-disc pl-5 space-y-1">
+                                <li>
+                                    Pídele que use <strong>"Olvidé mi contraseña"</strong> en la App para establecer la suya
+                                    (recibirá un email con un link de reset).
+                                </li>
+                                <li>
+                                    O configura un <strong>trigger en el proyecto secundario</strong> que envíe una invitación
+                                    automática cuando se cree un usuario importado.
+                                </li>
+                            </ul>
+                        </div>
+
+                        {postImportNotice.authMissing.length > 0 && (
+                            <div className="mt-3 rounded-xl bg-rose-50 border border-rose-200 p-4 text-sm text-rose-900">
+                                <p className="font-medium mb-1">
+                                    🚫 {postImportNotice.authMissing.length} conductor(es) SIN cuenta de auth creada
+                                </p>
+                                <p className="mb-2">
+                                    El registro existe en la BD de la App, pero el signUp falló (probablemente por
+                                    <em> rate limit</em>). Para ellos debes crear el auth manualmente desde el panel
+                                    de Supabase o reintentar más tarde:
+                                </p>
+                                <ul className="list-disc pl-5 space-y-0.5 max-h-32 overflow-auto">
+                                    {postImportNotice.authMissing.map((n, i) => <li key={i}>{n}</li>)}
+                                </ul>
+                            </div>
+                        )}
+
+                        {postImportNotice.count > 1 && postImportNotice.names.length <= 10 && (
+                            <details className="mt-3 text-xs text-slate-500">
+                                <summary className="cursor-pointer hover:text-slate-700">Ver conductores importados</summary>
+                                <ul className="mt-2 list-disc pl-5 space-y-0.5">
+                                    {postImportNotice.names.map((n, i) => <li key={i}>{n}</li>)}
+                                </ul>
+                            </details>
+                        )}
+
+                        <div className="mt-5 flex justify-end">
+                            <Button onClick={() => setPostImportNotice(null)}>Entendido</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Page>
     );
 };

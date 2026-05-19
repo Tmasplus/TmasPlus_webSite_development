@@ -4,6 +4,7 @@ import { FloatingInput, FloatingSelect, Checkbox } from "@/components/ui/Floatin
 import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
 import { RegistrationService } from "@/services/registration.service";
+import { UsersSecondaryService } from "@/services/usersSecondary.service";
 import DocumentUploadModal from "./DocumentUpload/DocumentUploadModal";
 
 type UserType = "cliente" | "conductor" | "empresa";
@@ -12,6 +13,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSubmit: (payload: any) => void; // ajusta al tipo real
+  /** Bloquea el tipo de usuario y oculta el selector de tabs. */
+  lockedType?: UserType;
 };
 
 const USER_TABS = [
@@ -188,13 +191,26 @@ const USER_TYPE_MAP: Record<UserType, 'customer' | 'driver' | 'company'> = {
 
 type UploadedDocs = Record<string, File[]>;
 
-export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit }) => {
-  const [type, setType] = useState<UserType>("cliente");
+export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedType }) => {
+  const [type, setType] = useState<UserType>(lockedType ?? "cliente");
   const [form, setForm] = useState<FormState>(initialForm);
   const [acceptTerms, setAcceptTerms] = useState(false);
 
   const [showDocsModal, setShowDocsModal] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocs | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      setType(lockedType ?? "cliente");
+      setForm(initialForm);
+      setAcceptTerms(false);
+      setUploadedDocs(null);
+      setSubmitError(null);
+      setSubmitting(false);
+    }
+  }, [open, lockedType]);
 
   // Filtrar los campos a mostrar según el tipo seleccionado
   const visibleFields = useMemo(
@@ -228,28 +244,59 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit }) => {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    console.log("DOCUMENTOS CARGADOS: ", uploadedDocs);
+    setSubmitting(true);
+    setSubmitError(null);
+    const mappedType = USER_TYPE_MAP[type];
+    try {
+      const created = await RegistrationService.register({
+        user_type: mappedType,
+        first_name: form.nombre,
+        last_name: form.apellido,
+        email: form.email,
+        city: form.ciudad,
+        document_type: form.tipoDocumento,
+        document_number: form.nroDocumento,
+        referral_id: form.referralId,
+        mobile: form.telefono,
+        bank_number: form.daviplata,
+        vehicle_type: form.tipoVehiculo,
+        vehicle_placa: form.placa,
+        vehicle_model: form.anioVehiculo,
+        password: form.password,
 
-    await RegistrationService.register({
-      user_type: type,
-      first_name: form.nombre,
-      last_name: form.apellido,
-      email: form.email,
-      city: form.ciudad,
-      document_type: form.tipoDocumento,
-      document_number: form.nroDocumento,
-      referral_id: form.referralId,
-      mobile: form.telefono,
-      bank_number: form.daviplata,
-      vehicle_type: form.tipoVehiculo,
-      vehicle_placa: form.placa,
-      vehicle_model: form.anioVehiculo,
-      password: form.password,
+        documents: uploadedDocs,
+      } as any);
 
-      documents: uploadedDocs
-    });
+      // Replicar en la BD secundaria reutilizando el id del registro principal.
+      try {
+        await UsersSecondaryService.create({
+          id: created.id,
+          auth_id: created.auth_id ?? null,
+          first_name: created.first_name ?? form.nombre,
+          last_name: created.last_name ?? form.apellido,
+          email: created.email ?? form.email,
+          mobile: created.mobile ?? form.telefono,
+          user_type: created.user_type ?? mappedType,
+          city: created.city ?? form.ciudad,
+          referral_id: created.referral_id ?? form.referralId ?? null,
+        });
+      } catch (secondaryErr: any) {
+        setSubmitError(
+          `Usuario creado en BD principal, pero falló la réplica en BD secundaria: ${
+            secondaryErr?.message || "error desconocido"
+          }`
+        );
+        onSubmit(created);
+        return;
+      }
 
-    onClose();
+      onSubmit(created);
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err?.message || "Error al crear el usuario");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -266,23 +313,31 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit }) => {
           <Button
             type="submit"
             onClick={handleSubmit}
-            disabled={!acceptTerms || !allRequiredFilled || !uploadedDocs}
+            disabled={submitting || !acceptTerms || !allRequiredFilled || !uploadedDocs}
           >
-            Guardar
+            {submitting ? "Guardando..." : "Guardar"}
           </Button>
         </>
       }
     >
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Tipo de Usuario */}
-        <div>
-          <p className="text-xs text-slate-500 mb-2">Tipo de Usuario</p>
-          <Tabs
-            tabs={USER_TABS as any}
-            value={type}
-            onChange={(v) => setType(v as UserType)}
-          />
-        </div>
+        {!lockedType && (
+          <div>
+            <p className="text-xs text-slate-500 mb-2">Tipo de Usuario</p>
+            <Tabs
+              tabs={USER_TABS as any}
+              value={type}
+              onChange={(v) => setType(v as UserType)}
+            />
+          </div>
+        )}
+
+        {submitError && (
+          <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+            {submitError}
+          </div>
+        )}
 
         {/* Campos principales */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -28,6 +28,19 @@ export interface UpdateUserInput {
   approved?: boolean;
 }
 
+export interface CreateUserInput {
+  id?: string;
+  auth_id?: string | null;
+  first_name: string;
+  last_name: string;
+  email: string;
+  mobile?: string | null;
+  user_type: string;
+  city?: string | null;
+  referral_id?: string | null;
+  [key: string]: any;
+}
+
 const sb = supabaseSecondary as any;
 
 async function syncSession() {
@@ -47,6 +60,27 @@ export class UsersSecondaryService {
 
     if (error) throw new Error(error.message || 'Error al obtener usuarios');
     return (data || []) as SecondaryUser[];
+  }
+
+  static async create(input: CreateUserInput): Promise<SecondaryUser> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+
+    const now = new Date().toISOString();
+    const payload: any = {
+      ...input,
+      created_at: input.created_at ?? now,
+      updated_at: input.updated_at ?? now,
+    };
+
+    const { data, error } = await sb
+      .from('users')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message || 'Error al crear usuario en BD secundaria');
+    return data as SecondaryUser;
   }
 
   static async update(
@@ -93,5 +127,62 @@ export class UsersSecondaryService {
     await syncSession();
     const { error } = await sb.from('users').delete().eq('id', id);
     if (error) throw new Error(error.message || 'Error al eliminar usuario');
+  }
+
+  static async listIds(): Promise<Set<string>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    const { data, error } = await sb.from('users').select('id');
+    if (error) throw new Error(error.message || 'Error al obtener IDs de usuarios');
+    return new Set((data || []).map((u: { id: string }) => u.id));
+  }
+
+  static async existsById(id: string): Promise<boolean> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const { data, error } = await sb.from('users').select('id').eq('id', id).maybeSingle();
+    if (error && (error as any).code !== 'PGRST116') {
+      throw new Error(error.message || 'Error al verificar usuario');
+    }
+    return !!data;
+  }
+
+  static async importDriverWithAuth(driver: {
+    id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    mobile?: string | null;
+    city?: string | null;
+    profile_image?: string | null;
+  }): Promise<{ user: SecondaryUser; authCreated: boolean; authWarning?: string }> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('import-driver', {
+      body: driver,
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      // functions.invoke envuelve el error HTTP; intentar extraer mensaje del cuerpo
+      let message = error.message || 'Error al importar conductor';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (!data?.user) throw new Error('Respuesta inválida de import-driver');
+    return {
+      user: data.user as SecondaryUser,
+      authCreated: !!data.authCreated,
+      authWarning: data.authWarning,
+    };
   }
 }

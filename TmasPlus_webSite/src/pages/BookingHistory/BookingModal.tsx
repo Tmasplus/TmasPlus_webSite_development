@@ -2,10 +2,19 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
 import type { BookingRecord } from "@/services/bookings.service";
 
-function formatDate(iso?: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return isNaN(+d) ? iso : d.toLocaleString();
+function formatDate(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") return "—";
+  // bigint/epoch (ms o segundos) o ISO string
+  let d: Date;
+  if (typeof value === "number") {
+    d = new Date(value < 1e12 ? value * 1000 : value);
+  } else if (/^\d+$/.test(value)) {
+    const n = Number(value);
+    d = new Date(n < 1e12 ? n * 1000 : n);
+  } else {
+    d = new Date(value);
+  }
+  return isNaN(+d) ? String(value) : d.toLocaleString();
 }
 
 function formatMoney(v: string | number | null | undefined) {

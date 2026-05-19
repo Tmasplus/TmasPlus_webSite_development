@@ -397,3 +397,12 @@ entrypoint = "./functions/send-approval-email/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-approval-email/*.html" ]
+
+[functions.import-driver]
+enabled = true
+# La función valida internamente el JWT contra el proyecto primario,
+# por lo que el gateway del proyecto secundario NO debe verificarlo
+# (verify_jwt=true bloquea el preflight CORS de OPTIONS desde el browser).
+verify_jwt = false
+import_map = "./functions/import-driver/deno.json"
+entrypoint = "./functions/import-driver/index.ts"

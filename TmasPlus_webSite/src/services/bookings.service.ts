@@ -203,13 +203,16 @@ export class BookingsService {
 
   static async cancel(id: string, reason?: string): Promise<BookingRecord> {
     await syncSession();
-    const now = new Date().toISOString();
+    // cancelled_at -> bigint (epoch ms) ; cancellation_time -> time (HH:MM:SS)
+    const now = new Date();
+    const nowMs = now.getTime();
+    const nowTime = now.toISOString().slice(11, 19);
     const { data, error } = await sb
       .from('bookings')
       .update({
         status: 'CANCELLED',
-        cancelled_at: now,
-        cancellation_time: now,
+        cancelled_at: nowMs,
+        cancellation_time: nowTime,
         reason: reason || 'Cancelada por administrador',
         cancelled_by: 'admin',
       })
