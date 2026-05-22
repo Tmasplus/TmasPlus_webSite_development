@@ -6,6 +6,7 @@ import DashboardLayout from '@/layouts/DashboardLayout';
 import LoginPage from '@/pages/Auth/LoginPage';
 import RegisterDriverPage from '@/pages/Auth/RegisterDriverPage';
 import UpdatePasswordPage from '@/pages/Auth/UpdatePasswordPage';
+import WelcomePage from '@/pages/Auth/WelcomePage';
 
 // Páginas protegidas
 import UsersPage from '@/pages/Users/UsersPage';
@@ -44,6 +45,7 @@ export default function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register-driver" element={<RegisterDriverPage />} />
       <Route path="/update-password" element={<UpdatePasswordPage />} />
+      <Route path="/welcome" element={<WelcomePage />} />
 
       {/* Redirige raíz a /login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
