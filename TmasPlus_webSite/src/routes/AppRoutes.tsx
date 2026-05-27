@@ -7,6 +7,7 @@ import LoginPage from '@/pages/Auth/LoginPage';
 import RegisterDriverPage from '@/pages/Auth/RegisterDriverPage';
 import UpdatePasswordPage from '@/pages/Auth/UpdatePasswordPage';
 import WelcomePage from '@/pages/Auth/WelcomePage';
+import DriverStatusPage from '@/pages/Driver/DriverStatusPage';
 
 // Páginas protegidas
 import UsersPage from '@/pages/Users/UsersPage';
@@ -46,6 +47,7 @@ export default function AppRoutes() {
       <Route path="/register-driver" element={<RegisterDriverPage />} />
       <Route path="/update-password" element={<UpdatePasswordPage />} />
       <Route path="/welcome" element={<WelcomePage />} />
+      <Route path="/driver-status" element={<DriverStatusPage />} />
 
       {/* Redirige raíz a /login */}
       <Route path="/" element={<Navigate to="/login" replace />} />

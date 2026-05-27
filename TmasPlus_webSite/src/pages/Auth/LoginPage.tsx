@@ -8,33 +8,55 @@ import { toast } from '@/utils/toast';
 import logo from '@/assets/Logo-v3.png';
 import { ForgotPasswordModal } from '@/pages/Auth/ForgotPasswordModal';
 import { supabase } from '@/config/supabase';
+import { DriversService } from '@/services/drivers.service';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated, isLoading: authLoading, profile } = useAuth();
+  const { login, isAuthenticated, isLoading: authLoading, profile, mode } = useAuth();
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [openForgot, setOpenForgot] = useState(false);
 
-  // Redireccionamiento inteligente basado en el perfil del usuario
+  // Redireccionamiento inteligente basado en el perfil/modo del usuario
   useEffect(() => {
-    if (isAuthenticated && !authLoading && profile) {
-      if (profile.user_type === 'admin') {
-        // Si es admin, va al panel de control
-        navigate('/home', { replace: true });
-      } else if (profile.user_type === 'driver' && !profile.approved) {
-        // Si es conductor y no está aprobado, lo mandamos a reanudar su registro (Paso 2)
-        toast.info('¡Bienvenido de vuelta! Continuemos con tu registro.');
-        navigate('/register-driver', { replace: true });
-      } else {
-        // Si es un conductor ya aprobado, el panel web no es para él
-        toast.success('Cuenta activa. Por favor, ingresa desde la App Móvil de Conductores.');
-        supabase.auth.signOut(); // Cerramos la sesión web por seguridad
-      }
+    if (!isAuthenticated || authLoading || !profile) return;
+
+    // Admin (BD principal)
+    if (mode === 'admin') {
+      navigate('/home', { replace: true });
+      return;
     }
-  }, [isAuthenticated, authLoading, profile, navigate]);
+
+    // Driver (BD secundaria o legacy en principal)
+    if (mode === 'driver') {
+      if (profile.user_type === 'driver' && !profile.approved && profile.auth_id) {
+        // Caso legacy: sesión driver-en-registro contra la BD principal.
+        // Tratamos de validar docs en principal; si falla seguimos al resumen.
+        (async () => {
+          try {
+            const validation = await DriversService.validateRequiredDocuments(profile.id);
+            if (validation.valid) {
+              navigate('/driver-status', { replace: true });
+            } else {
+              toast.info('¡Bienvenido de vuelta! Continuemos con tu registro.');
+              navigate('/register-driver', { replace: true });
+            }
+          } catch {
+            navigate('/driver-status', { replace: true });
+          }
+        })();
+        return;
+      }
+      navigate('/driver-status', { replace: true });
+      return;
+    }
+
+    // Defensa: sesión sin mode determinable
+    toast.error('No se pudo determinar el tipo de cuenta.');
+    supabase.auth.signOut();
+  }, [isAuthenticated, authLoading, profile, mode, navigate]);
 
   const update = (k: keyof typeof form, v: string) =>
     setForm((s) => ({ ...s, [k]: v }));

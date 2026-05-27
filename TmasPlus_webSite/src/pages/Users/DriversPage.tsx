@@ -9,6 +9,7 @@ import { useDebounced } from '@/hooks/useDebounced';
 import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
+import { exportToCsv } from '@/utils/exportCsv';
 import { supabase } from '@/config/supabase';
 import { DriversService } from '@/services/drivers.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
@@ -285,8 +286,37 @@ export const DriversPage: React.FC = () => {
         [selectedIds, appAccessIds]
     );
 
+    const handleExportCsv = () => {
+        if (filteredAndSortedDrivers.length === 0) {
+            toast.error('No hay conductores para exportar.');
+            return;
+        }
+        const statusLabel = (d: EnrichedDriverProfile) =>
+            d.blocked ? 'Bloqueado' : d.approved ? 'Aprobado' : 'Pendiente';
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        exportToCsv(`conductores_${dateStamp}`, filteredAndSortedDrivers, [
+            { header: 'ID', value: (d) => d.id },
+            { header: 'Nombre', value: (d) => d.first_name },
+            { header: 'Apellido', value: (d) => d.last_name },
+            { header: 'Correo', value: (d) => d.email },
+            { header: 'Teléfono', value: (d) => d.mobile },
+            { header: 'Estado', value: statusLabel },
+            { header: 'Acceso App', value: (d) => (appAccessIds.has(d.id) ? 'Sí' : 'No') },
+            { header: 'Referido Por', value: (d) => d.referrerName || '' },
+            { header: 'Código Referido', value: (d) => d.referral_id || '' },
+            { header: 'Registro', value: (d) => (d.created_at ? formatDate(d.created_at) : '') },
+        ]);
+    };
+
     return (
-        <Page title="Gestión de Conductores">
+        <Page
+            title="Gestión de Conductores"
+            actions={
+                <Button variant="secondary" onClick={handleExportCsv}>
+                    Exportar CSV
+                </Button>
+            }
+        >
             <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                 <div className="col-span-1 md:col-span-5 lg:col-span-1">
                     <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>

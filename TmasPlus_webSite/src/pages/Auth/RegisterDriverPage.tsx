@@ -58,7 +58,7 @@ export const RegisterDriverPage: React.FC = () => {
     const [step3, setStep3] = useState<Step3Data>({});
     const [step4, setStep4] = useState<CompanyData>({});
 
-    const { isAuthenticated, profile } = useAuth(); // Extraemos la sesión actual
+    const { isAuthenticated, profile, refreshProfile } = useAuth(); // Extraemos la sesión actual
 
     // LA MAGIA: Interceptar conductores a medias
     useEffect(() => {
@@ -173,20 +173,19 @@ export const RegisterDriverPage: React.FC = () => {
 
     // ==================== TEMPORIZADOR DE REDIRECCIÓN ====================
     useEffect(() => {
-        // Usamos ReturnType para que TypeScript infiera dinámicamente el tipo correcto 
-        // dependiendo de si está compilando para web o para otro entorno.
         let timer: ReturnType<typeof setTimeout>;
 
         if (pageState === 'SUCCESS_APP_ONLY' && countdown > 0) {
             timer = setTimeout(() => setCountdown(c => c - 1), 1000);
         } else if (pageState === 'SUCCESS_APP_ONLY' && countdown === 0) {
-            supabase.auth.signOut().then(() => navigate('/login'));
+            // Mantenemos la sesión y mandamos al resumen de estado del conductor.
+            refreshProfile().finally(() => navigate('/driver-status', { replace: true }));
         }
 
         return () => {
             if (timer) clearTimeout(timer);
         };
-    }, [pageState, countdown, navigate]);
+    }, [pageState, countdown, navigate, refreshProfile]);
 
     // ==================== MANEJADORES DE SUBMIT ====================
     const handleStep1Submit = async () => {
@@ -322,10 +321,10 @@ export const RegisterDriverPage: React.FC = () => {
                             <h2 className="text-lg font-bold text-[#002f45]">¡Documentos Enviados!</h2>
                             <p className="text-sm text-slate-500 mt-2">Tu solicitud está en revisión. Te notificaremos cuando tu perfil sea aprobado.</p>
                             <div className="mt-4 p-4 bg-sky-50 border border-sky-200 rounded-lg">
-                                <p className="text-sm font-bold text-sky-800">Uso Exclusivo en App</p>
-                                <p className="text-xs text-sky-600 mt-1">Como conductor, toda tu operativa y acceso se realiza desde la App Móvil de T+Plus. El portal web es solo administrativo.</p>
+                                <p className="text-sm font-bold text-sky-800">Próximo paso</p>
+                                <p className="text-xs text-sky-600 mt-1">Te vamos a llevar a tu resumen de perfil, donde podrás ver el estado de tu cuenta y la lista de documentos cargados.</p>
                             </div>
-                            <p className="text-xs text-slate-400 mt-6">Redirigiendo al inicio en {countdown} segundos...</p>
+                            <p className="text-xs text-slate-400 mt-6">Redirigiendo a tu resumen en {countdown} segundos...</p>
                         </motion.div>
                     )}
 

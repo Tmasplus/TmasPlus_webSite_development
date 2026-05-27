@@ -37,6 +37,17 @@ export default function AddBookingPage() {
   const [dateTime, setDateTime] = useState("");
   const [hours, setHours] = useState(0);
   const [fare, setFare] = useState<number | null>(null);
+  const [fareBreakdown, setFareBreakdown] = useState<{
+    isInter: boolean;
+    base: number;
+    perKm: number;
+    perHour: number;
+    waiting: number;
+    returnLeg: number;
+    schedulingSurcharge: number;
+    convenience: number;
+    minApplied: boolean;
+  } | null>(null);
   const [observationsEnabled, setObservationsEnabled] = useState(false);
   const [observations, setObservations] = useState("");
   const [success, setSuccess] = useState(false);
@@ -118,33 +129,62 @@ export default function AddBookingPage() {
       alert("Por favor completa origen, destino y tipo de vehículo.");
       return;
     }
+    if (!routeInfo) {
+      alert("Aún no se ha calculado la ruta en el mapa.");
+      return;
+    }
 
     const cat = categories.find((c) => c.id === vehicleType);
     if (!cat) return;
 
-    const distKm = routeInfo?.distanceKm ?? 0;
-    const durationHrs = (routeInfo?.durationMin ?? 0) / 60;
+    const distKm = routeInfo.distanceKm;
+    const durationHrs = routeInfo.durationMin / 60;
 
-    let total = cat.base_price + cat.price_per_km * distKm + cat.rate_per_hour * durationHrs;
+    const umbral = cat.umbral_intermunicipal_km ?? 29;
+    const isInter = distKm > umbral;
 
-    if (tripType === "Ida y regreso") {
-      total += total * 0.8 + cat.valor_hora * hours;
-    }
+    const basePrice = isInter ? cat.base_price_inter : cat.base_price;
+    const perKm = isInter ? cat.price_per_km_inter : cat.price_per_km;
+    const perHour = isInter ? cat.rate_per_hour_inter : cat.rate_per_hour;
+    const minFare = isInter ? cat.min_fare_inter : cat.min_fare;
 
-    if (isScheduled) {
-      total += cat.delta_aeropuerto_prog;
-    }
+    const baseComponent = basePrice;
+    const distComponent = perKm * distKm;
+    const timeComponent = perHour * durationHrs;
 
-    total = Math.max(total, cat.min_fare);
+    let oneWay = baseComponent + distComponent + timeComponent;
 
+    const returnLeg = tripType === "Ida y regreso" ? oneWay * 0.8 : 0;
+    const waiting = tripType === "Ida y regreso" ? cat.valor_hora * hours : 0;
+    const schedulingSurcharge = isScheduled ? cat.delta_aeropuerto_prog : 0;
+
+    let subtotal = oneWay + returnLeg + waiting + schedulingSurcharge;
+
+    const minApplied = subtotal < minFare;
+    if (minApplied) subtotal = minFare;
+
+    let convenience = 0;
     if (cat.convenience_fee > 0) {
-      total +=
+      convenience =
         cat.convenience_fee_type === "percentage"
-          ? total * (cat.convenience_fee / 100)
+          ? subtotal * (cat.convenience_fee / 100)
           : cat.convenience_fee;
     }
 
-    setFare(Math.round(total));
+    const total = Math.round(subtotal + convenience);
+
+    setFare(total);
+    setFareBreakdown({
+      isInter,
+      base: Math.round(baseComponent),
+      perKm: Math.round(distComponent),
+      perHour: Math.round(timeComponent),
+      waiting: Math.round(waiting),
+      returnLeg: Math.round(returnLeg),
+      schedulingSurcharge: Math.round(schedulingSurcharge),
+      convenience: Math.round(convenience),
+      minApplied,
+    });
   };
 
   const handleSubmit = async () => {
@@ -244,6 +284,7 @@ export default function AddBookingPage() {
     setDateTime("");
     setHours(0);
     setFare(null);
+    setFareBreakdown(null);
     setObservationsEnabled(false);
     setObservations("");
     clearCustomer();
@@ -452,13 +493,44 @@ export default function AddBookingPage() {
           <Button onClick={handleCalculate}>Calcular tarifa</Button>
         </div>
 
-        {fare !== null && (
+        {fare !== null && fareBreakdown && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mt-4 text-right text-lg font-semibold text-primary"
+            className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"
           >
-            Tarifa estimada: ${fare.toLocaleString("es-CO")}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-slate-700">
+                Desglose ({fareBreakdown.isInter ? "Intermunicipal" : "Urbano"})
+              </span>
+              <span className="text-xs text-slate-500">
+                {routeInfo?.distanceKm} km · {routeInfo?.durationMin} min
+              </span>
+            </div>
+            <ul className="text-sm text-slate-600 space-y-1">
+              <li className="flex justify-between"><span>Tarifa base</span><span>${fareBreakdown.base.toLocaleString("es-CO")}</span></li>
+              <li className="flex justify-between"><span>Distancia</span><span>${fareBreakdown.perKm.toLocaleString("es-CO")}</span></li>
+              <li className="flex justify-between"><span>Tiempo de viaje</span><span>${fareBreakdown.perHour.toLocaleString("es-CO")}</span></li>
+              {fareBreakdown.returnLeg > 0 && (
+                <li className="flex justify-between"><span>Regreso (80%)</span><span>${fareBreakdown.returnLeg.toLocaleString("es-CO")}</span></li>
+              )}
+              {fareBreakdown.waiting > 0 && (
+                <li className="flex justify-between"><span>Espera ({hours}h)</span><span>${fareBreakdown.waiting.toLocaleString("es-CO")}</span></li>
+              )}
+              {fareBreakdown.schedulingSurcharge > 0 && (
+                <li className="flex justify-between"><span>Recargo programado</span><span>${fareBreakdown.schedulingSurcharge.toLocaleString("es-CO")}</span></li>
+              )}
+              {fareBreakdown.minApplied && (
+                <li className="text-xs text-amber-600">Se aplicó la tarifa mínima.</li>
+              )}
+              {fareBreakdown.convenience > 0 && (
+                <li className="flex justify-between"><span>Conveniencia</span><span>${fareBreakdown.convenience.toLocaleString("es-CO")}</span></li>
+              )}
+            </ul>
+            <div className="mt-3 pt-3 border-t border-slate-200 flex justify-between text-lg font-semibold text-primary">
+              <span>Total</span>
+              <span>${fare.toLocaleString("es-CO")}</span>
+            </div>
           </motion.div>
         )}
 

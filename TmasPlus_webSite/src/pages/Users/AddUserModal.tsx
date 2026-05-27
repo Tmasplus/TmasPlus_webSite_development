@@ -5,7 +5,125 @@ import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
 import { RegistrationService } from "@/services/registration.service";
 import { UsersSecondaryService } from "@/services/usersSecondary.service";
+import { supabaseSecondary } from "@/config/supabase";
+import { toast } from "@/utils/toast";
 import DocumentUploadModal from "./DocumentUpload/DocumentUploadModal";
+
+const SECONDARY_DOC_BUCKET = "driver-documents";
+
+async function uploadFileToSecondary(
+  ownerId: string,
+  field: string,
+  file: File
+): Promise<string> {
+  if (!supabaseSecondary) throw new Error("Cliente secundario no configurado");
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${ownerId}/${field}_${Date.now()}.${ext}`;
+  const { error: upErr } = await supabaseSecondary.storage
+    .from(SECONDARY_DOC_BUCKET)
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (upErr) throw upErr;
+  const { data } = supabaseSecondary.storage
+    .from(SECONDARY_DOC_BUCKET)
+    .getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function uploadAndPersistCustomerCedula(
+  userId: string,
+  authId: string | null,
+  files: File[]
+): Promise<void> {
+  if (!supabaseSecondary || !files || files.length === 0) return;
+  const ownerId = authId || userId;
+  const fields: Array<"verify_id_image" | "verify_id_image_bk"> = [
+    "verify_id_image",
+    "verify_id_image_bk",
+  ];
+  const updates: Record<string, string> = {};
+  for (let i = 0; i < Math.min(files.length, 2); i++) {
+    updates[fields[i]] = await uploadFileToSecondary(ownerId, fields[i], files[i]);
+  }
+  if (Object.keys(updates).length === 0) return;
+  const { error: updateErr } = await supabaseSecondary
+    .from("users")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", userId);
+  if (updateErr) throw updateErr;
+}
+
+async function uploadAndPersistDriverDocs(
+  userId: string,
+  authId: string | null,
+  carId: string,
+  docs: Record<string, File[]>
+): Promise<void> {
+  if (!supabaseSecondary) return;
+  const ownerId = authId || userId;
+  const userUpdates: Record<string, string> = {};
+  const carUpdates: Record<string, string> = {};
+
+  // Cédula → users.verify_id_image / verify_id_image_bk
+  const cedulas = docs?.cedula ?? [];
+  const cedulaFields = ["verify_id_image", "verify_id_image_bk"] as const;
+  for (let i = 0; i < Math.min(cedulas.length, 2); i++) {
+    userUpdates[cedulaFields[i]] = await uploadFileToSecondary(ownerId, cedulaFields[i], cedulas[i]);
+  }
+
+  // Licencia → users.license_image / license_image_back
+  const licencias = docs?.licencia ?? [];
+  const licenciaFields = ["license_image", "license_image_back"] as const;
+  for (let i = 0; i < Math.min(licencias.length, 2); i++) {
+    userUpdates[licenciaFields[i]] = await uploadFileToSecondary(ownerId, licenciaFields[i], licencias[i]);
+  }
+
+  // Tarjeta de propiedad → cars.card_prop_image / card_prop_image_back
+  const tarjetas = docs?.tarjeta ?? [];
+  const tarjetaFields = ["card_prop_image", "card_prop_image_back"] as const;
+  for (let i = 0; i < Math.min(tarjetas.length, 2); i++) {
+    carUpdates[tarjetaFields[i]] = await uploadFileToSecondary(ownerId, tarjetaFields[i], tarjetas[i]);
+  }
+
+  // Foto Vehículo Exterior → cars.car_image_1
+  const fotoExt = docs?.foto_exterior?.[0];
+  if (fotoExt) {
+    carUpdates["car_image_1"] = await uploadFileToSecondary(ownerId, "car_image_1", fotoExt);
+  }
+
+  // Foto Vehículo Interior → cars.car_image_2
+  const fotoInt = docs?.foto_interior?.[0];
+  if (fotoInt) {
+    carUpdates["car_image_2"] = await uploadFileToSecondary(ownerId, "car_image_2", fotoInt);
+  }
+
+  // SOAT → cars.soat_image
+  const soat = docs?.soat?.[0];
+  if (soat) {
+    carUpdates["soat_image"] = await uploadFileToSecondary(ownerId, "soat_image", soat);
+  }
+
+  // Tecnomecánica → cars.tecnomecanica_image
+  const tecno = docs?.tecnomecanica?.[0];
+  if (tecno) {
+    carUpdates["tecnomecanica_image"] = await uploadFileToSecondary(ownerId, "tecnomecanica_image", tecno);
+  }
+
+  const now = new Date().toISOString();
+  if (Object.keys(userUpdates).length > 0) {
+    const { error } = await supabaseSecondary
+      .from("users")
+      .update({ ...userUpdates, updated_at: now })
+      .eq("id", userId);
+    if (error) throw error;
+  }
+  if (Object.keys(carUpdates).length > 0) {
+    const { error } = await supabaseSecondary
+      .from("cars")
+      .update({ ...carUpdates, updated_at: now })
+      .eq("id", carId);
+    if (error) throw error;
+  }
+}
 
 type UserType = "cliente" | "conductor" | "empresa";
 
@@ -52,6 +170,8 @@ type FormState = {
   // conductor
   daviplata: string;
   tipoVehiculo: string;
+  marcaVehiculo: string;
+  modeloVehiculo: string;
   placa: string;
   anioVehiculo: string;
   // empresa
@@ -73,6 +193,8 @@ const initialForm: FormState = {
   password: "",
   daviplata: "",
   tipoVehiculo: "",
+  marcaVehiculo: "",
+  modeloVehiculo: "",
   placa: "",
   anioVehiculo: "",
   razonSocial: "",
@@ -138,6 +260,20 @@ const FIELD_DEFS: FieldDef[] = [
       { value: "comfort_plus", label: "Comfort" },
       { value: "van_plus", label: "Van" }
     ],
+    showWhen: (t) => t === "conductor",
+    required: true
+  },
+  {
+    id: "marcaVehiculo",
+    label: "Marca",
+    kind: "input",
+    showWhen: (t) => t === "conductor",
+    required: true
+  },
+  {
+    id: "modeloVehiculo",
+    label: "Modelo",
+    kind: "input",
     showWhen: (t) => t === "conductor",
     required: true
   },
@@ -248,6 +384,84 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
     setSubmitError(null);
     const mappedType = USER_TYPE_MAP[type];
     try {
+      if (mappedType === 'customer') {
+        const created = await UsersSecondaryService.createCustomerWithAuth({
+          email: form.email,
+          password: form.password,
+          first_name: form.nombre,
+          last_name: form.apellido,
+          mobile: form.telefono || null,
+          city: form.ciudad || null,
+          document_type: form.tipoDocumento || null,
+          document_number: form.nroDocumento || null,
+          referral_id: form.referralId || null,
+        });
+
+        const cedulaFiles = uploadedDocs?.cedula ?? [];
+        if (cedulaFiles.length > 0) {
+          try {
+            await uploadAndPersistCustomerCedula(
+              created.id,
+              created.auth_id ?? null,
+              cedulaFiles
+            );
+          } catch (docErr: any) {
+            const msg = docErr?.message || "error desconocido";
+            setSubmitError(`Cliente creado, pero falló la subida de documentos: ${msg}`);
+            toast.warning(`Cliente creado. Documentos no se subieron: ${msg}`);
+            onSubmit(created);
+            return;
+          }
+        }
+
+        toast.success(`Cliente ${form.nombre} ${form.apellido} creado correctamente.`);
+        onSubmit(created);
+        onClose();
+        return;
+      }
+
+      if (mappedType === 'driver') {
+        const { user: created, car } = await UsersSecondaryService.createDriverWithAuth({
+          email: form.email,
+          password: form.password,
+          first_name: form.nombre,
+          last_name: form.apellido,
+          mobile: form.telefono || null,
+          city: form.ciudad || null,
+          document_type: form.tipoDocumento || null,
+          document_number: form.nroDocumento || null,
+          referral_id: form.referralId || null,
+          bank_number: form.daviplata || null,
+          vehicle_type: form.tipoVehiculo || null,
+          make: form.marcaVehiculo || null,
+          model: form.modeloVehiculo || null,
+          plate: form.placa || null,
+          vehicle_year: form.anioVehiculo || null,
+        });
+
+        if (uploadedDocs && Object.keys(uploadedDocs).length > 0) {
+          try {
+            await uploadAndPersistDriverDocs(
+              created.id,
+              created.auth_id ?? null,
+              car?.id,
+              uploadedDocs
+            );
+          } catch (docErr: any) {
+            const msg = docErr?.message || "error desconocido";
+            setSubmitError(`Conductor creado, pero falló la subida de documentos: ${msg}`);
+            toast.warning(`Conductor creado. Documentos no se subieron: ${msg}`);
+            onSubmit(created);
+            return;
+          }
+        }
+
+        toast.success(`Conductor ${form.nombre} ${form.apellido} creado correctamente.`);
+        onSubmit(created);
+        onClose();
+        return;
+      }
+
       const created = await RegistrationService.register({
         user_type: mappedType,
         first_name: form.nombre,
@@ -293,7 +507,9 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
       onSubmit(created);
       onClose();
     } catch (err: any) {
-      setSubmitError(err?.message || "Error al crear el usuario");
+      const msg = err?.message || "Error al crear el usuario";
+      setSubmitError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }

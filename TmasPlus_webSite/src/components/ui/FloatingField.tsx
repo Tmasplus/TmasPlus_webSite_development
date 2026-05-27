@@ -88,7 +88,7 @@ export const FloatingSelect: React.FC<
             error && "border-red-300 focus:ring-red-300 focus:border-red-300",
             required && !props.value && "border-red-400",
           )}
-          defaultValue=""
+          {...(props.value === undefined && props.defaultValue === undefined ? { defaultValue: "" } : {})}
           {...props}
         >
           <option value="" disabled hidden />

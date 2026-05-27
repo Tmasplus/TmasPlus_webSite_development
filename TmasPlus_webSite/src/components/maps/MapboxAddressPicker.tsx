@@ -39,7 +39,7 @@ interface BookingMapViewProps {
 
 async function reverseGeocode(lng: number, lat: number): Promise<string> {
   const res = await fetch(
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=es&country=co`
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=es&country=co&types=address,poi,neighborhood,locality,place&limit=1`
   );
   const data = await res.json();
   return data.features?.[0]?.place_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;

@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+const FROM_EMAIL = Deno.env.get('MAIL_FROM_EMAIL') ?? 'aprobaciones@tmasplus.com'
+const FROM_NAME = Deno.env.get('MAIL_FROM_NAME') ?? 'T+Plus administración'
 
 serve(async (req: Request) => {
   try {
@@ -157,24 +159,27 @@ serve(async (req: Request) => {
       `;
 
       // Enviar por Resend
+      if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY no configurada')
+
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
         body: JSON.stringify({
-          from: 'T+Plus administración <aprobaciones@tmasplus.com>', // dominio validado
+          from: `${FROM_NAME} <${FROM_EMAIL}>`,
           to: [emailDestino],
           subject: '¡Tu cuenta ha sido aprobada! + Código de Referido',
-          html: htmlContent
-        })
+          html: htmlContent,
+        }),
       });
 
+      const data = await res.json();
+
       if (res.ok) {
-        console.log("🎉 CORREO ENVIADO EXITOSAMENTE")
-        return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } })
+        console.log("🎉 CORREO ENVIADO EXITOSAMENTE", data)
+        return new Response(JSON.stringify({ success: true, result: data }), { headers: { "Content-Type": "application/json" } })
       } else {
-        const errorData = await res.json();
-        console.error("❌ ERROR EN RESEND:", errorData)
-        throw new Error(`Resend Error`);
+        console.error("❌ ERROR EN RESEND:", data)
+        throw new Error(`Resend Error: ${data?.message || data?.name || res.status}`);
       }
     } else {
       console.log("⏸️ Ignorado: No hubo cambio de Pendiente a Aprobado.")

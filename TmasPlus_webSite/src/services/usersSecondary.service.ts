@@ -53,6 +53,7 @@ async function syncSession() {
 export class UsersSecondaryService {
   static async list(): Promise<SecondaryUser[]> {
     if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
     const { data, error } = await sb
       .from('users')
       .select('*')
@@ -124,13 +125,36 @@ export class UsersSecondaryService {
   }
 
   static async delete(id: string): Promise<void> {
-    await syncSession();
-    const { error } = await sb.from('users').delete().eq('id', id);
-    if (error) throw new Error(error.message || 'Error al eliminar usuario');
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('delete-user', {
+      body: { id },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al eliminar usuario';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (data?.authWarning) {
+      console.warn('[delete-user]', data.authWarning);
+    }
   }
 
   static async listIds(): Promise<Set<string>> {
     if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
     const { data, error } = await sb.from('users').select('id');
     if (error) throw new Error(error.message || 'Error al obtener IDs de usuarios');
     return new Set((data || []).map((u: { id: string }) => u.id));
@@ -144,6 +168,86 @@ export class UsersSecondaryService {
       throw new Error(error.message || 'Error al verificar usuario');
     }
     return !!data;
+  }
+
+  static async createDriverWithAuth(input: {
+    email: string;
+    password: string;
+    first_name: string;
+    last_name: string;
+    mobile?: string | null;
+    city?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    referral_id?: string | null;
+    bank_number?: string | null;
+    vehicle_type?: string | null;
+    make?: string | null;
+    model?: string | null;
+    plate?: string | null;
+    vehicle_year?: string | null;
+  }): Promise<{ user: SecondaryUser; car: any }> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('create-driver', {
+      body: input,
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al crear conductor';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (!data?.user) throw new Error('Respuesta inválida de create-driver');
+    return { user: data.user as SecondaryUser, car: data.car };
+  }
+
+  static async createCustomerWithAuth(input: {
+    email: string;
+    password: string;
+    first_name: string;
+    last_name: string;
+    mobile?: string | null;
+    city?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    referral_id?: string | null;
+  }): Promise<SecondaryUser> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('create-customer', {
+      body: input,
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al crear cliente';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (!data?.user) throw new Error('Respuesta inválida de create-customer');
+    return data.user as SecondaryUser;
   }
 
   static async importDriverWithAuth(driver: {

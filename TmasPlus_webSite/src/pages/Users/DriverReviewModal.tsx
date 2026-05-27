@@ -2,23 +2,41 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 //import { classNames } from '@/utils/classNames';
 //import { formatDate } from '@/utils/formatDate';
-import { supabase } from '@/config/supabase';
+import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import type { DriverProfile } from '@/config/database.types';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
 
+export type DriverSource = 'primary' | 'secondary';
+
 interface DriverReviewModalProps {
     open: boolean;
     driver: EnrichedDriverProfile | null;
+    source?: DriverSource;
     onClose: () => void;
     onApprove: (id: string) => Promise<void>;
     onReject: (id: string) => Promise<void>;
     onRefresh: () => void;
 }
 
-const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null }) => {
+function pickStorageClientByUrl(url: string, fallbackSource: DriverSource) {
+    try {
+        const u = new URL(url);
+        const primaryHost = (import.meta as any).env?.VITE_SUPABASE_URL
+            ? new URL((import.meta as any).env.VITE_SUPABASE_URL).host
+            : '';
+        const secondaryHost = (import.meta as any).env?.VITE_SUPABASE_SECONDARY_URL
+            ? new URL((import.meta as any).env.VITE_SUPABASE_SECONDARY_URL).host
+            : '';
+        if (secondaryHost && u.host === secondaryHost && supabaseSecondary) return supabaseSecondary;
+        if (primaryHost && u.host === primaryHost) return supabase;
+    } catch { /* noop */ }
+    return fallbackSource === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
+}
+
+const SecureDocumentLink = ({ label, url, source = 'primary' }: { label: string; url?: string | null; source?: DriverSource }) => {
     const [secureUrl, setSecureUrl] = useState<string | null>(null);
 
     useEffect(() => {
@@ -31,8 +49,17 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
                 const bucket = pathParts[0];
                 const filePath = pathParts.slice(1).join('/');
 
-                const { data } = await supabase.storage.from(bucket).createSignedUrl(filePath, 3600);
-                if (isMounted) setSecureUrl(data?.signedUrl || url);
+                const client = pickStorageClientByUrl(url, source);
+                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
+                if (isMounted) {
+                    if (error) {
+                        // Fallback: si no se puede firmar, devolvemos la URL pública tal cual
+                        console.warn(`[SecureDocumentLink] No se pudo firmar ${bucket}/${filePath}: ${error.message}`);
+                        setSecureUrl(url);
+                    } else {
+                        setSecureUrl(data?.signedUrl || url);
+                    }
+                }
             } else {
                 if (isMounted) setSecureUrl(url);
             }
@@ -41,7 +68,7 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
         return () => {
             isMounted = false;
         };
-    }, [url]);
+    }, [url, source]);
 
     return (
         <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
@@ -66,27 +93,36 @@ const SecureDocumentLink = ({ label, url }: { label: string; url?: string | null
 };
 
 export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
-    open, driver, onClose, onApprove, onReject, onRefresh
+    open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh
 }) => {
+    const dbClient: any = source === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState<Partial<EnrichedDriverProfile>>({});
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
 
     useEffect(() => {
-        if (driver) {
-            setEditForm(driver);
-            setIsEditing(false);
+        if (!driver) return;
+        setEditForm(driver);
+        setIsEditing(false);
 
-            supabase.from('referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).single()
-                .then(({ data }: { data: { referral_code: string; total_referrals: number } | null }) => {
-                    if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
-                    else setOwnReferral({ code: 'No asignado (Pendiente)', total: 0 });
-                });
+        const isCustomerType = (driver.user_type || '').toLowerCase() === 'customer';
+        if (isCustomerType) {
+            // Los clientes no tienen código de referido propio.
+            setOwnReferral({ code: 'N/A', total: 0 });
+            return;
         }
+
+        dbClient.from('referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).maybeSingle()
+            .then(({ data }: { data: { referral_code: string; total_referrals: number } | null }) => {
+                if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
+                else setOwnReferral({ code: 'No asignado (Pendiente)', total: 0 });
+            });
     }, [driver]);
 
     if (!open || !driver) return null;
+
+    const isCustomer = (driver.user_type || '').toLowerCase() === 'customer';
 
     const handleAction = async (action: 'approve' | 'reject') => {
         setLoading(true);
@@ -102,7 +138,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const handleSaveEdit = async () => {
         setLoading(true);
         try {
-            const { error: userError } = await supabase.from('users').update({
+            const { error: userError } = await dbClient.from('users').update({
                 first_name: editForm.first_name,
                 last_name: editForm.last_name,
                 mobile: editForm.mobile,
@@ -111,7 +147,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             if (userError) throw userError;
 
             if (driver.vehicle && editForm.vehicle) {
-                const { error: carError } = await supabase.from('cars').update({
+                const { error: carError } = await dbClient.from('cars').update({
                     make: editForm.vehicle.make,
                     model: editForm.vehicle.model,
                     plate: editForm.vehicle.plate,
@@ -139,7 +175,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 
                 <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                     <div>
-                        <h2 className="text-xl font-bold text-slate-800">Expediente del Conductor</h2>
+                        <h2 className="text-xl font-bold text-slate-800">{isCustomer ? 'Expediente del Cliente' : 'Expediente del Conductor'}</h2>
                         <p className="text-sm text-slate-500">ID: {driver.id}</p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -153,6 +189,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
 
                     <div className="space-y-6">
+                        {!isCustomer && (
                         <div className="bg-gradient-to-r from-sky-50 to-indigo-50 p-4 rounded-xl border border-sky-100">
                             <h3 className="text-sm font-bold text-sky-900 mb-2 uppercase tracking-wide">Programa de Referidos</h3>
                             <div className="flex justify-between items-center">
@@ -166,6 +203,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                 </div>
                             </div>
                         </div>
+                        )}
 
                         <div>
                             <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Datos Personales</h3>
@@ -189,6 +227,23 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     <span className="font-semibold text-slate-500 block">Ciudad:</span>
                                     {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.city || ''} onChange={e => setEditForm({ ...editForm, city: e.target.value })} /> : <p>{driver.city}</p>}
                                 </div>
+
+                                {isCustomer && (
+                                    <>
+                                        <div>
+                                            <span className="font-semibold text-slate-500 block">Email:</span>
+                                            <p>{(driver as any).email || '—'}</p>
+                                        </div>
+                                        <div>
+                                            <span className="font-semibold text-slate-500 block">Tipo de Documento:</span>
+                                            <p>{(driver as any).document_type || '—'}</p>
+                                        </div>
+                                        <div>
+                                            <span className="font-semibold text-slate-500 block">Número de Documento:</span>
+                                            <p>{(driver as any).document_number || '—'}</p>
+                                        </div>
+                                    </>
+                                )}
 
                                 {driver.referrerName && (
                                     <p className="mt-4 p-2 bg-emerald-50 text-emerald-800 rounded border border-emerald-200 text-xs">
@@ -247,27 +302,39 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                         )}
                     </div>
 
+                    {isCustomer && (
+                    <div>
+                        <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Documentos del Cliente</h3>
+                        <div className="space-y-3">
+                            <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} source={source} />
+                            <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} source={source} />
+                        </div>
+                    </div>
+                    )}
+
+                    {!isCustomer && (
                     <div>
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Inspección de Vehículo</h3>
                         <div className="space-y-3 mb-6">
-                            <SecureDocumentLink label="Foto Vehículo (Exterior)" url={driver.vehicle?.car_image_1} />
-                            <SecureDocumentLink label="Foto Vehículo (Interior)" url={driver.vehicle?.car_image_2} />
+                            <SecureDocumentLink label="Foto Vehículo (Exterior)" url={driver.vehicle?.car_image_1} source={source} />
+                            <SecureDocumentLink label="Foto Vehículo (Interior)" url={driver.vehicle?.car_image_2} source={source} />
                         </div>
 
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Documentos de Verificación</h3>
                         <div className="space-y-3">
-                            <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} />
-                            <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} />
-                            <SecureDocumentLink label="Licencia (Frente)" url={driver.license_image} />
-                            <SecureDocumentLink label="Licencia (Reverso)" url={driver.license_image_back} />
-                            <SecureDocumentLink label="Tarjeta de Propiedad (Frente)" url={driver.vehicle?.card_prop_image} />
-                            <SecureDocumentLink label="Tarjeta de Propiedad (Reverso)" url={driver.vehicle?.card_prop_image_back} />
-                            <SecureDocumentLink label="SOAT" url={driver.vehicle?.soat_image} />
+                            <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} source={source} />
+                            <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} source={source} />
+                            <SecureDocumentLink label="Licencia (Frente)" url={driver.license_image} source={source} />
+                            <SecureDocumentLink label="Licencia (Reverso)" url={driver.license_image_back} source={source} />
+                            <SecureDocumentLink label="Tarjeta de Propiedad (Frente)" url={driver.vehicle?.card_prop_image} source={source} />
+                            <SecureDocumentLink label="Tarjeta de Propiedad (Reverso)" url={driver.vehicle?.card_prop_image_back} source={source} />
+                            <SecureDocumentLink label="SOAT" url={driver.vehicle?.soat_image} source={source} />
                             {driver.vehicle?.tecnomecanica_image && (
-                                <SecureDocumentLink label="Tecnomecánica" url={driver.vehicle.tecnomecanica_image} />
+                                <SecureDocumentLink label="Tecnomecánica" url={driver.vehicle.tecnomecanica_image} source={source} />
                             )}
                         </div>
                     </div>
+                    )}
                 </div>
 
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
@@ -276,7 +343,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     ) : (
                         <>
                             <Button variant="secondary" onClick={onClose} disabled={loading}>Cerrar</Button>
-                            {!driver.approved && !driver.blocked && (
+                            {!isCustomer && !driver.approved && !driver.blocked && (
                                 <>
                                     <button onClick={() => handleAction('reject')} disabled={loading} className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-100 transition-colors">Rechazar Conductor</button>
                                     <button onClick={() => handleAction('approve')} disabled={loading} className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors shadow-sm">Aprobar Conductor</button>

@@ -398,6 +398,14 @@ entrypoint = "./functions/send-approval-email/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-approval-email/*.html" ]
 
+[functions.send-trip-summary]
+enabled = true
+# Disparado por database webhook desde bookings cuando status = COMPLETED.
+# El webhook envía service_role key como Authorization, así que verify_jwt=true funciona.
+verify_jwt = true
+import_map = "./functions/send-trip-summary/deno.json"
+entrypoint = "./functions/send-trip-summary/index.ts"
+
 [functions.import-driver]
 enabled = true
 # La función valida internamente el JWT contra el proyecto primario,
@@ -406,3 +414,24 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/import-driver/deno.json"
 entrypoint = "./functions/import-driver/index.ts"
+
+[functions.create-customer]
+enabled = true
+# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
+verify_jwt = false
+import_map = "./functions/create-customer/deno.json"
+entrypoint = "./functions/create-customer/index.ts"
+
+[functions.create-driver]
+enabled = true
+# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
+verify_jwt = false
+import_map = "./functions/create-driver/deno.json"
+entrypoint = "./functions/create-driver/index.ts"
+
+[functions.delete-user]
+enabled = true
+# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
+verify_jwt = false
+import_map = "./functions/delete-user/deno.json"
+entrypoint = "./functions/delete-user/index.ts"

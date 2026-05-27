@@ -8,13 +8,18 @@ import { Tabs } from "@/components/ui/Tabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useDebounced } from "@/hooks/useDebounced";
 import { classNames } from "@/utils/classNames";
+import { toast } from "@/utils/toast";
+import { exportToCsv } from "@/utils/exportCsv";
+import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
   UsersSecondaryService,
   type SecondaryUser,
   type UpdateUserInput,
 } from "@/services/usersSecondary.service";
+import { DriversService } from "@/services/drivers.service";
 import UserEditModal from "./UserEditModal";
 import AddUserModal from "./AddUserModal";
+import DriverReviewModal, { type EnrichedDriverProfile } from "./DriverReviewModal";
 
 type StatusFilter = "todos" | "activos" | "congelados";
 
@@ -37,7 +42,10 @@ export const UsersPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>("todos");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SecondaryUser | null>(null);
-  const [openAdd, setOpenAdd] = useState(false);
+  const [openAdd, setOpenAdd] = useState<null | "cliente" | "conductor">(null);
+  const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
+  const [selectedDriverSource, setSelectedDriverSource] = useState<"primary" | "secondary">("primary");
+  const [loadingProfileId, setLoadingProfileId] = useState<string | null>(null);
 
   const debouncedQuery = useDebounced(query);
 
@@ -132,15 +140,158 @@ export const UsersPage: React.FC = () => {
     );
   };
 
+  const loadSecondaryDriverProfile = async (
+    u: SecondaryUser
+  ): Promise<EnrichedDriverProfile | null> => {
+    if (!supabaseSecondary) return null;
+    const sb = supabaseSecondary as any;
+
+    const { data: userRow, error: userErr } = await sb
+      .from("users")
+      .select("*")
+      .eq("id", u.id)
+      .maybeSingle();
+    if (userErr || !userRow) return null;
+
+    const { data: cars } = await sb
+      .from("cars")
+      .select("*")
+      .eq("driver_id", u.id)
+      .limit(1);
+    const activeVehicle = cars && cars[0] ? cars[0] : undefined;
+
+    let companyData: any;
+    if (activeVehicle?.features) {
+      companyData = (activeVehicle.features as Record<string, any>).companyData;
+    }
+
+    return {
+      ...(userRow as any),
+      vehicle: activeVehicle,
+      serviceType: (activeVehicle?.service_type as any) || "particular",
+      companyData,
+      referrerName: "Sin referencia",
+    } as EnrichedDriverProfile;
+  };
+
+  const handleOpenExpediente = async (u: SecondaryUser) => {
+    setLoadingProfileId(u.id);
+    try {
+      const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", u.id)
+        .maybeSingle();
+
+      if (!existing) {
+        const secondaryProfile = await loadSecondaryDriverProfile(u);
+        if (!secondaryProfile) {
+          toast.error(
+            `${fullName(u)} no tiene expediente de conductor en ninguna BD.`
+          );
+          setEditing(u);
+          return;
+        }
+        setSelectedDriverSource("secondary");
+        setSelectedDriver(secondaryProfile);
+        return;
+      }
+
+      const profile = await DriversService.getDriverProfile(u.id);
+      if (!profile) {
+        const secondaryProfile = await loadSecondaryDriverProfile(u);
+        if (!secondaryProfile) {
+          toast.error(
+            `${fullName(u)} no tiene expediente de conductor.`
+          );
+          setEditing(u);
+          return;
+        }
+        setSelectedDriverSource("secondary");
+        setSelectedDriver(secondaryProfile);
+        return;
+      }
+
+      let referrerName = "Sin referencia";
+      if (profile.referral_id && profile.referral_id.trim() !== "") {
+        const { data: refCodes } = await supabase
+          .from("referral_codes")
+          .select("driver_id")
+          .eq("referral_code", profile.referral_id)
+          .limit(1);
+        const refCode = refCodes?.[0];
+        if (refCode?.driver_id) {
+          const { data: referrers } = await supabase
+            .from("users")
+            .select("first_name, last_name")
+            .eq("id", refCode.driver_id)
+            .limit(1);
+          const referrer = referrers?.[0];
+          if (referrer) {
+            referrerName = `${referrer.first_name} ${referrer.last_name}`;
+          }
+        }
+      }
+
+      setSelectedDriverSource("primary");
+      setSelectedDriver({ ...profile, referrerName });
+    } catch (e: any) {
+      toast.error(e?.message || "Error al cargar el expediente");
+    } finally {
+      setLoadingProfileId(null);
+    }
+  };
+
+  const handleApproveDriver = async (id: string) => {
+    if (selectedDriverSource === "secondary") {
+      await UsersSecondaryService.update(id, { approved: true });
+    } else {
+      await DriversService.approveDriver(id, "admin-dashboard");
+    }
+    toast.success("Conductor aprobado exitosamente.");
+  };
+
+  const handleRejectDriver = async (id: string) => {
+    if (selectedDriverSource === "secondary") {
+      await UsersSecondaryService.update(id, { approved: false });
+    } else {
+      await DriversService.rejectDriver(id, "Documentos inválidos", "admin-dashboard");
+    }
+    toast.success("Conductor rechazado.");
+  };
+
+  const handleExportCsv = () => {
+    if (filtered.length === 0) {
+      toast.error("No hay usuarios para exportar.");
+      return;
+    }
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    exportToCsv(`usuarios_${dateStamp}`, filtered, [
+      { header: "ID", value: (u) => u.id },
+      { header: "Nombre", value: (u) => u.first_name || "" },
+      { header: "Apellido", value: (u) => u.last_name || "" },
+      { header: "Correo", value: (u) => u.email || "" },
+      { header: "Teléfono", value: (u) => u.mobile || "" },
+      { header: "Ciudad", value: (u) => u.city || "" },
+      { header: "Tipo", value: (u) => u.user_type || "" },
+      { header: "Estado", value: (u) => (u.blocked ? "Congelado" : "Activo") },
+      { header: "Alta", value: (u) => formatDate(u.created_at) },
+    ]);
+  };
+
   return (
     <Page
       title="Listado de Usuarios"
       actions={
         <>
+          <Button variant="secondary" onClick={handleExportCsv}>
+            Exportar CSV
+          </Button>
           <Button variant="secondary" onClick={load}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
-          <Button onClick={() => setOpenAdd(true)}>Añadir cliente</Button>
+          <Button variant="secondary" onClick={() => setOpenAdd("conductor")}>Añadir conductor</Button>
+          <Button onClick={() => setOpenAdd("cliente")}>Añadir cliente</Button>
         </>
       }
     >
@@ -276,10 +427,11 @@ export const UsersPage: React.FC = () => {
                           <div className="flex justify-center gap-2 flex-wrap">
                             <Button
                               variant="secondary"
-                              onClick={() => setEditing(u)}
+                              onClick={() => handleOpenExpediente(u)}
+                              disabled={loadingProfileId === u.id}
                               className="!px-3 !py-1.5 !text-xs"
                             >
-                              Editar
+                              {loadingProfileId === u.id ? "Cargando..." : "Editar"}
                             </Button>
                             <Button
                               variant="secondary"
@@ -325,12 +477,22 @@ export const UsersPage: React.FC = () => {
         onSave={handleSaveEdit}
       />
 
+      <DriverReviewModal
+        open={!!selectedDriver}
+        driver={selectedDriver}
+        source={selectedDriverSource}
+        onClose={() => setSelectedDriver(null)}
+        onApprove={handleApproveDriver}
+        onReject={handleRejectDriver}
+        onRefresh={load}
+      />
+
       <AddUserModal
-        open={openAdd}
-        lockedType="cliente"
-        onClose={() => setOpenAdd(false)}
+        open={openAdd !== null}
+        lockedType={openAdd ?? undefined}
+        onClose={() => setOpenAdd(null)}
         onSubmit={() => {
-          setOpenAdd(false);
+          setOpenAdd(null);
           load();
         }}
       />

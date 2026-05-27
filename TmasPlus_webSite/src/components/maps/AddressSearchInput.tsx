@@ -77,7 +77,7 @@ export default function AddressSearchInput({
     if (text.length < 2) { setSuggestions([]); return; }
     setLoading(true);
     try {
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_TOKEN}&country=co&language=es&limit=6&types=address,poi,neighborhood,locality,place`;
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_TOKEN}&country=co&language=es&limit=6&types=address,poi,neighborhood,locality,place&bbox=-82.0,-4.3,-66.8,13.5&proximity=-74.0817,4.6097&autocomplete=true`;
       const res = await fetch(url);
       if (!res.ok) { setSuggestions([]); return; }
       const data = await res.json();

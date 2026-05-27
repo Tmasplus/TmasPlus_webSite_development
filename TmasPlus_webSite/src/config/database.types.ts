@@ -255,6 +255,7 @@ export interface Database {
           delta_aeropuerto_prog: number;
           convenience_fee: number;
           convenience_fee_type: string;
+          umbral_intermunicipal_km: number;
           image: string | null;
           capacity: number;
           is_active: boolean;
@@ -278,6 +279,7 @@ export interface Database {
           delta_aeropuerto_prog?: number;
           convenience_fee?: number;
           convenience_fee_type?: string;
+          umbral_intermunicipal_km?: number;
           image?: string | null;
           capacity?: number;
           is_active?: boolean;
@@ -301,13 +303,14 @@ export interface Database {
           delta_aeropuerto_prog?: number;
           convenience_fee?: number;
           convenience_fee_type?: string;
+          umbral_intermunicipal_km?: number;
           image?: string | null;
           capacity?: number;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
         };
-      };  
+      };
       bookings: {
         Row: {
           id: string;
