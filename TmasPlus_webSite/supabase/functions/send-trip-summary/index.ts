@@ -37,11 +37,20 @@ serve(async (req: Request) => {
     const { record, old_record } = payload
     if (!record?.id) return new Response("Sin ID", { status: 200 })
 
-    const isNowCompleted = record?.status === 'COMPLETED'
-    const wasPreviouslyCompleted = old_record?.status === 'COMPLETED'
+    const COMPLETED_STATUSES = ['COMPLETE', 'COMPLETED']
+    const isNowCompleted = COMPLETED_STATUSES.includes(record?.status)
+    const wasPreviouslyCompleted = COMPLETED_STATUSES.includes(old_record?.status)
+
+    console.log("📊 STATUS CHECK:", JSON.stringify({
+      newStatus: record?.status,
+      oldStatus: old_record?.status,
+      isNowCompleted,
+      wasPreviouslyCompleted,
+      customer_email: record?.customer_email,
+    }))
 
     if (!(isNowCompleted && !wasPreviouslyCompleted)) {
-      console.log("⏸️ Ignorado: No hubo cambio a COMPLETED.")
+      console.log(`⏸️ Ignorado: status actual="${record?.status}" anterior="${old_record?.status}"`)
       return new Response("No action required", { status: 200 })
     }
 

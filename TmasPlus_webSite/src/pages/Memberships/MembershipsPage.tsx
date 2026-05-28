@@ -132,6 +132,9 @@ export default function MembershipsPage() {
                       Conductor
                     </th>
                     <th className="px-3 py-2 font-medium whitespace-nowrap">
+                      Placa
+                    </th>
+                    <th className="px-3 py-2 font-medium whitespace-nowrap">
                       Estado
                     </th>
                     <th className="px-3 py-2 font-medium whitespace-nowrap">
@@ -188,6 +191,15 @@ export default function MembershipsPage() {
                           <span className="text-xs text-slate-400 break-all">
                             {m.conductor}
                           </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        {m.car?.plate ? (
+                          <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-slate-700">
+                            {m.car.plate}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
                         )}
                       </td>
                       <td className="px-3 py-3">

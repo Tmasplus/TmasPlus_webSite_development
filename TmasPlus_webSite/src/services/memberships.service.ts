@@ -25,8 +25,17 @@ export interface MembershipUser {
   profile_image: string | null;
 }
 
+export interface MembershipCar {
+  id: string;
+  driver_id: string;
+  plate: string | null;
+  make: string | null;
+  model: string | null;
+}
+
 export interface MembershipWithUser extends Membership {
   user?: MembershipUser | null;
+  car?: MembershipCar | null;
 }
 
 export interface CreateMembershipInput {
@@ -64,27 +73,78 @@ export class MembershipsService {
       new Set(memberships.map((m) => m.conductor).filter(Boolean))
     );
 
-    let usersById: Record<string, MembershipUser> = {};
+    let usersByAuthId: Record<string, MembershipUser> = {};
+    let carsByAuthId: Record<string, MembershipCar> = {};
     if (conductorIds.length > 0) {
-      const { data: users, error: usersError } = await sb
+      // memberships.conductor stores users.auth_id (see CreateMembershipModal).
+      // Try matching by auth_id first; fall back to id for legacy rows.
+      const { data: usersByAuth, error: usersAuthError } = await sb
         .from('users')
         .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
-        .in('id', conductorIds);
+        .in('auth_id', conductorIds);
 
-      if (usersError) throw new Error(usersError.message);
+      if (usersAuthError) throw new Error(usersAuthError.message);
 
-      usersById = (users || []).reduce(
+      const matchedAuthIds = new Set(
+        (usersByAuth || []).map((u: MembershipUser) => u.auth_id).filter(Boolean)
+      );
+      const unmatchedIds = conductorIds.filter((c) => !matchedAuthIds.has(c));
+
+      let usersById: MembershipUser[] = [];
+      if (unmatchedIds.length > 0) {
+        const { data, error } = await sb
+          .from('users')
+          .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
+          .in('id', unmatchedIds);
+        if (error) throw new Error(error.message);
+        usersById = data || [];
+      }
+
+      const allUsers: MembershipUser[] = [...(usersByAuth || []), ...usersById];
+      usersByAuthId = allUsers.reduce(
         (acc: Record<string, MembershipUser>, u: MembershipUser) => {
-          acc[u.id] = u;
+          // Index by both auth_id and id so we hit either lookup style.
+          if (u.auth_id) acc[u.auth_id] = u;
+          if (u.id) acc[u.id] = u;
           return acc;
         },
         {}
       );
+
+      // cars.driver_id references users.id — use the resolved user ids.
+      const userIds = allUsers.map((u) => u.id).filter(Boolean);
+      if (userIds.length > 0) {
+        const { data: cars, error: carsError } = await sb
+          .from('cars')
+          .select('id, driver_id, plate, make, model')
+          .in('driver_id', userIds);
+        if (carsError) throw new Error(carsError.message);
+
+        const carsByUserId: Record<string, MembershipCar> = (cars || []).reduce(
+          (acc: Record<string, MembershipCar>, c: MembershipCar) => {
+            if (c.driver_id && !acc[c.driver_id]) acc[c.driver_id] = c;
+            return acc;
+          },
+          {}
+        );
+
+        carsByAuthId = allUsers.reduce(
+          (acc: Record<string, MembershipCar>, u: MembershipUser) => {
+            const car = carsByUserId[u.id];
+            if (!car) return acc;
+            if (u.auth_id) acc[u.auth_id] = car;
+            if (u.id) acc[u.id] = car;
+            return acc;
+          },
+          {}
+        );
+      }
     }
 
     return memberships.map((m) => ({
       ...m,
-      user: usersById[m.conductor] || null,
+      user: usersByAuthId[m.conductor] || null,
+      car: carsByAuthId[m.conductor] || null,
     }));
   }
 
