@@ -20,6 +20,33 @@ function json(body: unknown, status = 200) {
   });
 }
 
+/**
+ * Verifica que el JWT del proyecto primario pertenezca a un admin aprobado y no
+ * bloqueado. Usa el RPC `get_auth_profile` (security definer) que devuelve el
+ * perfil del usuario autenticado saltando RLS.
+ */
+async function isPrimaryAdmin(token: string): Promise<boolean> {
+  const authedPrimary = createClient(PRIMARY_URL, PRIMARY_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await authedPrimary.rpc("get_auth_profile");
+  if (error || !data) return false;
+  const profile = Array.isArray(data) ? data[0] : data;
+  return profile?.user_type === "admin" && profile?.approved === true && profile?.blocked !== true;
+}
+
+interface ImportVehicle {
+  make?: string | null;
+  model?: string | null;
+  plate?: string | null;
+  color?: string | null;
+  fuel_type?: string | null;
+  transmission?: string | null;
+  capacity?: number | null;
+  service_type?: string | null;
+}
+
 interface ImportDriverBody {
   id: string;
   email: string;
@@ -28,6 +55,64 @@ interface ImportDriverBody {
   mobile?: string | null;
   city?: string | null;
   profile_image?: string | null;
+  // Documento de identidad (cédula) del conductor en el proyecto primario
+  document_type?: string | null;
+  document_number?: string | null;
+  // Estado del conductor en la pestaña Conductores (proyecto primario)
+  approved?: boolean | null;
+  blocked?: boolean | null;
+  // Datos del vehículo a replicar en la tabla cars del proyecto secundario
+  vehicle?: ImportVehicle | null;
+}
+
+/**
+ * Replica los datos del vehículo del conductor en la tabla `cars` del proyecto
+ * secundario. Si ya existe un vehículo para ese conductor lo actualiza; si no,
+ * lo crea. Los errores no son fatales: se devuelven como aviso para no abortar
+ * la importación del usuario.
+ */
+async function syncCar(
+  admin: ReturnType<typeof createClient>,
+  driverId: string,
+  vehicle: ImportVehicle | null | undefined,
+  now: string,
+): Promise<string | undefined> {
+  if (!vehicle) return undefined;
+
+  const carFields: Record<string, unknown> = { driver_id: driverId, updated_at: now };
+  if (vehicle.make != null && String(vehicle.make).trim() !== "") carFields.make = String(vehicle.make).trim();
+  if (vehicle.model != null && String(vehicle.model).trim() !== "") carFields.model = String(vehicle.model).trim();
+  if (vehicle.plate != null && String(vehicle.plate).trim() !== "") carFields.plate = String(vehicle.plate).trim().toUpperCase();
+  if (vehicle.color != null) carFields.color = vehicle.color;
+  if (vehicle.fuel_type != null) carFields.fuel_type = vehicle.fuel_type;
+  if (vehicle.transmission != null) carFields.transmission = vehicle.transmission;
+  if (vehicle.capacity != null) carFields.capacity = vehicle.capacity;
+  if (vehicle.service_type != null) carFields.service_type = vehicle.service_type;
+
+  const { data: existingCar, error: findErr } = await admin
+    .from("cars")
+    .select("id")
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (findErr && (findErr as { code?: string }).code !== "PGRST116") {
+    return `No se pudo verificar el vehículo: ${findErr.message}`;
+  }
+
+  if (existingCar?.id) {
+    const { error } = await admin.from("cars").update(carFields).eq("id", existingCar.id);
+    if (error) return `No se pudo actualizar el vehículo: ${error.message}`;
+    return undefined;
+  }
+
+  // Crear vehículo nuevo: make/model/plate son NOT NULL en el esquema.
+  if (!carFields.make || !carFields.model || !carFields.plate) {
+    return "No se replicó el vehículo: faltan marca, modelo o placa.";
+  }
+  const { error } = await admin
+    .from("cars")
+    .insert({ ...carFields, is_active: true, created_at: now });
+  if (error) return `No se pudo crear el vehículo: ${error.message}`;
+  return undefined;
 }
 
 // Contraseña genérica temporal mientras el SMTP no esté configurado.
@@ -55,7 +140,9 @@ serve(async (req: Request) => {
   if (userErr || !userData?.user) {
     return json({ error: "Token inválido o expirado" }, 401);
   }
-  // Nota: aquí podrías agregar un chequeo extra de rol admin si lo necesitas.
+  if (!(await isPrimaryAdmin(token))) {
+    return json({ error: "Acceso denegado: se requiere rol de administrador" }, 403);
+  }
 
   // 2. Parsear payload
   let body: ImportDriverBody;
@@ -110,7 +197,34 @@ serve(async (req: Request) => {
       resetWarning = "El conductor ya estaba importado pero no se encontró su cuenta de Auth para resetear.";
     }
 
-    return json({ user: existing, authCreated: false, authWarning: resetWarning });
+    // Sincronizar estado del conductor (aprobado/bloqueado) y datos del vehículo
+    const nowExisting = new Date().toISOString();
+    const stateFields: Record<string, unknown> = { updated_at: nowExisting };
+    if (typeof body.approved === "boolean") stateFields.approved = body.approved;
+    if (typeof body.blocked === "boolean") stateFields.blocked = body.blocked;
+    if (body.document_type != null) stateFields.document_type = body.document_type;
+    if (body.document_number != null) stateFields.document_number = body.document_number;
+    let refreshed = existing;
+    if (Object.keys(stateFields).length > 1) {
+      const { data: updatedRow, error: stateErr } = await admin
+        .from("users")
+        .update(stateFields)
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (stateErr) {
+        resetWarning = resetWarning
+          ? `${resetWarning} No se pudo actualizar el estado: ${stateErr.message}`
+          : `No se pudo actualizar el estado: ${stateErr.message}`;
+      } else if (updatedRow) {
+        refreshed = updatedRow;
+      }
+    }
+
+    const carWarning = await syncCar(admin, existing.id, body.vehicle, nowExisting);
+    if (carWarning) resetWarning = resetWarning ? `${resetWarning} ${carWarning}` : carWarning;
+
+    return json({ user: refreshed, authCreated: false, authWarning: resetWarning });
   }
 
   // 5. Crear cuenta de Auth (sin rate-limit público, sin email de confirmación)
@@ -183,9 +297,13 @@ serve(async (req: Request) => {
     mobile: body.mobile ?? null,
     city: body.city ?? null,
     profile_image: body.profile_image ?? null,
+    document_type: body.document_type ?? null,
+    document_number: body.document_number ?? null,
     user_type: "driver",
-    approved: true,
-    blocked: false,
+    // Respetar el estado del conductor en la pestaña Conductores; por defecto
+    // aprobado/no bloqueado si el dashboard no envía el dato.
+    approved: typeof body.approved === "boolean" ? body.approved : true,
+    blocked: typeof body.blocked === "boolean" ? body.blocked : false,
     updated_at: now,
   };
 
@@ -220,6 +338,10 @@ serve(async (req: Request) => {
   if (upsertErr) {
     return json({ error: `Error al insertar usuario: ${upsertErr.message}` }, 500);
   }
+
+  // Replicar los datos del vehículo en la tabla cars del proyecto secundario
+  const carWarning = await syncCar(admin, upserted.id, body.vehicle, now);
+  if (carWarning) authWarning = authWarning ? `${authWarning} ${carWarning}` : carWarning;
 
   return json({ user: upserted, authCreated, authWarning });
 });

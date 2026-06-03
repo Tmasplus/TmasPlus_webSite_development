@@ -1,21 +1,24 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import Map, {
-  Marker,
-  Source,
-  Layer,
-  NavigationControl,
-  Popup,
-  type MapRef,
-  type ViewStateChangeEvent,
-} from "react-map-gl/mapbox";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
-import AddressSearchInput from "./AddressSearchInput";
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  InfoWindow,
+  useMap,
+  useMapsLibrary,
+  type MapMouseEvent,
+} from "@vis.gl/react-google-maps";
+import GooglePlacesSearchInput from "./GooglePlacesSearchInput";
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string;
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
 
-// Colombia bounding box — limita el mapa solo a Colombia
-const COLOMBIA_BOUNDS: [number, number, number, number] = [-82.0, -4.3, -66.8, 13.5];
+// Colombia bounding box — restricts the map view to Colombia
+const COLOMBIA_BOUNDS = {
+  north: 13.5,
+  south: -4.3,
+  west: -82.0,
+  east: -66.8,
+};
 
 export interface Location {
   latitude: number;
@@ -37,61 +40,66 @@ interface BookingMapViewProps {
   onRouteInfo?: (info: RouteInfo | null) => void;
 }
 
-async function reverseGeocode(lng: number, lat: number): Promise<string> {
-  // Ask for an address first; if none is found in this exact tile, fall back to
-  // wider place types so clicks in less-mapped areas still resolve to something.
-  const tryFetch = async (types: string) => {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&language=es&country=co&types=${types}&limit=1`
-    );
-    const data = await res.json();
-    return data.features?.[0]?.place_name as string | undefined;
-  };
-  const addr = await tryFetch("address");
-  if (addr) return addr;
-  const fallback = await tryFetch("address,poi,neighborhood,locality,place");
-  return fallback || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+export default function BookingMapView(props: BookingMapViewProps) {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return <MissingKeyNotice />;
+  }
+  return (
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={["places", "routes", "geocoding"]} language="es" region="CO">
+      <BookingMapInner {...props} />
+    </APIProvider>
+  );
 }
 
-export default function BookingMapView({
+function BookingMapInner({
   origin,
   destination,
   onOriginChange,
   onDestinationChange,
   onRouteInfo,
 }: BookingMapViewProps) {
-  const mapRef = useRef<MapRef>(null);
-  const [viewState, setViewState] = useState({
-    latitude: 4.6097,
-    longitude: -74.0817,
-    zoom: 13,
-  });
-  const [routeGeoJSON, setRouteGeoJSON] = useState<GeoJSON.Feature | null>(null);
-  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
+  const [center, setCenter] = useState({ lat: 4.6097, lng: -74.0817 });
+  const [zoom, setZoom] = useState(13);
   const [selectMode, setSelectMode] = useState<"origin" | "destination">("destination");
   const [locating, setLocating] = useState(true);
   const [userPos, setUserPos] = useState<{ lng: number; lat: number } | null>(null);
   const [showOriginPopup, setShowOriginPopup] = useState(false);
   const [showDestPopup, setShowDestPopup] = useState(false);
-  const [tokenError, setTokenError] = useState(false);
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
+  const initialFlyDoneRef = useRef(false);
 
-  // ── Validate token on mount ──
+  const geocodingLib = useMapsLibrary("geocoding");
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   useEffect(() => {
-    if (!MAPBOX_TOKEN) { setTokenError(true); return; }
-    fetch(`https://api.mapbox.com/tokens/v2?access_token=${MAPBOX_TOKEN}`)
-      .then((r) => r.json())
-      .then((d) => { if (d.code === "TokenInvalid") setTokenError(true); })
-      .catch(() => {});
+    if (geocodingLib) geocoderRef.current = new geocodingLib.Geocoder();
+  }, [geocodingLib]);
+
+  const reverseGeocode = useCallback(async (lng: number, lat: number): Promise<string> => {
+    if (!geocoderRef.current) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    try {
+      const res = await geocoderRef.current.geocode({
+        location: { lat, lng },
+        language: "es",
+        region: "co",
+      });
+      return res.results?.[0]?.formatted_address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    } catch {
+      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
   }, []);
 
   // ── GPS geolocation → auto-set origin ──
   useEffect(() => {
-    if (!navigator.geolocation) { setLocating(false); return; }
+    if (!navigator.geolocation) {
+      setLocating(false);
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
         setUserPos({ lng, lat });
-        setViewState({ latitude: lat, longitude: lng, zoom: 15 });
+        setCenter({ lat, lng });
+        setZoom(15);
         const address = await reverseGeocode(lng, lat);
         onOriginChange({ latitude: lat, longitude: lng, title: address });
         setSelectMode("destination");
@@ -101,50 +109,13 @@ export default function BookingMapView({
       { enableHighAccuracy: true, timeout: 10000 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reverseGeocode]);
 
-  // ── Fetch route when both points set ──
-  useEffect(() => {
-    if (!origin || !destination) {
-      setRouteGeoJSON(null);
-      setRouteInfo(null);
-      onRouteInfo?.(null);
-      return;
-    }
-    const fetchRoute = async () => {
-      try {
-        const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
-        const res = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
-        );
-        const data = await res.json();
-        const route = data.routes?.[0];
-        if (route?.geometry?.coordinates?.length) {
-          const info: RouteInfo = {
-            distanceKm: +(route.distance / 1000).toFixed(1),
-            durationMin: Math.ceil(route.duration / 60),
-            geometry: route.geometry,
-          };
-          setRouteInfo(info);
-          onRouteInfo?.(info);
-          setRouteGeoJSON({ type: "Feature", properties: {}, geometry: route.geometry });
-          const coordinates = route.geometry.coordinates as [number, number][];
-          const bounds = new mapboxgl.LngLatBounds();
-          coordinates.forEach((c) => bounds.extend(c));
-          mapRef.current?.fitBounds(bounds, { padding: 80, duration: 1200 });
-        }
-      } catch {
-        setRouteGeoJSON(null); setRouteInfo(null); onRouteInfo?.(null);
-      }
-    };
-    fetchRoute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin?.latitude, origin?.longitude, destination?.latitude, destination?.longitude]);
-
-  // ── Map click → reverse geocode → set origin/dest ──
   const handleMapClick = useCallback(
-    async (e: mapboxgl.MapLayerMouseEvent) => {
-      const { lng, lat } = e.lngLat;
+    async (e: MapMouseEvent) => {
+      const latLng = e.detail.latLng;
+      if (!latLng) return;
+      const { lat, lng } = latLng;
       const address = await reverseGeocode(lng, lat);
       const loc: Location = { latitude: lat, longitude: lng, title: address };
       if (selectMode === "origin") {
@@ -157,37 +128,27 @@ export default function BookingMapView({
         setSelectMode("origin");
       }
     },
-    [selectMode, onOriginChange, onDestinationChange]
+    [selectMode, onOriginChange, onDestinationChange, reverseGeocode]
   );
 
-  // ── Fly to selected search result ──
-  const flyTo = (loc: Location) => {
-    mapRef.current?.flyTo({ center: [loc.longitude, loc.latitude], zoom: 16, duration: 1200 });
-  };
+  const handleRouteCalculated = useCallback(
+    (info: RouteInfo | null) => {
+      setRouteInfo(info);
+      onRouteInfo?.(info);
+    },
+    [onRouteInfo]
+  );
 
-  // Route layer
-  const routeLayer: mapboxgl.LayerSpecification = {
-    id: "route-line", type: "line", source: "route",
-    paint: { "line-color": "#00204a", "line-width": 5, "line-opacity": 0.85 },
-    layout: { "line-join": "round", "line-cap": "round" },
-  };
-  // route outline for 3D effect
-  const routeOutline: mapboxgl.LayerSpecification = {
-    id: "route-outline", type: "line", source: "route",
-    paint: { "line-color": "#00f4f5", "line-width": 8, "line-opacity": 0.25 },
-    layout: { "line-join": "round", "line-cap": "round" },
-  };
-
-  const shortName = (title: string) => {
-    const parts = title.split(",");
-    return parts.length > 1 ? parts.slice(0, 2).join(",") : title;
-  };
+  // Reset initial fly flag if both points get cleared
+  useEffect(() => {
+    if (!origin && !destination) initialFlyDoneRef.current = false;
+  }, [origin, destination]);
 
   return (
     <div className="space-y-4">
       {/* ── Search inputs ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <AddressSearchInput
+        <GooglePlacesSearchInput
           label="Dirección de origen"
           placeholder="Ej: Calle 174 con 8, edificio..."
           value={origin?.title || ""}
@@ -195,13 +156,17 @@ export default function BookingMapView({
             onOriginChange(loc);
             setSelectMode("destination");
             setShowOriginPopup(true);
-            flyTo(loc);
+            setCenter({ lat: loc.latitude, lng: loc.longitude });
+            setZoom(16);
           }}
-          onClear={() => { onOriginChange(null); setShowOriginPopup(false); }}
+          onClear={() => {
+            onOriginChange(null);
+            setShowOriginPopup(false);
+          }}
           icon="origin"
           proximity={userPos ?? (destination ? { lng: destination.longitude, lat: destination.latitude } : null)}
         />
-        <AddressSearchInput
+        <GooglePlacesSearchInput
           label="Dirección de destino"
           placeholder="¿A dónde vamos?"
           value={destination?.title || ""}
@@ -209,9 +174,13 @@ export default function BookingMapView({
             onDestinationChange(loc);
             setSelectMode("origin");
             setShowDestPopup(true);
-            flyTo(loc);
+            setCenter({ lat: loc.latitude, lng: loc.longitude });
+            setZoom(16);
           }}
-          onClear={() => { onDestinationChange(null); setShowDestPopup(false); }}
+          onClear={() => {
+            onDestinationChange(null);
+            setShowDestPopup(false);
+          }}
           icon="destination"
           proximity={origin ? { lng: origin.longitude, lat: origin.latitude } : userPos}
         />
@@ -256,53 +225,40 @@ export default function BookingMapView({
       </div>
 
       {/* ── MAP ── */}
-      {tokenError ? (
-        <div className="rounded-2xl border-2 border-dashed border-red-300 bg-red-50 flex flex-col items-center justify-center text-center p-8" style={{ height: 420 }}>
-          <svg className="w-12 h-12 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
-          <p className="text-red-700 font-semibold text-lg mb-1">Token de Mapbox inválido</p>
-          <p className="text-red-500 text-sm max-w-md">
-            El token configurado en <code className="bg-red-100 px-1 rounded">.env</code> no es válido o fue revocado.
-            Genera uno nuevo en{" "}
-            <a href="https://account.mapbox.com/" target="_blank" rel="noopener noreferrer" className="underline font-medium">
-              account.mapbox.com
-            </a>{" "}
-            y actualiza <code className="bg-red-100 px-1 rounded">VITE_MAPBOX_ACCESS_TOKEN</code>. Luego reinicia el servidor.
-          </p>
-        </div>
-      ) : (
       <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-lg" style={{ height: 420 }}>
         <Map
-          ref={mapRef}
-          {...viewState}
-          onMove={(evt: ViewStateChangeEvent) => setViewState(evt.viewState)}
+          mapId="tplus-booking-map"
+          defaultCenter={center}
+          defaultZoom={zoom}
+          center={center}
+          zoom={zoom}
+          onCameraChanged={(ev) => {
+            setCenter(ev.detail.center);
+            setZoom(ev.detail.zoom);
+          }}
           onClick={handleMapClick}
-          mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/streets-v12"
-          style={{ width: "100%", height: "100%" }}
-          cursor={selectMode === "origin" ? "crosshair" : "crosshair"}
-          maxBounds={COLOMBIA_BOUNDS}
+          gestureHandling="greedy"
+          disableDefaultUI={false}
+          clickableIcons={false}
+          restriction={{ latLngBounds: COLOMBIA_BOUNDS, strictBounds: false }}
           minZoom={5}
+          style={{ width: "100%", height: "100%", cursor: "crosshair" }}
         >
-          <NavigationControl position="top-right" showCompass showZoom />
-
           {/* ── User GPS dot (blue pulse) ── */}
           {userPos && (
-            <Marker latitude={userPos.lat} longitude={userPos.lng}>
+            <AdvancedMarker position={{ lat: userPos.lat, lng: userPos.lng }}>
               <div className="relative w-6 h-6 cursor-default">
                 <div className="absolute inset-0 bg-blue-400/30 rounded-full animate-ping" />
                 <div className="absolute inset-1.5 bg-blue-500 border-2 border-white rounded-full shadow-lg" />
               </div>
-            </Marker>
+            </AdvancedMarker>
           )}
 
           {/* ── Origin Marker ── */}
           {origin && (
-            <Marker
-              latitude={origin.latitude}
-              longitude={origin.longitude}
-              onClick={(e) => { e.originalEvent.stopPropagation(); setShowOriginPopup(!showOriginPopup); }}
+            <AdvancedMarker
+              position={{ lat: origin.latitude, lng: origin.longitude }}
+              onClick={() => setShowOriginPopup((v) => !v)}
             >
               <div className="flex flex-col items-center cursor-pointer group">
                 <div className="relative">
@@ -312,30 +268,26 @@ export default function BookingMapView({
                 <div className="w-0.5 h-3 bg-green-500" />
                 <div className="w-2 h-2 bg-green-500/30 rounded-full" />
               </div>
-            </Marker>
+            </AdvancedMarker>
           )}
           {origin && showOriginPopup && (
-            <Popup
-              latitude={origin.latitude}
-              longitude={origin.longitude}
-              onClose={() => setShowOriginPopup(false)}
-              closeButton={false}
-              offset={25}
-              className="!p-0"
+            <InfoWindow
+              position={{ lat: origin.latitude, lng: origin.longitude }}
+              onCloseClick={() => setShowOriginPopup(false)}
+              pixelOffset={[0, -25]}
             >
-              <div className="px-3 py-2 max-w-[220px]">
+              <div className="px-1 py-1 max-w-[220px]">
                 <p className="text-xs font-bold text-green-700 mb-0.5">ORIGEN</p>
                 <p className="text-xs text-slate-600 leading-snug">{shortName(origin.title)}</p>
               </div>
-            </Popup>
+            </InfoWindow>
           )}
 
           {/* ── Destination Marker ── */}
           {destination && (
-            <Marker
-              latitude={destination.latitude}
-              longitude={destination.longitude}
-              onClick={(e) => { e.originalEvent.stopPropagation(); setShowDestPopup(!showDestPopup); }}
+            <AdvancedMarker
+              position={{ lat: destination.latitude, lng: destination.longitude }}
+              onClick={() => setShowDestPopup((v) => !v)}
             >
               <div className="flex flex-col items-center cursor-pointer group">
                 <div className="relative">
@@ -345,34 +297,29 @@ export default function BookingMapView({
                 <div className="w-0.5 h-3 bg-red-500" />
                 <div className="w-2 h-2 bg-red-500/30 rounded-full" />
               </div>
-            </Marker>
+            </AdvancedMarker>
           )}
           {destination && showDestPopup && (
-            <Popup
-              latitude={destination.latitude}
-              longitude={destination.longitude}
-              onClose={() => setShowDestPopup(false)}
-              closeButton={false}
-              offset={25}
-              className="!p-0"
+            <InfoWindow
+              position={{ lat: destination.latitude, lng: destination.longitude }}
+              onCloseClick={() => setShowDestPopup(false)}
+              pixelOffset={[0, -25]}
             >
-              <div className="px-3 py-2 max-w-[220px]">
+              <div className="px-1 py-1 max-w-[220px]">
                 <p className="text-xs font-bold text-red-700 mb-0.5">DESTINO</p>
                 <p className="text-xs text-slate-600 leading-snug">{shortName(destination.title)}</p>
               </div>
-            </Popup>
+            </InfoWindow>
           )}
 
-          {/* ── Route line ── */}
-          {routeGeoJSON && (
-            <Source id="route" type="geojson" data={routeGeoJSON}>
-              <Layer {...routeOutline} />
-              <Layer {...routeLayer} />
-            </Source>
-          )}
+          {/* ── Route directions ── */}
+          <Directions
+            origin={origin}
+            destination={destination}
+            onRouteInfo={handleRouteCalculated}
+          />
         </Map>
       </div>
-      )}
 
       {/* ── Route info summary ── */}
       {routeInfo && (
@@ -411,4 +358,111 @@ export default function BookingMapView({
       )}
     </div>
   );
+}
+
+// ── Directions sub-component: draws the route and reports back distance/time ──
+function Directions({
+  origin,
+  destination,
+  onRouteInfo,
+}: {
+  origin: Location | null;
+  destination: Location | null;
+  onRouteInfo: (info: RouteInfo | null) => void;
+}) {
+  const map = useMap();
+  const routesLib = useMapsLibrary("routes");
+  const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
+  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+
+  useEffect(() => {
+    if (!routesLib || !map) return;
+    directionsServiceRef.current = new routesLib.DirectionsService();
+    directionsRendererRef.current = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: {
+        strokeColor: "#00204a",
+        strokeOpacity: 0.85,
+        strokeWeight: 5,
+      },
+    });
+    return () => {
+      directionsRendererRef.current?.setMap(null);
+      directionsRendererRef.current = null;
+    };
+  }, [routesLib, map]);
+
+  useEffect(() => {
+    const svc = directionsServiceRef.current;
+    const renderer = directionsRendererRef.current;
+    if (!svc || !renderer || !map) return;
+
+    if (!origin || !destination) {
+      renderer.set("directions", null);
+      onRouteInfo(null);
+      return;
+    }
+
+    svc
+      .route({
+        origin: { lat: origin.latitude, lng: origin.longitude },
+        destination: { lat: destination.latitude, lng: destination.longitude },
+        travelMode: google.maps.TravelMode.DRIVING,
+        region: "co",
+      })
+      .then((res) => {
+        renderer.setDirections(res);
+        const leg = res.routes[0]?.legs[0];
+        if (!leg) {
+          onRouteInfo(null);
+          return;
+        }
+        const distMeters = leg.distance?.value ?? 0;
+        const durSec = leg.duration?.value ?? 0;
+        // Build GeoJSON LineString from the route's overview_path
+        const path = res.routes[0].overview_path.map((p) => [p.lng(), p.lat()] as [number, number]);
+        const info: RouteInfo = {
+          distanceKm: +(distMeters / 1000).toFixed(1),
+          durationMin: Math.ceil(durSec / 60),
+          geometry: { type: "LineString", coordinates: path },
+        };
+        onRouteInfo(info);
+
+        // Fit bounds to the route
+        const bounds = new google.maps.LatLngBounds();
+        res.routes[0].overview_path.forEach((p) => bounds.extend(p));
+        map.fitBounds(bounds, 80);
+      })
+      .catch(() => {
+        renderer.set("directions", null);
+        onRouteInfo(null);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin?.latitude, origin?.longitude, destination?.latitude, destination?.longitude, map]);
+
+  return null;
+}
+
+function MissingKeyNotice() {
+  return (
+    <div
+      className="rounded-2xl border-2 border-dashed border-red-300 bg-red-50 flex flex-col items-center justify-center text-center p-8"
+      style={{ height: 420 }}
+    >
+      <svg className="w-12 h-12 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+      </svg>
+      <p className="text-red-700 font-semibold text-lg mb-1">Falta la API Key de Google Maps</p>
+      <p className="text-red-500 text-sm max-w-md">
+        Añade <code className="bg-red-100 px-1 rounded">VITE_GOOGLE_MAPS_API_KEY</code> en el archivo{" "}
+        <code className="bg-red-100 px-1 rounded">.env</code> y reinicia el servidor de desarrollo.
+      </p>
+    </div>
+  );
+}
+
+function shortName(title: string) {
+  const parts = title.split(",");
+  return parts.length > 1 ? parts.slice(0, 2).join(",") : title;
 }

@@ -10,9 +10,11 @@ import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { exportToCsv } from '@/utils/exportCsv';
+import { vehicleCategoryLabel } from '@/utils/vehicleCategory';
 import { supabase } from '@/config/supabase';
 import { DriversService } from '@/services/drivers.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
+import { DriverDocumentsService } from '@/services/driverDocuments.service';
 import DriverReviewModal, { type EnrichedDriverProfile } from './DriverReviewModal';
 
 // 1. SOLUCIÓN TS: Tipos estrictos para eliminar el uso de `as any`
@@ -36,9 +38,13 @@ export const DriversPage: React.FC = () => {
     const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
 
     const [appAccessIds, setAppAccessIds] = useState<Set<string>>(new Set());
+    // Respaldo desde la BD secundaria (App) cuando la primaria no tiene el dato.
+    const [cedulaFallback, setCedulaFallback] = useState<Record<string, string>>({});
+    const [categoryFallback, setCategoryFallback] = useState<Record<string, string>>({});
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
     const [bulkImporting, setBulkImporting] = useState(false);
+    const [bulkResyncing, setBulkResyncing] = useState(false);
     const [postImportNotice, setPostImportNotice] = useState<{ count: number; names: string[]; authMissing: string[] } | null>(null);
 
     const debouncedQuery = useDebounced(query, 500);
@@ -101,6 +107,52 @@ export const DriversPage: React.FC = () => {
         fetchDrivers();
     }, [fetchDrivers]);
 
+    // Respaldo cruzado: la pestaña Conductores lee la BD primaria, pero la cédula
+    // o la categoría del vehículo pueden existir solo en la App (secundaria).
+    // Para los conductores a los que les falte el dato en primaria, lo buscamos
+    // en la secundaria y lo mostramos igual.
+    useEffect(() => {
+        if (drivers.length === 0) {
+            setCedulaFallback({});
+            setCategoryFallback({});
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const missingCedulaIds = drivers
+                .filter(d => !(d as any).license_number && !(d as any).document_number)
+                .map(d => d.id);
+            const missingCatIds = drivers
+                .filter(d => !(d.serviceType || d.vehicle?.service_type))
+                .map(d => d.id);
+
+            const [cedulas, cats] = await Promise.all([
+                missingCedulaIds.length
+                    ? UsersSecondaryService.documentsByIds(missingCedulaIds).catch(() => ({}))
+                    : Promise.resolve({} as Record<string, { document_number: string | null }>),
+                missingCatIds.length
+                    ? UsersSecondaryService.categoriesByDriver(missingCatIds).catch(() => ({}))
+                    : Promise.resolve({} as Record<string, string>),
+            ]);
+            if (cancelled) return;
+
+            const cedulaMap: Record<string, string> = {};
+            for (const [id, doc] of Object.entries(cedulas)) {
+                if (doc?.document_number) cedulaMap[id] = doc.document_number;
+            }
+            setCedulaFallback(cedulaMap);
+            setCategoryFallback(cats as Record<string, string>);
+        })();
+        return () => { cancelled = true; };
+    }, [drivers]);
+
+    const cedulaFor = (d: EnrichedDriverProfile): string =>
+        // En la App (primaria) la cédula del conductor está en license_number.
+        (d as any).license_number || (d as any).document_number || cedulaFallback[d.id] || '';
+
+    const categoryFor = (d: EnrichedDriverProfile): string | undefined =>
+        d.serviceType || d.vehicle?.service_type || categoryFallback[d.id];
+
     const filteredAndSortedDrivers = useMemo(() => {
         let result = [...drivers];
 
@@ -147,6 +199,27 @@ export const DriversPage: React.FC = () => {
                 mobile: driver.mobile,
                 city: (driver as any).city ?? null,
                 profile_image: (driver as any).profile_image ?? null,
+                // Cédula del conductor → base secundaria. En la App (primaria) la
+                // cédula del conductor está en license_number, así que la tomamos
+                // de ahí para guardarla como document_number en la secundaria.
+                document_type: (driver as any).document_type ?? null,
+                document_number: (driver as any).license_number ?? (driver as any).document_number ?? null,
+                // Estado del conductor (pestaña Conductores) → base secundaria
+                approved: !!driver.approved,
+                blocked: !!driver.blocked,
+                // Datos del vehículo → tabla cars de la base secundaria
+                vehicle: driver.vehicle
+                    ? {
+                          make: driver.vehicle.make ?? null,
+                          model: driver.vehicle.model ?? null,
+                          plate: driver.vehicle.plate ?? null,
+                          color: driver.vehicle.color ?? null,
+                          fuel_type: driver.vehicle.fuel_type ?? null,
+                          transmission: driver.vehicle.transmission ?? null,
+                          capacity: driver.vehicle.capacity ?? null,
+                          service_type: driver.vehicle.service_type ?? null,
+                      }
+                    : null,
             });
             setAppAccessIds(prev => {
                 const next = new Set(prev);
@@ -154,6 +227,28 @@ export const DriversPage: React.FC = () => {
                 return next;
             });
             if (res.authWarning) toast.warning(`${driver.first_name}: ${res.authWarning}`);
+
+            // Replicar los documentos del conductor y del vehículo a la App para
+            // que queden visibles en la pestaña Usuarios. El usuario/vehículo ya
+            // existen en la secundaria tras importDriverWithAuth.
+            const v = driver.vehicle as any;
+            const docs: Record<string, string | null | undefined> = {
+                verify_id_image: (driver as any).verify_id_image,
+                verify_id_image_bk: (driver as any).verify_id_image_bk,
+                license_image: (driver as any).license_image,
+                license_image_back: (driver as any).license_image_back,
+                car_image_1: v?.car_image_1,
+                car_image_2: v?.car_image_2,
+                card_prop_image: v?.card_prop_image,
+                card_prop_image_back: v?.card_prop_image_back,
+                soat_image: v?.soat_image,
+                tecnomecanica_image: v?.tecnomecanica_image,
+            };
+            const { warnings } = await DriverDocumentsService.replicateAllToSecondary(driver.id, docs);
+            if (warnings.length) {
+                toast.warning(`${driver.first_name}: documentos sin replicar → ${warnings.join('; ')}`);
+            }
+
             return { ok: true, authCreated: res.authCreated };
         } catch (error: any) {
             toast.error(`Error al importar ${driver.first_name}: ${error?.message || 'desconocido'}`);
@@ -178,6 +273,44 @@ export const DriversPage: React.FC = () => {
                 authMissing: res.authCreated ? [] : [name],
             });
         }
+    };
+
+    const handleResyncOne = async (driver: EnrichedDriverProfile) => {
+        setImportingIds(prev => new Set(prev).add(driver.id));
+        const res = await importOne(driver);
+        setImportingIds(prev => {
+            const next = new Set(prev);
+            next.delete(driver.id);
+            return next;
+        });
+        if (res.ok) {
+            toast.success(`${driver.first_name} ${driver.last_name}: estado y vehículo re-sincronizados en la App.`);
+        }
+    };
+
+    const handleBulkResync = async () => {
+        // Re-sincroniza a los conductores ya importados que estén en la lista filtrada
+        const targets = filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && d.email);
+        if (targets.length === 0) {
+            toast.error('No hay conductores importados para re-sincronizar.');
+            return;
+        }
+        if (!window.confirm(
+            `¿Re-sincronizar estado y vehículo de ${targets.length} conductor(es) ya importado(s)?\n\n` +
+            `Nota: esto restablece su contraseña en la App a la genérica.`
+        )) return;
+
+        setBulkResyncing(true);
+        let success = 0;
+        let failed = 0;
+        for (const d of targets) {
+            const res = await importOne(d);
+            if (res.ok) success++; else failed++;
+            if (targets.length > 1) await new Promise(r => setTimeout(r, 350));
+        }
+        setBulkResyncing(false);
+        if (success > 0) toast.success(`${success} conductor(es) re-sincronizado(s).`);
+        if (failed > 0) toast.error(`${failed} re-sincronización(es) fallaron.`);
     };
 
     const handleBulkImport = async () => {
@@ -251,6 +384,24 @@ export const DriversPage: React.FC = () => {
 
     const columns: Column<EnrichedDriverProfile>[] = [
         { header: "Nombre", accessor: (r) => <span className="font-medium text-[#002f45]">{r.first_name} {r.last_name}</span> },
+        {
+            header: "Cédula",
+            accessor: (r) => {
+                const ced = cedulaFor(r);
+                return ced
+                    ? <span className="font-mono text-xs text-slate-700">{ced}</span>
+                    : <span className="text-slate-400 text-xs italic">—</span>;
+            }
+        },
+        {
+            header: "Categoría",
+            accessor: (r) => {
+                const cat = categoryFor(r);
+                return cat
+                    ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">{vehicleCategoryLabel(cat)}</span>
+                    : <span className="text-slate-400 text-xs italic">Sin vehículo</span>;
+            }
+        },
         { header: "Correo", accessor: (r) => r.email },
         { header: "Teléfono", accessor: (r) => r.mobile },
         {
@@ -281,6 +432,11 @@ export const DriversPage: React.FC = () => {
         { header: "Registro", accessor: (r) => r.created_at ? formatDate(r.created_at) : 'N/A' },
     ];
 
+    const importedCount = useMemo(
+        () => filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && d.email).length,
+        [filteredAndSortedDrivers, appAccessIds]
+    );
+
     const pendingImportCount = useMemo(
         () => Array.from(selectedIds).filter(id => !appAccessIds.has(id)).length,
         [selectedIds, appAccessIds]
@@ -298,6 +454,8 @@ export const DriversPage: React.FC = () => {
             { header: 'ID', value: (d) => d.id },
             { header: 'Nombre', value: (d) => d.first_name },
             { header: 'Apellido', value: (d) => d.last_name },
+            { header: 'Cédula', value: (d) => cedulaFor(d) },
+            { header: 'Categoría', value: (d) => { const c = categoryFor(d); return c ? vehicleCategoryLabel(c) : ''; } },
             { header: 'Correo', value: (d) => d.email },
             { header: 'Teléfono', value: (d) => d.mobile },
             { header: 'Estado', value: statusLabel },
@@ -312,9 +470,21 @@ export const DriversPage: React.FC = () => {
         <Page
             title="Gestión de Conductores"
             actions={
-                <Button variant="secondary" onClick={handleExportCsv}>
-                    Exportar CSV
-                </Button>
+                <div className="flex items-center gap-2">
+                    {importedCount > 0 && (
+                        <Button
+                            variant="secondary"
+                            onClick={handleBulkResync}
+                            disabled={bulkResyncing || bulkImporting}
+                            title="Vuelve a enviar estado y vehículo de los conductores ya importados (los visibles según el filtro actual)"
+                        >
+                            {bulkResyncing ? 'Sincronizando...' : `Re-sincronizar importados (${importedCount})`}
+                        </Button>
+                    )}
+                    <Button variant="secondary" onClick={handleExportCsv}>
+                        Exportar CSV
+                    </Button>
+                </div>
             }
         >
             <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
@@ -388,7 +558,7 @@ export const DriversPage: React.FC = () => {
                         page={page}
                         pageSize={pageSize}
                         onPageChange={setPage}
-                        edit={(driver) => setSelectedDriver(driver)}
+                        edit={(driver) => setSelectedDriver({ ...driver, license_number: (driver as any).license_number || cedulaFor(driver) || null } as EnrichedDriverProfile)}
                         onDelete={handleDelete}
                         selectable
                         selectedIds={selectedIds}
@@ -396,7 +566,17 @@ export const DriversPage: React.FC = () => {
                         onToggleSelectAll={toggleSelectAllVisible}
                         isRowSelectable={(r) => !appAccessIds.has(r.id)}
                         rowActions={(r) => appAccessIds.has(r.id)
-                            ? null
+                            ? (
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => handleResyncOne(r)}
+                                    disabled={importingIds.has(r.id) || !r.email}
+                                    className="!px-3 !py-1.5 !text-xs"
+                                    title="Vuelve a enviar estado y datos del vehículo a la App"
+                                >
+                                    {importingIds.has(r.id) ? 'Sincronizando...' : 'Re-sincronizar'}
+                                </Button>
+                            )
                             : (
                                 <Button
                                     onClick={() => handleImportOne(r)}

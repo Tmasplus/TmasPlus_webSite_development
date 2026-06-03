@@ -148,6 +148,27 @@ export class MembershipsService {
     }));
   }
 
+  /**
+   * Devuelve un mapa { conductor -> status } con la membresía más reciente de
+   * cada conductor. La clave `conductor` corresponde a users.auth_id (o users.id
+   * en filas heredadas), por lo que al consultar conviene probar ambos ids.
+   */
+  static async statusByConductor(): Promise<Record<string, MembershipStatus | string>> {
+    const { data, error } = await sb
+      .from('memberships')
+      .select('conductor, status')
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(error.message || 'Error al obtener membresías');
+
+    const map: Record<string, MembershipStatus | string> = {};
+    for (const m of (data || []) as Pick<Membership, 'conductor' | 'status'>[]) {
+      // Como viene ordenado por created_at desc, la primera ocurrencia es la más reciente.
+      if (m.conductor && !map[m.conductor]) map[m.conductor] = m.status;
+    }
+    return map;
+  }
+
   static async searchUsers(
     query: string,
     limit = 10

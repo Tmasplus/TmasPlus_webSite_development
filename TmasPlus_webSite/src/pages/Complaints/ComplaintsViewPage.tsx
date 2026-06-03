@@ -18,14 +18,14 @@ const PAGE_SIZE = 20;
 
 const STATUS_LABEL: Record<ComplaintStatus, string> = {
   pending: "Pendiente",
-  in_progress: "En proceso",
+  in_review: "En proceso",
   resolved: "Resuelto",
   rejected: "Rechazado",
 };
 
 const STATUS_BADGE: Record<ComplaintStatus, string> = {
   pending: "bg-yellow-100 text-yellow-800",
-  in_progress: "bg-blue-100 text-blue-800",
+  in_review: "bg-blue-100 text-blue-800",
   resolved: "bg-green-100 text-green-800",
   rejected: "bg-slate-200 text-slate-700",
 };
@@ -227,7 +227,7 @@ export default function ComplaintsViewPage() {
             >
               <option value="all">Todos</option>
               <option value="pending">Pendiente</option>
-              <option value="in_progress">En proceso</option>
+              <option value="in_review">En proceso</option>
               <option value="resolved">Resuelto</option>
               <option value="rejected">Rechazado</option>
             </select>
@@ -531,7 +531,7 @@ export default function ComplaintsViewPage() {
                       <a
                         href={url}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="text-sky-600 hover:underline break-all"
                       >
                         {url}

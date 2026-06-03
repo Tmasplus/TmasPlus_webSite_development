@@ -21,22 +21,19 @@ type RegisterInput = {
 
 export class RegistrationService {
   static async register(input: RegisterInput): Promise<UserRow> {
+    // La tabla `users` de la App (BD primaria) NO tiene columnas
+    // `document_number`/`document_type` (la cédula se guarda en `license_number`)
+    // ni `bank_number`/`vehicle_*`/`password`. Insertamos solo columnas válidas
+    // y mapeamos la cédula a `license_number` para evitar errores 400.
     const userData: UserInsert = {
       user_type: input.user_type,
       first_name: input.first_name,
       last_name: input.last_name,
       email: input.email,
       city: input.city,
-      document_type: input.document_type,
-      document_number: input.document_number,
       referral_id: input.referral_id,
       mobile: input.mobile,
-      bank_number: input.bank_number,
-      vehicle_type: input.vehicle_type,
-      vehicle_placa: input.vehicle_placa,
-      vehicle_model: input.vehicle_model,
-      password: input.password,
-      // documents: input.documents
+      license_number: input.document_number || null,
     };
 
     return await UsersService.createUser(userData);

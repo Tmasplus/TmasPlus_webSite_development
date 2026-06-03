@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string;
+import { useMapsLibrary } from "@vis.gl/react-google-maps";
 
 interface Location {
   latitude: number;
@@ -9,29 +8,12 @@ interface Location {
 }
 
 interface Suggestion {
-  id: string;
-  place_name: string;
-  text: string;
-  address: string;
-  center: [number, number];
+  placeId: string;
+  mainText: string;
+  secondaryText: string;
 }
 
-// Build a compact display string ("Carrera 8 #174, Chicó, Bogotá") from the
-// full Mapbox place_name. Drops the country and any postal-code segment, keeps
-// at most the first 3 meaningful parts.
-function shortenPlaceName(placeName: string): string {
-  if (!placeName) return "";
-  const parts = placeName
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .filter((p) => p.toLowerCase() !== "colombia");
-  // Strip a trailing postal code from any segment ("Bogotá 110111" → "Bogotá").
-  const cleaned = parts.map((p) => p.replace(/\s+\d{4,}\s*$/, "").trim());
-  return cleaned.slice(0, 3).join(", ");
-}
-
-interface AddressSearchInputProps {
+interface GooglePlacesSearchInputProps {
   label: string;
   placeholder: string;
   value: string;
@@ -39,32 +21,21 @@ interface AddressSearchInputProps {
   onClear?: () => void;
   icon: "origin" | "destination";
   disabled?: boolean;
-  // Bias geocoding results around this point (e.g. user GPS or the other field).
   proximity?: { lng: number; lat: number } | null;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseFeature(f: any): Suggestion {
-  const city = f.context?.find((c: any) => c.id.startsWith("place"))?.text || "";
-  const region = f.context?.find((c: any) => c.id.startsWith("region"))?.text || "";
-  const neighborhood =
-    f.context?.find((c: any) => c.id.startsWith("neighborhood") || c.id.startsWith("locality"))?.text || "";
-  // Mapbox geocoding v5 returns the house number on `feature.address` (top-level) for
-  // address-type features — not on `feature.properties.address`. Fall back to either.
-  const houseNumber = f.address || f.properties?.address || "";
-  const isAddress = Array.isArray(f.place_type) && f.place_type.includes("address");
-  const shortAddr = isAddress && houseNumber ? `${f.text} #${houseNumber}` : f.text;
-  const subtitle = [neighborhood, city, region].filter(Boolean).join(", ");
-  return {
-    id: f.id,
-    place_name: f.place_name,
-    text: shortAddr,
-    address: subtitle,
-    center: f.center,
-  };
+function shortenPlaceName(placeName: string): string {
+  if (!placeName) return "";
+  const parts = placeName
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => p.toLowerCase() !== "colombia");
+  const cleaned = parts.map((p) => p.replace(/\s+\d{4,}\s*$/, "").trim());
+  return cleaned.slice(0, 3).join(", ");
 }
 
-export default function AddressSearchInput({
+export default function GooglePlacesSearchInput({
   label,
   placeholder,
   value,
@@ -73,17 +44,32 @@ export default function AddressSearchInput({
   icon,
   disabled,
   proximity,
-}: AddressSearchInputProps) {
+}: GooglePlacesSearchInputProps) {
+  const placesLib = useMapsLibrary("places");
   const [query, setQuery] = useState(value);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+  const autocompleteSvcRef = useRef<google.maps.places.AutocompleteService | null>(null);
+  const placesSvcRef = useRef<google.maps.places.PlacesService | null>(null);
   const isOrigin = icon === "origin";
 
-  useEffect(() => { setQuery(shortenPlaceName(value)); }, [value]);
+  useEffect(() => {
+    setQuery(shortenPlaceName(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (!placesLib) return;
+    autocompleteSvcRef.current = new placesLib.AutocompleteService();
+    sessionTokenRef.current = new placesLib.AutocompleteSessionToken();
+    // PlacesService requires an HTMLElement or Map; a detached div works.
+    const dummy = document.createElement("div");
+    placesSvcRef.current = new placesLib.PlacesService(dummy);
+  }, [placesLib]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -96,57 +82,84 @@ export default function AddressSearchInput({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const searchAddress = useCallback(async (text: string) => {
-    if (text.length < 2) { setSuggestions([]); return; }
-    setLoading(true);
-    try {
-      // Bias results around proximity (GPS or other selected point). Fall back to Bogotá.
-      const center = proximity ?? { lng: -74.0817, lat: 4.6097 };
-      // ~55km box around proximity center → drops results from other cities.
-      const delta = 0.5;
-      const bbox = [
-        center.lng - delta,
-        Math.max(-4.3, center.lat - delta),
-        center.lng + delta,
-        Math.min(13.5, center.lat + delta),
-      ].join(",");
-      const params = new URLSearchParams({
-        access_token: MAPBOX_TOKEN,
-        country: "co",
-        language: "es",
-        limit: "6",
-        // Restrict to specific places (addresses + POIs). Including place/locality/
-        // neighborhood causes whole-city results to outrank actual addresses.
-        types: "address,poi",
-        proximity: `${center.lng},${center.lat}`,
-        bbox,
-        autocomplete: "true",
-      });
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?${params}`;
-      const res = await fetch(url);
-      if (!res.ok) { setSuggestions([]); return; }
-      const data = await res.json();
-      setSuggestions((data.features || []).map(parseFeature));
-    } catch {
-      setSuggestions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [proximity]);
+  const searchAddress = useCallback(
+    async (text: string) => {
+      if (text.length < 2 || !autocompleteSvcRef.current) {
+        setSuggestions([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const center = proximity ?? { lng: -74.0817, lat: 4.6097 };
+        const request: google.maps.places.AutocompletionRequest = {
+          input: text,
+          sessionToken: sessionTokenRef.current ?? undefined,
+          componentRestrictions: { country: "co" },
+          language: "es",
+          location: new google.maps.LatLng(center.lat, center.lng),
+          radius: 55000,
+        };
+        autocompleteSvcRef.current.getPlacePredictions(request, (preds, status) => {
+          setLoading(false);
+          if (status !== google.maps.places.PlacesServiceStatus.OK || !preds) {
+            setSuggestions([]);
+            return;
+          }
+          setSuggestions(
+            preds.map((p) => ({
+              placeId: p.place_id,
+              mainText: p.structured_formatting?.main_text || p.description,
+              secondaryText: p.structured_formatting?.secondary_text || "",
+            }))
+          );
+        });
+      } catch {
+        setLoading(false);
+        setSuggestions([]);
+      }
+    },
+    [proximity]
+  );
 
   const handleChange = (text: string) => {
     setQuery(text);
     setSelectedIdx(-1);
-    if (!text) { setSuggestions([]); onClear?.(); return; }
+    if (!text) {
+      setSuggestions([]);
+      onClear?.();
+      return;
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => searchAddress(text), 300);
   };
 
   const handleSelect = (s: Suggestion) => {
-    onSelect({ latitude: s.center[1], longitude: s.center[0], title: s.place_name });
-    setQuery(shortenPlaceName(s.place_name));
-    setSuggestions([]);
-    setIsFocused(false);
+    if (!placesSvcRef.current) return;
+    placesSvcRef.current.getDetails(
+      {
+        placeId: s.placeId,
+        fields: ["geometry", "formatted_address", "name"],
+        sessionToken: sessionTokenRef.current ?? undefined,
+      },
+      (place, status) => {
+        if (
+          status === google.maps.places.PlacesServiceStatus.OK &&
+          place?.geometry?.location
+        ) {
+          const lat = place.geometry.location.lat();
+          const lng = place.geometry.location.lng();
+          const title = place.formatted_address || `${s.mainText}, ${s.secondaryText}`;
+          onSelect({ latitude: lat, longitude: lng, title });
+          setQuery(shortenPlaceName(title));
+          setSuggestions([]);
+          setIsFocused(false);
+          // Per Google docs, session tokens are single-use per autocomplete+details cycle.
+          if (placesLib) {
+            sessionTokenRef.current = new placesLib.AutocompleteSessionToken();
+          }
+        }
+      }
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -165,7 +178,6 @@ export default function AddressSearchInput({
     }
   };
 
-  // Static Tailwind classes — dynamic interpolation (bg-${color}-500) gets purged
   const dotCls = isOrigin ? "bg-green-500" : "bg-red-500";
   const iconCls = isOrigin ? "text-green-500" : "text-red-500";
   const borderFocus = isOrigin
@@ -213,7 +225,11 @@ export default function AddressSearchInput({
           </svg>
         )}
         {query && !loading && (
-          <button type="button" onClick={() => handleChange("")} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button
+            type="button"
+            onClick={() => handleChange("")}
+            className="text-slate-400 hover:text-slate-600 transition-colors"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -225,7 +241,7 @@ export default function AddressSearchInput({
       {isFocused && suggestions.length > 0 && (
         <ul className="absolute z-50 mt-1.5 w-full bg-white border border-slate-200 rounded-xl shadow-2xl max-h-64 overflow-y-auto py-1">
           {suggestions.map((s, idx) => (
-            <li key={s.id}>
+            <li key={s.placeId}>
               <button
                 type="button"
                 onClick={() => handleSelect(s)}
@@ -241,8 +257,10 @@ export default function AddressSearchInput({
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-800 truncate">{s.text}</p>
-                  {s.address && <p className="text-xs text-slate-400 truncate">{s.address}</p>}
+                  <p className="text-sm font-medium text-slate-800 truncate">{s.mainText}</p>
+                  {s.secondaryText && (
+                    <p className="text-xs text-slate-400 truncate">{s.secondaryText}</p>
+                  )}
                 </div>
               </button>
             </li>

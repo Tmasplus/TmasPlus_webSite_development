@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { motion } from "framer-motion";
-import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/MapboxAddressPicker";
+import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/GoogleMapsAddressPicker";
 import { CarTypesService } from "@/services/carTypes.service";
 import type { CarTypeRow } from "@/config/database.types";
 import {
@@ -12,8 +12,7 @@ import {
 
 const PAYMENT_LABEL_TO_DB: Record<string, string> = {
   Efectivo: "cash",
-  Tarjeta: "card",
-  Empresarial: "corporate",
+  Nequi: "nequi",
   Daviplata: "daviplata",
 };
 
@@ -392,8 +391,7 @@ export default function AddBookingPage() {
               className="w-full p-2 border border-slate-300 rounded-lg"
             >
               <option>Efectivo</option>
-              <option>Tarjeta</option>
-              <option>Empresarial</option>
+              <option>Nequi</option>
               <option>Daviplata</option>
             </select>
           </div>
@@ -530,6 +528,13 @@ export default function AddBookingPage() {
             <div className="mt-3 pt-3 border-t border-slate-200 flex justify-between text-lg font-semibold text-primary">
               <span>Total</span>
               <span>${fare.toLocaleString("es-CO")}</span>
+            </div>
+            <div className="mt-2 flex justify-between text-sm text-slate-600">
+              <span>Rango estimado (±10%)</span>
+              <span>
+                ${Math.round(fare * 0.9).toLocaleString("es-CO")} – $
+                {Math.round(fare * 1.1).toLocaleString("es-CO")}
+              </span>
             </div>
           </motion.div>
         )}

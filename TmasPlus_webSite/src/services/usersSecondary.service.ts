@@ -111,9 +111,19 @@ export class UsersSecondaryService {
       .update(payload)
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw new Error(error.message || 'Error al actualizar usuario');
+
+    // Si el UPDATE afectó 0 filas, PostgREST devuelve una representación vacía
+    // (antes provocaba un 406 críptico con .single()). Esto ocurre cuando la
+    // política RLS del proyecto secundario no permite la escritura con el rol
+    // actual. Lo señalamos con un mensaje claro.
+    if (!data) {
+      throw new Error(
+        'No se pudo actualizar el usuario (no encontrado o sin permisos de escritura en la BD).'
+      );
+    }
     return data as SecondaryUser;
   }
 
@@ -121,7 +131,72 @@ export class UsersSecondaryService {
     id: string,
     blocked: boolean
   ): Promise<SecondaryUser> {
-    return this.update(id, { blocked });
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
+    // no es válido para escribir en el proyecto secundario (se trata como anon y
+    // el UPDATE no afecta filas -> 406). Por eso el bloqueo se hace vía Edge
+    // Function con service role, igual que delete-user.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('set-user-blocked', {
+      body: { id, blocked },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al cambiar el estado del usuario';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (!data?.user) {
+      throw new Error('No se pudo cambiar el estado del usuario');
+    }
+    return data.user as SecondaryUser;
+  }
+
+  static async setApproved(
+    id: string,
+    approved: boolean
+  ): Promise<SecondaryUser> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    // Igual que toggleBlock: el dashboard se autentica contra el proyecto
+    // PRIMARIO, por lo que su token se trata como anon en el proyecto secundario
+    // y el UPDATE directo no afecta filas (406). La aprobación/rechazo se hace
+    // vía Edge Function con service role.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('set-user-approved', {
+      body: { id, approved },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al cambiar el estado de aprobación';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    if (!data?.user) {
+      throw new Error('No se pudo cambiar el estado de aprobación del usuario');
+    }
+    return data.user as SecondaryUser;
   }
 
   static async delete(id: string): Promise<void> {
@@ -158,6 +233,107 @@ export class UsersSecondaryService {
     const { data, error } = await sb.from('users').select('id');
     if (error) throw new Error(error.message || 'Error al obtener IDs de usuarios');
     return new Set((data || []).map((u: { id: string }) => u.id));
+  }
+
+  /**
+   * Devuelve la cédula (document_number/document_type) de cada usuario por id,
+   * leída de la BD secundaria (Dashboard). Sirve de respaldo para la pestaña
+   * Conductores: si un conductor tiene la cédula solo en esta BD, igual se
+   * muestra.
+   */
+  static async documentsByIds(
+    ids: string[],
+  ): Promise<Record<string, { document_number: string | null; document_type: string | null }>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (unique.length === 0) return {};
+    await syncSession();
+    const { data, error } = await sb
+      .from('users')
+      .select('id, document_number, document_type')
+      .in('id', unique);
+    if (error) {
+      console.warn('[documentsByIds] No se pudo leer users:', error.message);
+      return {};
+    }
+    const map: Record<string, { document_number: string | null; document_type: string | null }> = {};
+    for (const row of (data || []) as Array<{ id: string; document_number: string | null; document_type: string | null }>) {
+      map[row.id] = { document_number: row.document_number, document_type: row.document_type };
+    }
+    return map;
+  }
+
+  /**
+   * Devuelve la categoría (service_type) del vehículo activo de cada conductor,
+   * leída de la tabla cars de la BD secundaria (App). Prioriza el vehículo
+   * activo y, ante varios, el más reciente. Mapea por driver_id, que puede ser
+   * tanto users.id como users.auth_id (filas heredadas).
+   */
+  static async categoriesByDriver(
+    driverIds: string[],
+  ): Promise<Record<string, string>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    const ids = Array.from(new Set(driverIds.filter(Boolean)));
+    if (ids.length === 0) return {};
+    await syncSession();
+    const { data, error } = await sb
+      .from('cars')
+      .select('driver_id, service_type, is_active, updated_at')
+      .in('driver_id', ids)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false });
+    if (error) {
+      console.warn('[categoriesByDriver] No se pudo leer cars:', error.message);
+      return {};
+    }
+    const map: Record<string, string> = {};
+    for (const row of (data || []) as Array<{ driver_id: string; service_type: string | null }>) {
+      // El primer registro por driver_id (gracias al order) es el preferido.
+      if (row.driver_id && row.service_type && !map[row.driver_id]) {
+        map[row.driver_id] = row.service_type;
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Carga el usuario y su vehículo desde la base secundaria, sincronizando la
+   * sesión para que las políticas RLS dejen leer ambas tablas. El vehículo se
+   * busca por users.id y, como respaldo, por auth_id (filas heredadas).
+   *
+   * Si el conductor tiene varios vehículos se prioriza el activo (is_active);
+   * solo si no hay ninguno activo se cae al más reciente.
+   */
+  static async getUserWithVehicle(
+    userId: string,
+    authId?: string | null,
+  ): Promise<{ user: SecondaryUser | null; car: any | null }> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+
+    const { data: user, error: userErr } = await sb
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (userErr && (userErr as any).code !== 'PGRST116') {
+      throw new Error(userErr.message || 'Error al obtener usuario');
+    }
+
+    const driverIds = [userId, authId].filter(Boolean) as string[];
+    const { data: cars, error: carErr } = await sb
+      .from('cars')
+      .select('*')
+      .in('driver_id', driverIds)
+      // El vehículo activo primero; ante empate, el más reciente.
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (carErr) {
+      console.warn('[getUserWithVehicle] No se pudo leer cars:', carErr.message);
+    }
+
+    return { user: (user as SecondaryUser) ?? null, car: cars?.[0] ?? null };
   }
 
   static async existsById(id: string): Promise<boolean> {
@@ -258,6 +434,20 @@ export class UsersSecondaryService {
     mobile?: string | null;
     city?: string | null;
     profile_image?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    approved?: boolean | null;
+    blocked?: boolean | null;
+    vehicle?: {
+      make?: string | null;
+      model?: string | null;
+      plate?: string | null;
+      color?: string | null;
+      fuel_type?: string | null;
+      transmission?: string | null;
+      capacity?: number | null;
+      service_type?: string | null;
+    } | null;
   }): Promise<{ user: SecondaryUser; authCreated: boolean; authWarning?: string }> {
     if (!sb) throw new Error('Cliente secundario no configurado');
 

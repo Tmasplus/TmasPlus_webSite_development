@@ -10,6 +10,7 @@ import { useDebounced } from "@/hooks/useDebounced";
 import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
 import { exportToCsv } from "@/utils/exportCsv";
+import { vehicleCategoryLabel } from "@/utils/vehicleCategory";
 import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
   UsersSecondaryService,
@@ -17,11 +18,15 @@ import {
   type UpdateUserInput,
 } from "@/services/usersSecondary.service";
 import { DriversService } from "@/services/drivers.service";
+import {
+  MembershipsService,
+  type MembershipStatus,
+} from "@/services/memberships.service";
 import UserEditModal from "./UserEditModal";
 import AddUserModal from "./AddUserModal";
 import DriverReviewModal, { type EnrichedDriverProfile } from "./DriverReviewModal";
 
-type StatusFilter = "todos" | "activos" | "congelados";
+type StatusFilter = "todos" | "activos" | "bloqueados";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -33,8 +38,46 @@ function fullName(u: SecondaryUser) {
   return [u.first_name, u.last_name].filter(Boolean).join(" ") || "—";
 }
 
+const MEMBERSHIP_STYLES: Record<string, string> = {
+  ACTIVA: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  INACTIVA: "bg-slate-100 text-slate-600 border-slate-200",
+  CANCELADA: "bg-rose-50 text-rose-700 border-rose-200",
+  VENCIDA: "bg-amber-50 text-amber-700 border-amber-200",
+};
+
+function MembershipBadge({ status }: { status?: MembershipStatus | string }) {
+  if (!status) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs border bg-slate-50 text-slate-400 border-slate-200">
+        Sin membresía
+      </span>
+    );
+  }
+  const cls =
+    MEMBERSHIP_STYLES[String(status)] ||
+    "bg-slate-100 text-slate-700 border-slate-200";
+  return (
+    <span
+      className={classNames(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs border font-medium",
+        cls
+      )}
+    >
+      {String(status)}
+    </span>
+  );
+}
+
 export const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<SecondaryUser[]>([]);
+  const [membershipMap, setMembershipMap] = useState<
+    Record<string, MembershipStatus | string>
+  >({});
+  // Categoría (service_type) del vehículo activo, resuelta por user.id.
+  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
+  // Cédula tomada de la BD primaria, solo como respaldo cuando la secundaria
+  // no la tiene; keyed por user.id.
+  const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -53,14 +96,114 @@ export const UsersPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await UsersSecondaryService.list();
+      const [data, memberships] = await Promise.all([
+        UsersSecondaryService.list(),
+        MembershipsService.statusByConductor().catch(() => ({})),
+      ]);
       setUsers(data);
+      setMembershipMap(memberships);
+      // No bloqueamos la tabla por la cédula/categoría: se enriquece aparte.
+      enrich(data);
     } catch (e: any) {
       setError(e?.message || "Error al cargar usuarios");
     } finally {
       setLoading(false);
     }
   };
+
+  // Resuelve la categoría del vehículo activo y la cédula de respaldo (primaria)
+  // para la lista actual. La categoría se busca primero en la App (secundaria) y,
+  // si falta, en el registro web (primaria). La cédula secundaria ya viene en la
+  // fila; aquí solo cubrimos las que no la tengan.
+  const enrich = async (rows: SecondaryUser[]) => {
+    if (rows.length === 0) {
+      setCategoryMap({});
+      setCedulaFallbackMap({});
+      return;
+    }
+
+    // ids (users.id + auth_id) usados como driver_id en la tabla cars.
+    const idPairs = rows.map((u) => ({ id: u.id, authId: u.auth_id }));
+    const allDriverIds = idPairs.flatMap((p) =>
+      [p.id, p.authId].filter(Boolean) as string[]
+    );
+
+    // 1) Categoría desde la App (secundaria).
+    const secCats = await UsersSecondaryService.categoriesByDriver(
+      allDriverIds
+    ).catch(() => ({} as Record<string, string>));
+
+    const catByUser: Record<string, string> = {};
+    for (const { id, authId } of idPairs) {
+      const c = secCats[id] || (authId ? secCats[authId] : undefined);
+      if (c) catByUser[id] = c;
+    }
+
+    // 2) Respaldo de categoría desde la primaria para los que falten.
+    const missingCat = idPairs.filter(({ id }) => !catByUser[id]);
+    if (missingCat.length > 0) {
+      const missingDriverIds = missingCat.flatMap(({ id, authId }) =>
+        [id, authId].filter(Boolean) as string[]
+      );
+      const { data: primaryCars } = await supabase
+        .from("cars")
+        .select("driver_id, service_type, is_active, updated_at")
+        .in("driver_id", missingDriverIds)
+        .order("is_active", { ascending: false })
+        .order("updated_at", { ascending: false });
+      const primaryByDriver: Record<string, string> = {};
+      for (const row of (primaryCars || []) as Array<{
+        driver_id: string;
+        service_type: string | null;
+      }>) {
+        if (row.driver_id && row.service_type && !primaryByDriver[row.driver_id]) {
+          primaryByDriver[row.driver_id] = row.service_type;
+        }
+      }
+      for (const { id, authId } of missingCat) {
+        const c = primaryByDriver[id] || (authId ? primaryByDriver[authId] : undefined);
+        if (c) catByUser[id] = c;
+      }
+    }
+    setCategoryMap(catByUser);
+
+    // 3) Cédula de respaldo (primaria/App) para usuarios sin document_number en
+    // la BD del Dashboard. En la App la cédula se guarda en `license_number`
+    // (esa tabla NO tiene columna `document_number`).
+    const missingCedulaIds = rows
+      .filter((u) => !u.document_number)
+      .map((u) => u.id);
+    if (missingCedulaIds.length > 0) {
+      const { data: primaryUsers } = await supabase
+        .from("users")
+        .select("id, license_number")
+        .in("id", missingCedulaIds);
+      const cedulaByUser: Record<string, string> = {};
+      for (const row of (primaryUsers || []) as Array<{
+        id: string;
+        license_number: string | null;
+      }>) {
+        if (row.license_number) cedulaByUser[row.id] = row.license_number;
+      }
+      setCedulaFallbackMap(cedulaByUser);
+    } else {
+      setCedulaFallbackMap({});
+    }
+  };
+
+  const cedulaFor = (u: SecondaryUser): string =>
+    u.document_number || cedulaFallbackMap[u.id] || "";
+
+  // La App guarda la categoría tanto denormalizada en users.car_type
+  // ("T+Plus Taxi"…) como en cars.service_type. Priorizamos car_type por ser el
+  // dato propio de la App; si falta, usamos el mapa (cars secundaria → primaria).
+  const categoryFor = (u: SecondaryUser): string | undefined =>
+    (u.car_type as string | undefined) || categoryMap[u.id];
+
+  // memberships.conductor guarda users.auth_id (o users.id en filas heredadas),
+  // así que probamos ambos identificadores del usuario.
+  const membershipFor = (u: SecondaryUser): MembershipStatus | string | undefined =>
+    (u.auth_id && membershipMap[u.auth_id]) || membershipMap[u.id];
 
   useEffect(() => {
     load();
@@ -76,28 +219,28 @@ export const UsersPage: React.FC = () => {
     const q = debouncedQuery.trim().toLowerCase();
     return users.filter((u) => {
       const matchesQ = q
-        ? [u.id, u.first_name, u.last_name, u.email, u.mobile, u.city]
+        ? [u.id, u.first_name, u.last_name, u.email, u.mobile, u.city, cedulaFor(u)]
             .filter(Boolean)
             .some((v) => String(v).toLowerCase().includes(q))
         : true;
       const matchesStatus =
         status === "todos"
           ? true
-          : status === "congelados"
+          : status === "bloqueados"
           ? !!u.blocked
           : !u.blocked;
       const matchesType =
         typeFilter === "todos" ? true : u.user_type === typeFilter;
       return matchesQ && matchesStatus && matchesType;
     });
-  }, [users, debouncedQuery, status, typeFilter]);
+  }, [users, debouncedQuery, status, typeFilter, cedulaFallbackMap]);
 
   const handleToggleBlock = async (u: SecondaryUser) => {
     const willBlock = !u.blocked;
     if (
       !confirm(
         willBlock
-          ? `¿Congelar a ${fullName(u)}? No podrá iniciar sesión.`
+          ? `¿Bloquear a ${fullName(u)}? No podrá iniciar sesión.`
           : `¿Reactivar a ${fullName(u)}?`
       )
     )
@@ -144,21 +287,11 @@ export const UsersPage: React.FC = () => {
     u: SecondaryUser
   ): Promise<EnrichedDriverProfile | null> => {
     if (!supabaseSecondary) return null;
-    const sb = supabaseSecondary as any;
 
-    const { data: userRow, error: userErr } = await sb
-      .from("users")
-      .select("*")
-      .eq("id", u.id)
-      .maybeSingle();
-    if (userErr || !userRow) return null;
-
-    const { data: cars } = await sb
-      .from("cars")
-      .select("*")
-      .eq("driver_id", u.id)
-      .limit(1);
-    const activeVehicle = cars && cars[0] ? cars[0] : undefined;
+    // Usa el servicio (sincroniza la sesión) para que el RLS deje leer users y cars.
+    const { user: userRow, car: activeVehicle } =
+      await UsersSecondaryService.getUserWithVehicle(u.id, u.auth_id);
+    if (!userRow) return null;
 
     let companyData: any;
     if (activeVehicle?.features) {
@@ -167,7 +300,7 @@ export const UsersPage: React.FC = () => {
 
     return {
       ...(userRow as any),
-      vehicle: activeVehicle,
+      vehicle: activeVehicle ?? undefined,
       serviceType: (activeVehicle?.service_type as any) || "particular",
       companyData,
       referrerName: "Sin referencia",
@@ -177,21 +310,34 @@ export const UsersPage: React.FC = () => {
   const handleOpenExpediente = async (u: SecondaryUser) => {
     setLoadingProfileId(u.id);
     try {
-      const { data: existing } = await supabase
-        .from("users")
-        .select("id")
-        .eq("id", u.id)
-        .maybeSingle();
-
-      if (!existing) {
-        const secondaryProfile = await loadSecondaryDriverProfile(u);
-        if (!secondaryProfile) {
-          toast.error(
-            `${fullName(u)} no tiene expediente de conductor en ninguna BD.`
-          );
-          setEditing(u);
-          return;
+      // /users lista la base secundaria (App), así que el expediente —y en
+      // particular el vehículo— debe leerse de la secundaria como fuente de
+      // verdad. La primaria solo se usa como respaldo si no hay fila secundaria.
+      const secondaryProfile = await loadSecondaryDriverProfile(u);
+      if (secondaryProfile) {
+        // Respaldo: si no hay vehículo en la secundaria pero sí en la primaria
+        // (conductores importados antes de sincronizar el vehículo), lo adjuntamos.
+        if (!secondaryProfile.vehicle) {
+          const driverIds = [u.id, u.auth_id].filter(Boolean) as string[];
+          const { data: primaryCars } = await supabase
+            .from("cars")
+            .select("*")
+            .in("driver_id", driverIds)
+            .limit(1);
+          const primaryCar = primaryCars?.[0];
+          if (primaryCar) {
+            secondaryProfile.vehicle = primaryCar as any;
+            secondaryProfile.serviceType = (primaryCar.service_type as any) || "particular";
+          }
         }
+        // La cédula puede vivir solo en la App (license_number). Inyectamos el
+        // valor ya resuelto (incluye el respaldo) para que el modal lo muestre y
+        // permita editarlo, tanto en clientes (document_number) como conductores.
+        const cedulaResuelta = cedulaFor(u) || null;
+        (secondaryProfile as any).document_number =
+          (secondaryProfile as any).document_number || cedulaResuelta;
+        (secondaryProfile as any).license_number =
+          (secondaryProfile as any).license_number || cedulaResuelta;
         setSelectedDriverSource("secondary");
         setSelectedDriver(secondaryProfile);
         return;
@@ -199,16 +345,10 @@ export const UsersPage: React.FC = () => {
 
       const profile = await DriversService.getDriverProfile(u.id);
       if (!profile) {
-        const secondaryProfile = await loadSecondaryDriverProfile(u);
-        if (!secondaryProfile) {
-          toast.error(
-            `${fullName(u)} no tiene expediente de conductor.`
-          );
-          setEditing(u);
-          return;
-        }
-        setSelectedDriverSource("secondary");
-        setSelectedDriver(secondaryProfile);
+        toast.error(
+          `${fullName(u)} no tiene expediente de conductor en ninguna BD.`
+        );
+        setEditing(u);
         return;
       }
 
@@ -244,7 +384,7 @@ export const UsersPage: React.FC = () => {
 
   const handleApproveDriver = async (id: string) => {
     if (selectedDriverSource === "secondary") {
-      await UsersSecondaryService.update(id, { approved: true });
+      await UsersSecondaryService.setApproved(id, true);
     } else {
       await DriversService.approveDriver(id, "admin-dashboard");
     }
@@ -253,7 +393,7 @@ export const UsersPage: React.FC = () => {
 
   const handleRejectDriver = async (id: string) => {
     if (selectedDriverSource === "secondary") {
-      await UsersSecondaryService.update(id, { approved: false });
+      await UsersSecondaryService.setApproved(id, false);
     } else {
       await DriversService.rejectDriver(id, "Documentos inválidos", "admin-dashboard");
     }
@@ -270,11 +410,14 @@ export const UsersPage: React.FC = () => {
       { header: "ID", value: (u) => u.id },
       { header: "Nombre", value: (u) => u.first_name || "" },
       { header: "Apellido", value: (u) => u.last_name || "" },
+      { header: "Cédula", value: (u) => cedulaFor(u) },
       { header: "Correo", value: (u) => u.email || "" },
       { header: "Teléfono", value: (u) => u.mobile || "" },
       { header: "Ciudad", value: (u) => u.city || "" },
+      { header: "Categoría", value: (u) => (categoryFor(u) ? vehicleCategoryLabel(categoryFor(u)) : "") },
       { header: "Tipo", value: (u) => u.user_type || "" },
-      { header: "Estado", value: (u) => (u.blocked ? "Congelado" : "Activo") },
+      { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
+      { header: "Estado", value: (u) => (u.blocked ? "Bloqueado" : u.approved === false ? "Pendiente" : "Activo") },
       { header: "Alta", value: (u) => formatDate(u.created_at) },
     ]);
   };
@@ -316,7 +459,7 @@ export const UsersPage: React.FC = () => {
           >
             <option value="todos">Todos</option>
             <option value="activos">Activos</option>
-            <option value="congelados">Congelados</option>
+            <option value="bloqueados">Bloqueados</option>
           </select>
           <select
             className="rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
@@ -356,9 +499,12 @@ export const UsersPage: React.FC = () => {
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
                     <th className="px-3 py-2 font-medium">Usuario</th>
+                    <th className="px-3 py-2 font-medium">Cédula</th>
                     <th className="px-3 py-2 font-medium">Correo</th>
                     <th className="px-3 py-2 font-medium">Teléfono</th>
+                    <th className="px-3 py-2 font-medium">Categoría</th>
                     <th className="px-3 py-2 font-medium">Tipo</th>
+                    <th className="px-3 py-2 font-medium">Membresía</th>
                     <th className="px-3 py-2 font-medium">Estado</th>
                     <th className="px-3 py-2 font-medium">Alta</th>
                     <th className="px-3 py-2 font-medium text-center">
@@ -370,6 +516,9 @@ export const UsersPage: React.FC = () => {
                   {filtered.map((u) => {
                     const busy = actionLoadingId === u.id;
                     const blocked = !!u.blocked;
+                    // Un conductor importado sin aprobar (approved === false y no
+                    // bloqueado) sigue pendiente de revisión: no debe verse "Activo".
+                    const pending = !blocked && u.approved === false;
                     return (
                       <motion.tr
                         key={u.id}
@@ -401,23 +550,40 @@ export const UsersPage: React.FC = () => {
                             </div>
                           </div>
                         </td>
+                        <td className="px-3 py-3 font-mono text-xs text-slate-700">
+                          {cedulaFor(u) || "—"}
+                        </td>
                         <td className="px-3 py-3">{u.email || "—"}</td>
                         <td className="px-3 py-3">{u.mobile || "—"}</td>
+                        <td className="px-3 py-3">
+                          {categoryFor(u) ? (
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">
+                              {vehicleCategoryLabel(categoryFor(u))}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3">
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-700 border border-slate-200">
                             {u.user_type || "—"}
                           </span>
                         </td>
                         <td className="px-3 py-3">
+                          <MembershipBadge status={membershipFor(u)} />
+                        </td>
+                        <td className="px-3 py-3">
                           <span
                             className={classNames(
                               "inline-flex items-center rounded-full px-2 py-0.5 text-xs border",
                               blocked
-                                ? "bg-sky-50 text-sky-700 border-sky-200"
+                                ? "bg-red-50 text-red-700 border-red-200"
+                                : pending
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
                                 : "bg-green-50 text-green-700 border-green-200"
                             )}
                           >
-                            {blocked ? "Congelado" : "Activo"}
+                            {blocked ? "Bloqueado" : pending ? "Pendiente" : "Activo"}
                           </span>
                         </td>
                         <td className="px-3 py-3">
@@ -441,14 +607,14 @@ export const UsersPage: React.FC = () => {
                                 "!px-3 !py-1.5 !text-xs",
                                 blocked
                                   ? "!text-green-700 !border-green-300"
-                                  : "!text-sky-700 !border-sky-300"
+                                  : "!text-red-700 !border-red-300"
                               )}
                             >
                               {busy
                                 ? "..."
                                 : blocked
                                 ? "Reactivar"
-                                : "Congelar"}
+                                : "Bloquear"}
                             </Button>
                             <Button
                               variant="secondary"

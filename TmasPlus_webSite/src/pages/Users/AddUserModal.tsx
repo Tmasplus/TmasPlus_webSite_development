@@ -493,6 +493,8 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
           user_type: created.user_type ?? mappedType,
           city: created.city ?? form.ciudad,
           referral_id: created.referral_id ?? form.referralId ?? null,
+          document_type: form.tipoDocumento || null,
+          document_number: form.nroDocumento || null,
         });
       } catch (secondaryErr: any) {
         setSubmitError(

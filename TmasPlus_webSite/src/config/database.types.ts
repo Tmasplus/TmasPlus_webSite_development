@@ -597,7 +597,7 @@ export type ComplaintUpdate = Database['public']['Tables']['complaints']['Update
 // ==================== ENUMS DE QUEJAS ====================
 export type ComplaintType = 'queja' | 'reclamo' | 'sugerencia';
 export type ComplaintPriority = 'alta' | 'media' | 'baja';
-export type ComplaintStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
+export type ComplaintStatus = 'pending' | 'in_review' | 'resolved' | 'rejected';
 
 export interface ComplaintFilters {
   status?: ComplaintStatus | 'all';

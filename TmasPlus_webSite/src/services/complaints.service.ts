@@ -188,40 +188,82 @@ export class ComplaintsService {
   static async setStatus(
     id: string,
     status: ComplaintStatus,
-    adminId?: string | null
+    _adminId?: string | null
   ): Promise<ComplaintRow> {
     const updates: ComplaintUpdate = { status };
-    if (status === 'resolved') {
-      updates.resolved_by = adminId ?? null;
-      updates.resolved_at = new Date().toISOString();
-    } else {
-      updates.resolved_by = null;
-      updates.resolved_at = null;
-    }
+    // resolved_by referencia users.id del proyecto secundario; los admins viven en
+    // el proyecto primario, así que dejamos siempre null para no romper la FK.
+    updates.resolved_by = null;
+    updates.resolved_at = status === 'resolved' ? new Date().toISOString() : null;
     return this.updateComplaint(id, updates);
   }
 
   static async respond(
     id: string,
     adminResponse: string,
-    adminId: string | null,
+    _adminId: string | null,
     markResolved: boolean
   ): Promise<ComplaintRow> {
     const updates: ComplaintUpdate = {
       admin_response: adminResponse,
-      status: markResolved ? 'resolved' : 'in_progress',
+      status: markResolved ? 'resolved' : 'in_review',
+      resolved_by: null,
     };
     if (markResolved) {
-      updates.resolved_by = adminId;
       updates.resolved_at = new Date().toISOString();
     }
-    return this.updateComplaint(id, updates);
+    const updated = await this.updateComplaint(id, updates);
+
+    try {
+      await this.sendResponseEmail(id);
+    } catch (emailError) {
+      ErrorHandler.handleWithToast(
+        emailError,
+        'ComplaintsService.respond.sendResponseEmail',
+      );
+    }
+
+    return updated;
+  }
+
+  static async sendResponseEmail(complaintId: string): Promise<void> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('send-complaint-response', {
+      body: { complaintId },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al enviar correo al cliente';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw ErrorHandler.createError(
+        AppErrorType.UNKNOWN,
+        'No se pudo enviar el correo de respuesta',
+        message,
+      );
+    }
+
+    if (data?.error) {
+      throw ErrorHandler.createError(
+        AppErrorType.UNKNOWN,
+        'No se pudo enviar el correo de respuesta',
+        data.error,
+      );
+    }
   }
 
   static async getStats(): Promise<{
     total: number;
     pending: number;
-    in_progress: number;
+    in_review: number;
     resolved: number;
     rejected: number;
     high_priority_open: number;
@@ -245,7 +287,7 @@ export class ComplaintsService {
       return {
         total: rows.length,
         pending: rows.filter((r) => r.status === 'pending').length,
-        in_progress: rows.filter((r) => r.status === 'in_progress').length,
+        in_review: rows.filter((r) => r.status === 'in_review').length,
         resolved: rows.filter((r) => r.status === 'resolved').length,
         rejected: rows.filter((r) => r.status === 'rejected').length,
         high_priority_open: rows.filter(

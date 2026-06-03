@@ -435,3 +435,28 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/delete-user/deno.json"
 entrypoint = "./functions/delete-user/index.ts"
+
+[functions.set-user-blocked]
+enabled = true
+# Misma razón que delete-user: la función valida el JWT contra el proyecto primario.
+# El gateway del proyecto secundario NO debe verificar el JWT (verify_jwt=true
+# devuelve 401 porque el token es del proyecto primario, no del secundario).
+verify_jwt = false
+import_map = "./functions/set-user-blocked/deno.json"
+entrypoint = "./functions/set-user-blocked/index.ts"
+
+[functions.send-complaint-response]
+enabled = true
+# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
+verify_jwt = false
+import_map = "./functions/send-complaint-response/deno.json"
+entrypoint = "./functions/send-complaint-response/index.ts"
+
+[functions.upload-driver-document]
+enabled = true
+# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
+# El gateway del proyecto secundario NO debe verificar el JWT (verify_jwt=true
+# devuelve 401 porque el token es del proyecto primario, no del secundario).
+verify_jwt = false
+import_map = "./functions/upload-driver-document/deno.json"
+entrypoint = "./functions/upload-driver-document/index.ts"

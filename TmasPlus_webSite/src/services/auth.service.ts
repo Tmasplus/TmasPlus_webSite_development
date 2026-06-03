@@ -77,7 +77,7 @@ export class AuthService {
       // Si está bloqueado por el sistema
       if (profile.blocked) {
         await supabase.auth.signOut();
-        throw ErrorHandler.createError(AppErrorType.AUTHORIZATION, 'Esta cuenta ha sido suspendida.');
+        throw ErrorHandler.createError(AppErrorType.AUTHORIZATION, 'Su cuenta está bloqueada. Comuníquese con soporte.');
       }
 
       // Si NO es admin Y NO es un conductor pendiente de registro, SE BLOQUEA.
@@ -174,7 +174,7 @@ export class AuthService {
 
     if (profile.blocked) {
       await supabaseSecondary.auth.signOut();
-      throw ErrorHandler.createError(AppErrorType.AUTHORIZATION, 'Esta cuenta ha sido suspendida.');
+      throw ErrorHandler.createError(AppErrorType.AUTHORIZATION, 'Su cuenta está bloqueada. Comuníquese con soporte.');
     }
 
     return {

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/Button';
 //import { classNames } from '@/utils/classNames';
 //import { formatDate } from '@/utils/formatDate';
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import type { DriverProfile } from '@/config/database.types';
+import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
@@ -92,6 +93,110 @@ const SecureDocumentLink = ({ label, url, source = 'primary' }: { label: string;
     );
 };
 
+// Enlace compacto que firma la URL (primaria o secundaria, según el host).
+const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: string }> = ({
+    url,
+    label = 'Ver Documento ↗',
+    missingText = 'Falta',
+}) => {
+    const [secureUrl, setSecureUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!url) { setSecureUrl(null); return; }
+        let isMounted = true;
+        (async () => {
+            if (url.includes('/object/public/')) {
+                const parts = url.split('/object/public/');
+                const pathParts = parts[1].split('/');
+                const bucket = pathParts[0];
+                const filePath = pathParts.slice(1).join('/');
+                const client = pickStorageClientByUrl(url, 'primary');
+                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
+                if (isMounted) setSecureUrl(error ? url : (data?.signedUrl || url));
+            } else if (isMounted) {
+                setSecureUrl(url);
+            }
+        })();
+        return () => { isMounted = false; };
+    }, [url]);
+
+    if (!url) return <span className="text-sm text-red-500 font-medium">{missingText}</span>;
+    if (!secureUrl) return <span className="text-xs text-slate-400">Cargando...</span>;
+    return (
+        <a href={secureUrl} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-sky-600 hover:text-sky-800 font-semibold"
+            onClick={(e) => e.stopPropagation()}>
+            {label}
+        </a>
+    );
+};
+
+// Fila de documento con estado en panel + App y subida/reemplazo (admin).
+const DocumentManager: React.FC<{
+    def: DocDef;
+    primaryUrl?: string | null;
+    secondaryUrl?: string | null;
+    driverId: string;
+    carId?: string | null;
+    onUploaded: () => void;
+}> = ({ def, primaryUrl, secondaryUrl, driverId, carId, onUploaded }) => {
+    const [uploading, setUploading] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const needsCar = def.scope === 'car';
+    const canUpload = !needsCar || !!carId;
+
+    const handleFile = async (file?: File | null) => {
+        if (!file) return;
+        setUploading(true);
+        try {
+            const res = await DriverDocumentsService.uploadBoth(def.field, file, driverId, carId);
+            if (res.secondaryWarning) {
+                toast.warning(`${def.label}: guardado en el panel. App: ${res.secondaryWarning}`);
+            } else {
+                toast.success(`${def.label} actualizado (panel y App).`);
+            }
+            onUploaded();
+        } catch (e: any) {
+            toast.error(`Error al subir ${def.label}: ${e?.message || 'desconocido'}`);
+        } finally {
+            setUploading(false);
+            if (inputRef.current) inputRef.current.value = '';
+        }
+    };
+
+    return (
+        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <div className="flex justify-between items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">{def.label}</span>
+                <div className="flex items-center gap-3">
+                    <SignedLink url={primaryUrl} />
+                    <button
+                        type="button"
+                        onClick={() => inputRef.current?.click()}
+                        disabled={uploading || !canUpload}
+                        className="text-xs font-semibold px-2 py-1 rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50 disabled:opacity-40"
+                        title={canUpload ? 'Subir o reemplazar (panel + App)' : 'Requiere vehículo registrado'}
+                    >
+                        {uploading ? 'Subiendo...' : (primaryUrl ? 'Reemplazar' : 'Subir')}
+                    </button>
+                </div>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+                {secondaryUrl ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-700">
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 border border-emerald-200 bg-emerald-50 font-medium">En App ✓</span>
+                        <SignedLink url={secondaryUrl} label="ver en App ↗" />
+                    </span>
+                ) : (
+                    <span className="text-slate-400">No está en la App</span>
+                )}
+            </div>
+            <input ref={inputRef} type="file" accept={def.accept} className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])} />
+        </div>
+    );
+};
+
 export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh
 }) => {
@@ -100,11 +205,20 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState<Partial<EnrichedDriverProfile>>({});
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
+    const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
+
+    const loadSecondaryDocs = (id: string) => {
+        DriverDocumentsService.getSecondaryDocs(id)
+            .then(setSecondaryDocs)
+            .catch(() => setSecondaryDocs({}));
+    };
 
     useEffect(() => {
         if (!driver) return;
         setEditForm(driver);
         setIsEditing(false);
+        setSecondaryDocs({});
+        loadSecondaryDocs(driver.id);
 
         const isCustomerType = (driver.user_type || '').toLowerCase() === 'customer';
         if (isCustomerType) {
@@ -123,6 +237,33 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     if (!open || !driver) return null;
 
     const isCustomer = (driver.user_type || '').toLowerCase() === 'customer';
+    const carId = driver.vehicle?.id ?? null;
+
+    // Cédula unificada: en la App (primaria) vive en license_number; en el
+    // Dashboard (secundaria) en document_number. Mostramos cualquiera que exista
+    // y, al editar, actualizamos ambas claves del formulario para que el guardado
+    // escriba en la columna correcta según el origen del registro.
+    const cedulaActual = ((editForm as any).document_number ?? (editForm as any).license_number ?? '') as string;
+    const setCedula = (value: string) =>
+        setEditForm(prev => ({ ...prev, document_number: value, license_number: value } as any));
+
+    const primaryUrlFor = (def: DocDef): string | null =>
+        def.scope === 'car'
+            ? ((driver.vehicle as any)?.[def.field] ?? null)
+            : ((driver as any)[def.field] ?? null);
+
+    const handleDocUploaded = () => {
+        loadSecondaryDocs(driver.id);
+        onRefresh();
+    };
+
+    const inspeccionFields = ['car_image_1', 'car_image_2'];
+    const verificacionFields = [
+        'verify_id_image', 'verify_id_image_bk',
+        'license_image', 'license_image_back',
+        'card_prop_image', 'card_prop_image_back',
+        'soat_image', 'tecnomecanica_image',
+    ];
 
     const handleAction = async (action: 'approve' | 'reject') => {
         setLoading(true);
@@ -138,12 +279,23 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const handleSaveEdit = async () => {
         setLoading(true);
         try {
-            const { error: userError } = await dbClient.from('users').update({
+            const userPayload: any = {
                 first_name: editForm.first_name,
                 last_name: editForm.last_name,
                 mobile: editForm.mobile,
-                city: editForm.city
-            }).eq('id', driver.id);
+                city: editForm.city,
+            };
+            const cedula = cedulaActual.trim() || null;
+            if (source === 'secondary') {
+                // BD del Dashboard: la cédula se guarda en document_number
+                // (la tabla tiene esa columna). El tipo solo aplica a clientes.
+                userPayload.document_number = cedula;
+                if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
+            } else {
+                // BD de la App (primaria): la cédula se guarda en license_number.
+                userPayload.license_number = cedula;
+            }
+            const { error: userError } = await dbClient.from('users').update(userPayload).eq('id', driver.id);
             if (userError) throw userError;
 
             if (driver.vehicle && editForm.vehicle) {
@@ -229,21 +381,32 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                 </div>
 
                                 {isCustomer && (
-                                    <>
-                                        <div>
-                                            <span className="font-semibold text-slate-500 block">Email:</span>
-                                            <p>{(driver as any).email || '—'}</p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-slate-500 block">Tipo de Documento:</span>
-                                            <p>{(driver as any).document_type || '—'}</p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-slate-500 block">Número de Documento:</span>
-                                            <p>{(driver as any).document_number || '—'}</p>
-                                        </div>
-                                    </>
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Email:</span>
+                                        <p>{(driver as any).email || '—'}</p>
+                                    </div>
                                 )}
+
+                                {isCustomer && (
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Tipo de Documento:</span>
+                                        {isEditing ? <input className="border p-1 rounded w-full mt-1" placeholder="CC / CE / PA…" value={(editForm as any).document_type || ''} onChange={e => setEditForm({ ...editForm, document_type: e.target.value } as any)} /> : <p>{(driver as any).document_type || '—'}</p>}
+                                    </div>
+                                )}
+
+                                {/* Cédula unificada (cliente y conductor). Editable: si no
+                                    existe, se puede ingresar manualmente como texto. */}
+                                <div>
+                                    <span className="font-semibold text-slate-500 block">Cédula:</span>
+                                    {isEditing
+                                        ? <input
+                                            className="border p-1 rounded w-full mt-1"
+                                            placeholder="Ingresar cédula manualmente"
+                                            value={cedulaActual}
+                                            onChange={e => setCedula(e.target.value)}
+                                          />
+                                        : <p>{cedulaActual || '—'}</p>}
+                                </div>
 
                                 {driver.referrerName && (
                                     <p className="mt-4 p-2 bg-emerald-50 text-emerald-800 rounded border border-emerald-200 text-xs">
@@ -315,23 +478,38 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     {!isCustomer && (
                     <div>
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Inspección de Vehículo</h3>
+                        {!carId && (
+                            <p className="text-xs text-amber-600 mb-2">
+                                Sin vehículo registrado: no se pueden subir fotos ni documentos del vehículo.
+                            </p>
+                        )}
                         <div className="space-y-3 mb-6">
-                            <SecureDocumentLink label="Foto Vehículo (Exterior)" url={driver.vehicle?.car_image_1} source={source} />
-                            <SecureDocumentLink label="Foto Vehículo (Interior)" url={driver.vehicle?.car_image_2} source={source} />
+                            {inspeccionFields.map((f) => (
+                                <DocumentManager
+                                    key={f}
+                                    def={DOC_DEFS[f]}
+                                    primaryUrl={primaryUrlFor(DOC_DEFS[f])}
+                                    secondaryUrl={secondaryDocs[f] ?? null}
+                                    driverId={driver.id}
+                                    carId={carId}
+                                    onUploaded={handleDocUploaded}
+                                />
+                            ))}
                         </div>
 
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Documentos de Verificación</h3>
                         <div className="space-y-3">
-                            <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} source={source} />
-                            <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} source={source} />
-                            <SecureDocumentLink label="Licencia (Frente)" url={driver.license_image} source={source} />
-                            <SecureDocumentLink label="Licencia (Reverso)" url={driver.license_image_back} source={source} />
-                            <SecureDocumentLink label="Tarjeta de Propiedad (Frente)" url={driver.vehicle?.card_prop_image} source={source} />
-                            <SecureDocumentLink label="Tarjeta de Propiedad (Reverso)" url={driver.vehicle?.card_prop_image_back} source={source} />
-                            <SecureDocumentLink label="SOAT" url={driver.vehicle?.soat_image} source={source} />
-                            {driver.vehicle?.tecnomecanica_image && (
-                                <SecureDocumentLink label="Tecnomecánica" url={driver.vehicle.tecnomecanica_image} source={source} />
-                            )}
+                            {verificacionFields.map((f) => (
+                                <DocumentManager
+                                    key={f}
+                                    def={DOC_DEFS[f]}
+                                    primaryUrl={primaryUrlFor(DOC_DEFS[f])}
+                                    secondaryUrl={secondaryDocs[f] ?? null}
+                                    driverId={driver.id}
+                                    carId={carId}
+                                    onUploaded={handleDocUploaded}
+                                />
+                            ))}
                         </div>
                     </div>
                     )}
