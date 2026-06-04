@@ -20,6 +20,11 @@ const COLOMBIA_BOUNDS = {
   east: -66.8,
 };
 
+// Initial camera (Bogotá). The map camera is left UNCONTROLLED after this —
+// programmatic moves go through map.panTo()/setZoom() to avoid a feedback loop.
+const DEFAULT_CENTER = { lat: 4.6097, lng: -74.0817 };
+const DEFAULT_ZOOM = 13;
+
 export interface Location {
   latitude: number;
   longitude: number;
@@ -58,8 +63,7 @@ function BookingMapInner({
   onDestinationChange,
   onRouteInfo,
 }: BookingMapViewProps) {
-  const [center, setCenter] = useState({ lat: 4.6097, lng: -74.0817 });
-  const [zoom, setZoom] = useState(13);
+  const map = useMap();
   const [selectMode, setSelectMode] = useState<"origin" | "destination">("destination");
   const [locating, setLocating] = useState(true);
   const [userPos, setUserPos] = useState<{ lng: number; lat: number } | null>(null);
@@ -88,6 +92,19 @@ function BookingMapInner({
     }
   }, []);
 
+  // Imperative camera move — used for GPS + place selection. The map camera is
+  // left UNCONTROLLED to avoid a render→camera feedback loop that made the map
+  // drift on its own and re-render the search inputs on every frame.
+  const flyTo = useCallback(
+    (lat: number, lng: number, z = 16) => {
+      if (!map) return;
+      map.panTo({ lat, lng });
+      map.setZoom(z);
+      initialFlyDoneRef.current = true;
+    },
+    [map]
+  );
+
   // ── GPS geolocation → auto-set origin ──
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -98,8 +115,6 @@ function BookingMapInner({
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
         setUserPos({ lng, lat });
-        setCenter({ lat, lng });
-        setZoom(15);
         const address = await reverseGeocode(lng, lat);
         onOriginChange({ latitude: lat, longitude: lng, title: address });
         setSelectMode("destination");
@@ -110,6 +125,13 @@ function BookingMapInner({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reverseGeocode]);
+
+  // Pan to the user's GPS position once the map instance is ready (one-time).
+  useEffect(() => {
+    if (map && userPos && !initialFlyDoneRef.current) {
+      flyTo(userPos.lat, userPos.lng, 15);
+    }
+  }, [map, userPos, flyTo]);
 
   const handleMapClick = useCallback(
     async (e: MapMouseEvent) => {
@@ -156,8 +178,7 @@ function BookingMapInner({
             onOriginChange(loc);
             setSelectMode("destination");
             setShowOriginPopup(true);
-            setCenter({ lat: loc.latitude, lng: loc.longitude });
-            setZoom(16);
+            flyTo(loc.latitude, loc.longitude, 16);
           }}
           onClear={() => {
             onOriginChange(null);
@@ -174,8 +195,7 @@ function BookingMapInner({
             onDestinationChange(loc);
             setSelectMode("origin");
             setShowDestPopup(true);
-            setCenter({ lat: loc.latitude, lng: loc.longitude });
-            setZoom(16);
+            flyTo(loc.latitude, loc.longitude, 16);
           }}
           onClear={() => {
             onDestinationChange(null);
@@ -228,14 +248,8 @@ function BookingMapInner({
       <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-lg" style={{ height: 420 }}>
         <Map
           mapId="tplus-booking-map"
-          defaultCenter={center}
-          defaultZoom={zoom}
-          center={center}
-          zoom={zoom}
-          onCameraChanged={(ev) => {
-            setCenter(ev.detail.center);
-            setZoom(ev.detail.zoom);
-          }}
+          defaultCenter={DEFAULT_CENTER}
+          defaultZoom={DEFAULT_ZOOM}
           onClick={handleMapClick}
           gestureHandling="greedy"
           disableDefaultUI={false}
