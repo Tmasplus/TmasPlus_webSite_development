@@ -8,6 +8,7 @@ import { UsersSecondaryService } from "@/services/usersSecondary.service";
 import { supabaseSecondary } from "@/config/supabase";
 import { toast } from "@/utils/toast";
 import DocumentUploadModal from "./DocumentUpload/DocumentUploadModal";
+import { DOCUMENT_TYPE_OPTIONS, DOCUMENT_TYPE_LABELS } from "@/config/constants";
 
 const SECONDARY_DOC_BUCKET = "driver-documents";
 
@@ -125,6 +126,20 @@ async function uploadAndPersistDriverDocs(
   }
 }
 
+// Ciudades disponibles para el registro (misma lista que el flujo de registro público)
+const CITIES = [
+  "Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena",
+  "Cúcuta", "Bucaramanga", "Pereira", "Santa Marta", "Ibagué",
+  "Manizales", "Pasto", "Neiva", "Villavicencio", "Armenia",
+  "Valledupar", "Montería", "Sincelejo", "Popayán", "Tunja",
+] as const;
+
+const CITY_OPTIONS = CITIES.map((c) => ({ value: c, label: c }));
+
+// Opciones del "Tipo de Documento" (fuente única en @/config/constants). La
+// etiqueta se reutiliza para nombrar el documento que se debe subir, de forma
+// que coincida con lo seleccionado.
+
 type UserType = "cliente" | "conductor" | "empresa";
 
 type Props = {
@@ -221,21 +236,14 @@ const FIELD_DEFS: FieldDef[] = [
     id: "ciudad",
     label: "Ciudad",
     kind: "select",
-    options: [
-      { value: "BOG", label: "Bogotá" }
-    ],
+    options: CITY_OPTIONS,
     required: true
   },
   {
     id: "tipoDocumento",
     label: "Tipo de Documento",
     kind: "select",
-    options: [
-      { value: "ced", label: "Cédula" },
-      { value: "pasaporte", label: "Pasaporte" },
-      { value: "licencia", label: "Licencia" },
-      { value: "nit", label: "NIT / RIF" },
-    ],
+    options: DOCUMENT_TYPE_OPTIONS.map((o) => ({ ...o })),
     required: true
   },
   { id: "nroDocumento", label: "Número de Documento", kind: "input", required: true },
@@ -675,6 +683,7 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
       <DocumentUploadModal
         open={showDocsModal}
         profile={type === "cliente" ? "cliente" : form.tipoVehiculo}
+        documentLabel={DOCUMENT_TYPE_LABELS[form.tipoDocumento]}
         // requiredCount={3}
         onClose={() => setShowDocsModal(false)}
         onComplete={(files) => setUploadedDocs(files)}

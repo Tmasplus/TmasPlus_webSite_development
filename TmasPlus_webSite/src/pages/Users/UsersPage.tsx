@@ -75,6 +75,9 @@ export const UsersPage: React.FC = () => {
   >({});
   // Categoría (service_type) del vehículo activo, resuelta por user.id.
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
+  // Cuántos conductores ha referido cada usuario (referral_codes.total_referrals,
+  // proyecto primario), mapeado por users.id.
+  const [referralCountMap, setReferralCountMap] = useState<Record<string, number>>({});
   // Cédula tomada de la BD primaria, solo como respaldo cuando la secundaria
   // no la tiene; keyed por user.id.
   const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
@@ -189,6 +192,26 @@ export const UsersPage: React.FC = () => {
     } else {
       setCedulaFallbackMap({});
     }
+
+    // 4) Cuántos ha referido cada usuario: referral_codes.total_referrals (BD
+    // primaria), buscando por driver_id (users.id o auth_id en filas heredadas).
+    const { data: refCodes } = await supabase
+      .from("referral_codes")
+      .select("driver_id, total_referrals")
+      .in("driver_id", allDriverIds);
+    const refByDriver: Record<string, number> = {};
+    for (const row of (refCodes || []) as Array<{
+      driver_id: string;
+      total_referrals: number | null;
+    }>) {
+      if (row.driver_id) refByDriver[row.driver_id] = row.total_referrals ?? 0;
+    }
+    const refByUser: Record<string, number> = {};
+    for (const { id, authId } of idPairs) {
+      const count = refByDriver[id] ?? (authId ? refByDriver[authId] : undefined);
+      if (count !== undefined) refByUser[id] = count;
+    }
+    setReferralCountMap(refByUser);
   };
 
   const cedulaFor = (u: SecondaryUser): string =>
@@ -199,6 +222,9 @@ export const UsersPage: React.FC = () => {
   // dato propio de la App; si falta, usamos el mapa (cars secundaria → primaria).
   const categoryFor = (u: SecondaryUser): string | undefined =>
     (u.car_type as string | undefined) || categoryMap[u.id];
+
+  // Cuántos conductores ha referido este usuario (0 si no tiene código propio aún).
+  const referralsFor = (u: SecondaryUser): number => referralCountMap[u.id] ?? 0;
 
   // memberships.conductor guarda users.auth_id (o users.id en filas heredadas),
   // así que probamos ambos identificadores del usuario.
@@ -240,8 +266,8 @@ export const UsersPage: React.FC = () => {
     if (
       !confirm(
         willBlock
-          ? `¿Bloquear a ${fullName(u)}? No podrá iniciar sesión.`
-          : `¿Reactivar a ${fullName(u)}?`
+          ? `¿Quitar la aprobación a ${fullName(u)}? No podrá iniciar sesión.`
+          : `¿Aprobar a ${fullName(u)}? Podrá iniciar sesión en la app.`
       )
     )
       return;
@@ -413,11 +439,12 @@ export const UsersPage: React.FC = () => {
       { header: "Cédula", value: (u) => cedulaFor(u) },
       { header: "Correo", value: (u) => u.email || "" },
       { header: "Teléfono", value: (u) => u.mobile || "" },
+      { header: "Referidos", value: (u) => String(referralsFor(u)) },
       { header: "Ciudad", value: (u) => u.city || "" },
       { header: "Categoría", value: (u) => (categoryFor(u) ? vehicleCategoryLabel(categoryFor(u)) : "") },
       { header: "Tipo", value: (u) => u.user_type || "" },
       { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
-      { header: "Estado", value: (u) => (u.blocked ? "Bloqueado" : u.approved === false ? "Pendiente" : "Activo") },
+      { header: "Estado", value: (u) => (u.blocked ? "No aprobado" : "Aprobado") },
       { header: "Alta", value: (u) => formatDate(u.created_at) },
     ]);
   };
@@ -458,8 +485,8 @@ export const UsersPage: React.FC = () => {
             onChange={(e) => setStatus(e.target.value as StatusFilter)}
           >
             <option value="todos">Todos</option>
-            <option value="activos">Activos</option>
-            <option value="bloqueados">Bloqueados</option>
+            <option value="activos">Aprobados</option>
+            <option value="bloqueados">No aprobados</option>
           </select>
           <select
             className="rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
@@ -502,6 +529,7 @@ export const UsersPage: React.FC = () => {
                     <th className="px-3 py-2 font-medium">Cédula</th>
                     <th className="px-3 py-2 font-medium">Correo</th>
                     <th className="px-3 py-2 font-medium">Teléfono</th>
+                    <th className="px-3 py-2 font-medium text-center">Referidos</th>
                     <th className="px-3 py-2 font-medium">Categoría</th>
                     <th className="px-3 py-2 font-medium">Tipo</th>
                     <th className="px-3 py-2 font-medium">Membresía</th>
@@ -515,10 +543,9 @@ export const UsersPage: React.FC = () => {
                 <tbody>
                   {filtered.map((u) => {
                     const busy = actionLoadingId === u.id;
+                    // Estado único: aprobado = no bloqueado (bloquear = quitar
+                    // aprobación, aprobar = desbloquear; es el mismo eje).
                     const blocked = !!u.blocked;
-                    // Un conductor importado sin aprobar (approved === false y no
-                    // bloqueado) sigue pendiente de revisión: no debe verse "Activo".
-                    const pending = !blocked && u.approved === false;
                     return (
                       <motion.tr
                         key={u.id}
@@ -555,6 +582,15 @@ export const UsersPage: React.FC = () => {
                         </td>
                         <td className="px-3 py-3">{u.email || "—"}</td>
                         <td className="px-3 py-3">{u.mobile || "—"}</td>
+                        <td className="px-3 py-3 text-center">
+                          {referralsFor(u) > 0 ? (
+                            <span className="inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {referralsFor(u)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">0</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3">
                           {categoryFor(u) ? (
                             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">
@@ -578,12 +614,10 @@ export const UsersPage: React.FC = () => {
                               "inline-flex items-center rounded-full px-2 py-0.5 text-xs border",
                               blocked
                                 ? "bg-red-50 text-red-700 border-red-200"
-                                : pending
-                                ? "bg-amber-50 text-amber-700 border-amber-200"
                                 : "bg-green-50 text-green-700 border-green-200"
                             )}
                           >
-                            {blocked ? "Bloqueado" : pending ? "Pendiente" : "Activo"}
+                            {blocked ? "No aprobado" : "Aprobado"}
                           </span>
                         </td>
                         <td className="px-3 py-3">
@@ -613,8 +647,8 @@ export const UsersPage: React.FC = () => {
                               {busy
                                 ? "..."
                                 : blocked
-                                ? "Reactivar"
-                                : "Bloquear"}
+                                ? "Aprobar"
+                                : "Desaprobar"}
                             </Button>
                             <Button
                               variant="secondary"

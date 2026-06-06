@@ -137,7 +137,7 @@ export default function AddBookingPage() {
     if (!cat) return;
 
     const distKm = routeInfo.distanceKm;
-    const durationHrs = routeInfo.durationMin / 60;
+    const durationSec = routeInfo.durationMin * 60;
 
     const umbral = cat.umbral_intermunicipal_km ?? 29;
     const isInter = distKm > umbral;
@@ -147,9 +147,13 @@ export default function AddBookingPage() {
     const perHour = isInter ? cat.rate_per_hour_inter : cat.rate_per_hour;
     const minFare = isInter ? cat.min_fare_inter : cat.min_fare;
 
+    // El valor de tiempo se cobra POR SEGUNDO. El campo `rate_per_hour` está
+    // guardado como valor por minuto, así que la tarifa por segundo = /60.
+    const ratePerSecond = perHour / 60;
+
     const baseComponent = basePrice;
     const distComponent = perKm * distKm;
-    const timeComponent = perHour * durationHrs;
+    const timeComponent = ratePerSecond * durationSec;
 
     let oneWay = baseComponent + distComponent + timeComponent;
 

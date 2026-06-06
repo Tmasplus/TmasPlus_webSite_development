@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { BookingModal } from "./BookingModal";
 import {
   BookingsService,
+  serviceTotal,
   type BookingRecord,
 } from "@/services/bookings.service";
 import { supabaseSecondary } from "@/config/supabase";
@@ -30,6 +31,7 @@ function formatMoney(v: string | number | null | undefined) {
   if (v === null || v === undefined || v === "") return "—";
   const num = typeof v === "string" ? Number(v) : v;
   if (isNaN(num)) return String(v);
+  if (num === 0) return "—";
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -61,6 +63,9 @@ export default function BookingHistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [cancelBlocked, setCancelBlocked] = useState<BookingRecord | null>(
+    null
+  );
   const [realtimeStatus, setRealtimeStatus] = useState<
     "connecting" | "live" | "offline"
   >("connecting");
@@ -212,7 +217,7 @@ export default function BookingHistoryPage() {
       b.car_type || "",
       b.pickup_address || "",
       b.drop_address || "",
-      b.total_cost ?? b.price ?? "",
+      serviceTotal(b) ?? "",
       b.status || "",
       b.otp || "",
     ]);
@@ -249,6 +254,11 @@ export default function BookingHistoryPage() {
   };
 
   const handleCancel = async (b: BookingRecord) => {
+    // Una reserva completada no se puede cancelar: avisamos con un modal.
+    if ((b.status || "").toUpperCase().startsWith("COMPLET")) {
+      setCancelBlocked(b);
+      return;
+    }
     if (!confirm(`¿Cancelar la reserva ${b.reference || b.id}?`)) return;
     setActionLoadingId(b.id);
     try {
@@ -386,7 +396,8 @@ export default function BookingHistoryPage() {
               </tr>
             ) : filteredBookings.length > 0 ? (
               filteredBookings.map((b) => {
-                const isCancelled = (b.status || "").toUpperCase() === "CANCELLED";
+                const statusUpper = (b.status || "").toUpperCase();
+                const isCancelled = statusUpper === "CANCELLED";
                 const busy = actionLoadingId === b.id;
                 return (
                   <motion.tr
@@ -411,7 +422,7 @@ export default function BookingHistoryPage() {
                     <td className="p-3">{b.plate_number || "—"}</td>
                     <td className="p-3">{b.car_type || "—"}</td>
                     <td className="p-3">
-                      {formatMoney(b.total_cost ?? b.price)}
+                      {formatMoney(serviceTotal(b))}
                     </td>
                     <td className="p-3">
                       <span
@@ -474,6 +485,38 @@ export default function BookingHistoryPage() {
           selectedBooking ? actionLoadingId === selectedBooking.id : false
         }
       />
+
+      {/* Aviso: no se puede cancelar una reserva completada */}
+      {cancelBlocked && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 text-center">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+                ⚠️
+              </div>
+              <h2 className="text-lg font-bold text-slate-800 mb-2">
+                No se puede cancelar
+              </h2>
+              <p className="text-sm text-slate-600">
+                La reserva{" "}
+                <span className="font-semibold">
+                  {cancelBlocked.reference || cancelBlocked.id.slice(0, 8)}
+                </span>{" "}
+                ya está <span className="font-semibold">completada</span> y no
+                puede cancelarse.
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+              <Button onClick={() => setCancelBlocked(null)}>Entendido</Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

@@ -40,6 +40,24 @@ export const APP_CONFIG = {
     MANUAL: 'manual',
     AUTOMATICO: 'automatico',
   } as const;
+
+  // Tipos de documento. El `value` es lo que se guarda en BD (document_type);
+  // el `label` es lo que se muestra al usuario. Fuente única de verdad para el
+  // selector (AddUserModal) y para las vistas de solo lectura (DriverReviewModal).
+  export const DOCUMENT_TYPE_OPTIONS = [
+    { value: 'ced', label: 'Cédula' },
+    { value: 'pasaporte', label: 'Pasaporte' },
+    { value: 'licencia', label: 'Licencia' },
+    { value: 'nit', label: 'NIT / RIF' },
+  ] as const;
+
+  export const DOCUMENT_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+    DOCUMENT_TYPE_OPTIONS.map((o) => [o.value, o.label])
+  );
+
+  /** Devuelve la etiqueta legible de un tipo de documento (p. ej. "ced" → "Cédula"). */
+  export const getDocumentTypeLabel = (value?: string | null): string =>
+    (value ? DOCUMENT_TYPE_LABELS[value] ?? value : '') as string;
   
   export const DEFAULT_DRIVER_VALUES = {
     wallet_balance: 0,

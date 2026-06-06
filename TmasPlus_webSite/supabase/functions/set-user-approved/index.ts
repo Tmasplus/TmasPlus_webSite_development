@@ -66,9 +66,15 @@ serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // Regla de negocio: aprobar a un usuario lo desbloquea (puede entrar a la App);
+  // desaprobarlo lo vuelve a bloquear. El bloqueo es el espejo de "no aprobado".
   const { data: updated, error: updateErr } = await admin
     .from("users")
-    .update({ approved: body.approved, updated_at: new Date().toISOString() })
+    .update({
+      approved: body.approved,
+      blocked: !body.approved,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", body.id)
     .select()
     .maybeSingle();

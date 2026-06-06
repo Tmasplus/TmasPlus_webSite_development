@@ -50,6 +50,21 @@ export interface BookingRecord {
   [key: string]: any;
 }
 
+/**
+ * Total real del servicio. En la base de datos `total_cost` suele venir en 0,
+ * mientras que el valor cobrado está en `price` (o `estimate`). Devolvemos el
+ * primer candidato mayor que 0 para no mostrar nunca "0" en el historial.
+ */
+export function serviceTotal(
+  b: Pick<BookingRecord, 'total_cost' | 'price' | 'estimate'>
+): number | null {
+  for (const candidate of [b.total_cost, b.price, b.estimate]) {
+    const n = typeof candidate === 'string' ? Number(candidate) : candidate;
+    if (n != null && !Number.isNaN(n) && n > 0) return n;
+  }
+  return null;
+}
+
 const sb = supabaseSecondary as any;
 
 async function syncSession() {

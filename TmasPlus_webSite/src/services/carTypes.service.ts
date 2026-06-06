@@ -1,4 +1,4 @@
-import supabase, { supabaseSecondary } from '@/config/supabase';
+import { supabaseSecondary } from '@/config/supabase';
 import type { CarTypeRow, CarTypeInsert, CarTypeUpdate } from '@/config/database.types';
 
 const sb = supabaseSecondary as any;
@@ -87,6 +87,16 @@ export class CarTypesService {
 
   /** Subir imagen de categoría y devolver URL pública */
   static async uploadImage(file: File, categoryName: string): Promise<string> {
+    // Asegurar que la subida se ejecute con la sesión del cliente secundario
+    // (donde vive el bucket). Sin sesión válida, el INSERT en storage.objects
+    // viaja como rol anon y la política RLS lo rechaza.
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) {
+      throw new Error(
+        'Sesión secundaria no disponible. Vuelve a iniciar sesión para subir imágenes.'
+      );
+    }
+
     const ext = file.name.split('.').pop();
     const fileName = `car-types/${Date.now()}_${categoryName.replace(/\s+/g, '_')}.${ext}`;
 
@@ -96,7 +106,9 @@ export class CarTypesService {
 
     if (upErr) throw upErr;
 
-    const { data } = supabase.storage
+    // La URL pública debe generarse desde el MISMO proyecto donde se subió
+    // (secundario), no desde el cliente primario.
+    const { data } = sb.storage
       .from('public-site-assets')
       .getPublicUrl(fileName);
 

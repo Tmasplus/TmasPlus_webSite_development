@@ -164,8 +164,10 @@ serve(async (req: Request) => {
     referral_id: body.referral_id ?? null,
     bank_number: body.bank_number ?? null,
     user_type: "driver",
-    approved: true,
-    blocked: false,
+    // Regla de negocio: el conductor nace PENDIENTE y BLOQUEADO en la App.
+    // Solo al aprobarlo desde el dashboard se desbloquea y puede ingresar.
+    approved: false,
+    blocked: true,
     updated_at: now,
   };
 

@@ -58,6 +58,9 @@ interface ImportDriverBody {
   // Documento de identidad (cédula) del conductor en el proyecto primario
   document_type?: string | null;
   document_number?: string | null;
+  // Código de referido con el que se registró el conductor (users.referral_id
+  // del proyecto primario). Se replica a la App.
+  referral_id?: string | null;
   // Estado del conductor en la pestaña Conductores (proyecto primario)
   approved?: boolean | null;
   blocked?: boolean | null;
@@ -200,8 +203,15 @@ serve(async (req: Request) => {
     // Sincronizar estado del conductor (aprobado/bloqueado) y datos del vehículo
     const nowExisting = new Date().toISOString();
     const stateFields: Record<string, unknown> = { updated_at: nowExisting };
-    if (typeof body.approved === "boolean") stateFields.approved = body.approved;
-    if (typeof body.blocked === "boolean") stateFields.blocked = body.blocked;
+    // Regla de negocio: el usuario queda bloqueado en la App hasta ser aprobado.
+    // Aprobar = desbloquear. Un bloqueo explícito del dashboard también se respeta.
+    if (typeof body.approved === "boolean") {
+      stateFields.approved = body.approved;
+      stateFields.blocked = !body.approved || body.blocked === true;
+    } else if (typeof body.blocked === "boolean") {
+      stateFields.blocked = body.blocked;
+    }
+    if (body.referral_id != null) stateFields.referral_id = body.referral_id;
     if (body.document_type != null) stateFields.document_type = body.document_type;
     if (body.document_number != null) stateFields.document_number = body.document_number;
     let refreshed = existing;
@@ -289,6 +299,11 @@ serve(async (req: Request) => {
   const byEmail = byEmailList && byEmailList[0] ? byEmailList[0] : null;
 
   const now = new Date().toISOString();
+  // Regla de negocio: el usuario llega bloqueado a la App hasta ser aprobado.
+  // Si el dashboard no envía 'approved', se asume NO aprobado (pendiente).
+  // Aprobar = desbloquear; un bloqueo explícito del dashboard también bloquea.
+  const isApproved = typeof body.approved === "boolean" ? body.approved : false;
+  const isBlocked = !isApproved || body.blocked === true;
   const baseFields = {
     auth_id: authId ?? body.id,
     first_name: body.first_name,
@@ -299,11 +314,10 @@ serve(async (req: Request) => {
     profile_image: body.profile_image ?? null,
     document_type: body.document_type ?? null,
     document_number: body.document_number ?? null,
+    referral_id: body.referral_id ?? null,
     user_type: "driver",
-    // Respetar el estado del conductor en la pestaña Conductores; por defecto
-    // aprobado/no bloqueado si el dashboard no envía el dato.
-    approved: typeof body.approved === "boolean" ? body.approved : true,
-    blocked: typeof body.blocked === "boolean" ? body.blocked : false,
+    approved: isApproved,
+    blocked: isBlocked,
     updated_at: now,
   };
 

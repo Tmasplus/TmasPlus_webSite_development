@@ -8,7 +8,9 @@ type UploadedDocs = Record<string, File[]>;
 type DocumentUploadModalProps = {
   open: boolean;
   profile: ProfileType;
-  requiredCount: number;
+  requiredCount?: number;
+  /** Etiqueta del documento de identidad acorde al tipo de documento elegido. */
+  documentLabel?: string;
   onClose: () => void;
   onComplete: (files: UploadedDocs) => void;
 };
@@ -16,7 +18,7 @@ type DocumentUploadModalProps = {
 const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   open,
   profile,
-  requiredCount,
+  documentLabel,
   onClose,
   onComplete,
 }) => {
@@ -58,6 +60,7 @@ const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           profile={profile}
           files={files}
           onChange={setFiles}
+          documentLabel={documentLabel}
         />
 
         {error && (

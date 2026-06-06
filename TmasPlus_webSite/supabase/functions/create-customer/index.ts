@@ -161,8 +161,10 @@ serve(async (req: Request) => {
     document_number: body.document_number ?? null,
     referral_id: body.referral_id ?? null,
     user_type: "customer",
-    approved: true,
-    blocked: false,
+    // Regla de negocio: el cliente nace PENDIENTE y BLOQUEADO en la App.
+    // Solo al aprobarlo desde el dashboard se desbloquea y puede ingresar.
+    approved: false,
+    blocked: true,
     updated_at: now,
   };
 

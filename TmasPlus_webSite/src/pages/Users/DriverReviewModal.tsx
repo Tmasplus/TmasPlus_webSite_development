@@ -6,6 +6,7 @@ import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
+import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
@@ -36,62 +37,6 @@ function pickStorageClientByUrl(url: string, fallbackSource: DriverSource) {
     } catch { /* noop */ }
     return fallbackSource === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
 }
-
-const SecureDocumentLink = ({ label, url, source = 'primary' }: { label: string; url?: string | null; source?: DriverSource }) => {
-    const [secureUrl, setSecureUrl] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!url) return;
-        let isMounted = true;
-        const fetchSecureUrl = async () => {
-            if (url.includes('/object/public/')) {
-                const parts = url.split('/object/public/');
-                const pathParts = parts[1].split('/');
-                const bucket = pathParts[0];
-                const filePath = pathParts.slice(1).join('/');
-
-                const client = pickStorageClientByUrl(url, source);
-                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
-                if (isMounted) {
-                    if (error) {
-                        // Fallback: si no se puede firmar, devolvemos la URL pública tal cual
-                        console.warn(`[SecureDocumentLink] No se pudo firmar ${bucket}/${filePath}: ${error.message}`);
-                        setSecureUrl(url);
-                    } else {
-                        setSecureUrl(data?.signedUrl || url);
-                    }
-                }
-            } else {
-                if (isMounted) setSecureUrl(url);
-            }
-        };
-        fetchSecureUrl();
-        return () => {
-            isMounted = false;
-        };
-    }, [url, source]);
-
-    return (
-        <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <span className="text-sm font-medium text-slate-700">{label}</span>
-            {secureUrl ? (
-                <a 
-                    href={secureUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="text-sm text-sky-600 hover:text-sky-800 font-semibold"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                    }}
-                >
-                    Ver Documento ↗
-                </a>
-            ) : (
-                <span className="text-sm text-red-500 font-medium">Falta o Cargando...</span>
-            )}
-        </div>
-    );
-};
 
 // Enlace compacto que firma la URL (primaria o secundaria, según el host).
 const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: string }> = ({
@@ -127,6 +72,60 @@ const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: 
             className="text-sm text-sky-600 hover:text-sky-800 font-semibold"
             onClick={(e) => e.stopPropagation()}>
             {label}
+        </a>
+    );
+};
+
+// Vista previa de imagen firmada. Igual que SignedLink resuelve la URL (firma
+// las públicas, usa tal cual las ya firmadas), pero renderiza la imagen en
+// línea. Para PDFs cae a un enlace, ya que <img> no los muestra.
+const SignedImage: React.FC<{ url?: string | null; alt?: string; missingText?: string }> = ({
+    url,
+    alt = 'Documento',
+    missingText = 'Sin imagen',
+}) => {
+    const [secureUrl, setSecureUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!url) { setSecureUrl(null); return; }
+        let isMounted = true;
+        (async () => {
+            if (url.includes('/object/public/')) {
+                const parts = url.split('/object/public/');
+                const pathParts = parts[1].split('/');
+                const bucket = pathParts[0];
+                const filePath = pathParts.slice(1).join('/');
+                const client = pickStorageClientByUrl(url, 'primary');
+                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
+                if (isMounted) setSecureUrl(error ? url : (data?.signedUrl || url));
+            } else if (isMounted) {
+                setSecureUrl(url);
+            }
+        })();
+        return () => { isMounted = false; };
+    }, [url]);
+
+    if (!url) return <span className="text-sm text-red-500 font-medium">{missingText}</span>;
+    if (!secureUrl) return <span className="text-xs text-slate-400">Cargando...</span>;
+
+    const isPdf = /\.pdf(\?|$)/i.test(url);
+    if (isPdf) {
+        return (
+            <a href={secureUrl} target="_blank" rel="noopener noreferrer"
+                className="text-sm text-sky-600 hover:text-sky-800 font-semibold"
+                onClick={(e) => e.stopPropagation()}>
+                Ver PDF ↗
+            </a>
+        );
+    }
+
+    return (
+        <a href={secureUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+            <img
+                src={secureUrl}
+                alt={alt}
+                className="w-full max-h-72 object-contain rounded-lg border border-slate-200 bg-slate-50"
+            />
         </a>
     );
 };
@@ -204,6 +203,10 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState<Partial<EnrichedDriverProfile>>({});
+    // Copia local que refleja lo realmente guardado. El modo lectura se pinta
+    // desde aquí (no desde la prop `driver`, que no se actualiza tras guardar),
+    // por eso antes los cambios no se veían reflejados visualmente.
+    const [displayDriver, setDisplayDriver] = useState<EnrichedDriverProfile | null>(driver);
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
 
@@ -216,17 +219,14 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     useEffect(() => {
         if (!driver) return;
         setEditForm(driver);
+        setDisplayDriver(driver);
         setIsEditing(false);
         setSecondaryDocs({});
         loadSecondaryDocs(driver.id);
 
-        const isCustomerType = (driver.user_type || '').toLowerCase() === 'customer';
-        if (isCustomerType) {
-            // Los clientes no tienen código de referido propio.
-            setOwnReferral({ code: 'N/A', total: 0 });
-            return;
-        }
-
+        // Tanto conductores como clientes tienen su propio código de referido en
+        // la tabla referral_codes (driver_id = users.id). Lo cargamos para ambos.
+        setOwnReferral({ code: 'Generando...', total: 0 });
         dbClient.from('referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).maybeSingle()
             .then(({ data }: { data: { referral_code: string; total_referrals: number } | null }) => {
                 if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
@@ -236,8 +236,15 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 
     if (!open || !driver) return null;
 
-    const isCustomer = (driver.user_type || '').toLowerCase() === 'customer';
-    const carId = driver.vehicle?.id ?? null;
+    // Fuente de verdad para el modo lectura: la copia local ya guardada.
+    const d = displayDriver ?? driver;
+
+    const isCustomer = (d.user_type || '').toLowerCase() === 'customer';
+    const carId = d.vehicle?.id ?? null;
+
+    // Cédula a mostrar en modo lectura (desde la copia guardada, no desde el
+    // borrador `editForm`, para no enseñar cambios cancelados sin guardar).
+    const cedulaShown = (((d as any).document_number ?? (d as any).license_number ?? '') as string);
 
     // Cédula unificada: en la App (primaria) vive en license_number; en el
     // Dashboard (secundaria) en document_number. Mostramos cualquiera que exista
@@ -311,6 +318,12 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 if (carError) throw carError;
             }
 
+            // Reflejamos de inmediato lo guardado en la copia local para que el
+            // modo lectura muestre los valores nuevos sin reabrir el expediente.
+            const merged = { ...(d as any), ...(editForm as any) } as EnrichedDriverProfile;
+            setDisplayDriver(merged);
+            setEditForm(merged);
+
             toast.success('Datos actualizados correctamente');
             setIsEditing(false);
             onRefresh();
@@ -331,7 +344,11 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                         <p className="text-sm text-slate-500">ID: {driver.id}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <Button variant="secondary" onClick={() => setIsEditing(!isEditing)}>
+                        <Button variant="secondary" onClick={() => {
+                            // Al cancelar, descartamos el borrador volviendo a la copia guardada.
+                            if (isEditing) setEditForm(d);
+                            setIsEditing(!isEditing);
+                        }}>
                             {isEditing ? 'Cancelar Edición' : 'Editar Datos (Admin)'}
                         </Button>
                         <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-2xl">&times;</button>
@@ -341,7 +358,6 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
 
                     <div className="space-y-6">
-                        {!isCustomer && (
                         <div className="bg-gradient-to-r from-sky-50 to-indigo-50 p-4 rounded-xl border border-sky-100">
                             <h3 className="text-sm font-bold text-sky-900 mb-2 uppercase tracking-wide">Programa de Referidos</h3>
                             <div className="flex justify-between items-center">
@@ -350,12 +366,11 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     <p className="text-lg font-bold text-sky-900">{ownReferral.code}</p>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-xs text-sky-700">Usuarios Invitados:</p>
+                                    <p className="text-xs text-sky-700">{isCustomer ? 'Personas Referidas:' : 'Usuarios Invitados:'}</p>
                                     <p className="text-2xl font-black text-indigo-600">{ownReferral.total}</p>
                                 </div>
                             </div>
                         </div>
-                        )}
 
                         <div>
                             <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Datos Personales</h3>
@@ -367,30 +382,43 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                             <input className="border p-1 rounded w-full" value={editForm.first_name || ''} onChange={e => setEditForm({ ...editForm, first_name: e.target.value })} />
                                             <input className="border p-1 rounded w-full" value={editForm.last_name || ''} onChange={e => setEditForm({ ...editForm, last_name: e.target.value })} />
                                         </div>
-                                    ) : <p>{driver.first_name} {driver.last_name}</p>}
+                                    ) : <p>{d.first_name} {d.last_name}</p>}
                                 </div>
 
                                 <div>
                                     <span className="font-semibold text-slate-500 block">Teléfono:</span>
-                                    {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.mobile || ''} onChange={e => setEditForm({ ...editForm, mobile: e.target.value })} /> : <p>{driver.mobile}</p>}
+                                    {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.mobile || ''} onChange={e => setEditForm({ ...editForm, mobile: e.target.value })} /> : <p>{d.mobile}</p>}
                                 </div>
 
                                 <div>
                                     <span className="font-semibold text-slate-500 block">Ciudad:</span>
-                                    {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.city || ''} onChange={e => setEditForm({ ...editForm, city: e.target.value })} /> : <p>{driver.city}</p>}
+                                    {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.city || ''} onChange={e => setEditForm({ ...editForm, city: e.target.value })} /> : <p>{d.city}</p>}
                                 </div>
 
                                 {isCustomer && (
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Email:</span>
-                                        <p>{(driver as any).email || '—'}</p>
+                                        <p>{(d as any).email || '—'}</p>
                                     </div>
                                 )}
 
                                 {isCustomer && (
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Tipo de Documento:</span>
-                                        {isEditing ? <input className="border p-1 rounded w-full mt-1" placeholder="CC / CE / PA…" value={(editForm as any).document_type || ''} onChange={e => setEditForm({ ...editForm, document_type: e.target.value } as any)} /> : <p>{(driver as any).document_type || '—'}</p>}
+                                        {isEditing ? (
+                                            <select
+                                                className="border p-1 rounded w-full mt-1"
+                                                value={(editForm as any).document_type || ''}
+                                                onChange={e => setEditForm({ ...editForm, document_type: e.target.value } as any)}
+                                            >
+                                                <option value="">Selecciona…</option>
+                                                {DOCUMENT_TYPE_OPTIONS.map((o) => (
+                                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <p>{getDocumentTypeLabel((d as any).document_type) || '—'}</p>
+                                        )}
                                     </div>
                                 )}
 
@@ -405,7 +433,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                             value={cedulaActual}
                                             onChange={e => setCedula(e.target.value)}
                                           />
-                                        : <p>{cedulaActual || '—'}</p>}
+                                        : <p>{cedulaShown || '—'}</p>}
                                 </div>
 
                                 {driver.referrerName && (
@@ -417,7 +445,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                             </div>
                         </div>
 
-                        {driver.vehicle && (
+                        {d.vehicle && (
                             <div>
                                 <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Datos del Vehículo</h3>
                                 <div className="space-y-3 text-sm">
@@ -429,12 +457,12 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                                 <input className="border p-1 rounded w-full" value={editForm.vehicle?.make || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : { make: e.target.value } as any })} />
                                                 <input className="border p-1 rounded w-full" value={editForm.vehicle?.model || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, model: e.target.value } : { model: e.target.value } as any })} />
                                             </div>
-                                        ) : <p>{driver.vehicle.make} {driver.vehicle.model}</p>}
+                                        ) : <p>{d.vehicle.make} {d.vehicle.model}</p>}
                                     </div>
 
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Placa:</span>
-                                        {isEditing ? <input className="border p-1 rounded w-full mt-1 uppercase" value={editForm.vehicle?.plate || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, plate: e.target.value.toUpperCase() } : { plate: e.target.value.toUpperCase() } as any })} /> : <p className="uppercase font-bold">{driver.vehicle.plate}</p>}
+                                        {isEditing ? <input className="border p-1 rounded w-full mt-1 uppercase" value={editForm.vehicle?.plate || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, plate: e.target.value.toUpperCase() } : { plate: e.target.value.toUpperCase() } as any })} /> : <p className="uppercase font-bold">{d.vehicle.plate}</p>}
                                     </div>
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Combustible:</span>
@@ -447,7 +475,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                                 <option value="electrico">Eléctrico</option>
                                                 <option value="hibrido">Híbrido</option>
                                             </select>
-                                        ) : <p className="capitalize">{driver.vehicle.fuel_type}</p>}
+                                        ) : <p className="capitalize">{d.vehicle.fuel_type}</p>}
                                     </div>
 
                                     <div>
@@ -458,7 +486,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                                 <option value="manual">Manual</option>
                                                 <option value="automatico">Automática</option>
                                             </select>
-                                        ) : <p className="capitalize">{driver.vehicle.transmission}</p>}
+                                        ) : <p className="capitalize">{d.vehicle.transmission}</p>}
                                     </div>
                                 </div>
                             </div>
@@ -469,8 +497,27 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     <div>
                         <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Documentos del Cliente</h3>
                         <div className="space-y-3">
-                            <SecureDocumentLink label="Cédula (Frente)" url={driver.verify_id_image} source={source} />
-                            <SecureDocumentLink label="Cédula (Reverso)" url={driver.verify_id_image_bk} source={source} />
+                            {/* Cédula (frente): la imagen vive en la BD secundaria (App)
+                                en users.verify_id_image. La mostramos en línea como la
+                                cédula del cliente. */}
+                            <div>
+                                <span className="text-sm font-medium text-slate-700 block mb-1.5">Cédula (Frente)</span>
+                                <SignedImage
+                                    url={primaryUrlFor(DOC_DEFS.verify_id_image) ?? secondaryDocs['verify_id_image'] ?? null}
+                                    alt="Cédula del cliente (frente)"
+                                    missingText="El cliente no tiene cédula registrada."
+                                />
+                            </div>
+                            {/* Solo se solicita una imagen para el cliente. El admin
+                                puede subirla/reemplazarla desde el dashboard. */}
+                            <DocumentManager
+                                def={{ ...DOC_DEFS.verify_id_image, label: 'Documento de Identidad' }}
+                                primaryUrl={primaryUrlFor(DOC_DEFS.verify_id_image)}
+                                secondaryUrl={secondaryDocs['verify_id_image'] ?? null}
+                                driverId={driver.id}
+                                carId={carId}
+                                onUploaded={handleDocUploaded}
+                            />
                         </div>
                     </div>
                     )}
@@ -516,18 +563,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 </div>
 
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-                    {isEditing ? (
+                    {isEditing && (
                         <Button onClick={handleSaveEdit} disabled={loading}>Guardar Cambios</Button>
-                    ) : (
-                        <>
-                            <Button variant="secondary" onClick={onClose} disabled={loading}>Cerrar</Button>
-                            {!isCustomer && !driver.approved && !driver.blocked && (
-                                <>
-                                    <button onClick={() => handleAction('reject')} disabled={loading} className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-100 transition-colors">Rechazar Conductor</button>
-                                    <button onClick={() => handleAction('approve')} disabled={loading} className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors shadow-sm">Aprobar Conductor</button>
-                                </>
-                            )}
-                        </>
                     )}
                 </div>
             </div>

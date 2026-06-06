@@ -204,6 +204,8 @@ export const DriversPage: React.FC = () => {
                 // de ahí para guardarla como document_number en la secundaria.
                 document_type: (driver as any).document_type ?? null,
                 document_number: (driver as any).license_number ?? (driver as any).document_number ?? null,
+                // Código de referido del conductor → base secundaria (users.referral_id)
+                referral_id: driver.referral_id ?? null,
                 // Estado del conductor (pestaña Conductores) → base secundaria
                 approved: !!driver.approved,
                 blocked: !!driver.blocked,

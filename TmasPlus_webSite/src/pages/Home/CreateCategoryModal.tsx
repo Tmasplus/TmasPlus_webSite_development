@@ -21,8 +21,8 @@ const INITIAL_FORM = {
   base_price_inter: "",
   price_per_km: "",
   price_per_km_inter: "",
-  rate_per_hour: "",
-  rate_per_hour_inter: "",
+  price_per_second: "",
+  price_per_second_inter: "",
   valor_hora: "",
   min_fare: "",
   min_fare_inter: "",
@@ -58,8 +58,9 @@ export const CreateCategoryModal: React.FC<Props> = ({
         base_price_inter: String(editData.base_price_inter),
         price_per_km: String(editData.price_per_km),
         price_per_km_inter: String(editData.price_per_km_inter),
-        rate_per_hour: String(editData.rate_per_hour),
-        rate_per_hour_inter: String(editData.rate_per_hour_inter),
+        // `rate_per_hour` se guarda como valor por minuto; lo mostramos por segundo (÷60).
+        price_per_second: String(editData.rate_per_hour / 60),
+        price_per_second_inter: String(editData.rate_per_hour_inter / 60),
         valor_hora: String(editData.valor_hora),
         min_fare: String(editData.min_fare),
         min_fare_inter: String(editData.min_fare_inter),
@@ -115,8 +116,9 @@ export const CreateCategoryModal: React.FC<Props> = ({
         base_price_inter: Number(form.base_price_inter) || 0,
         price_per_km: Number(form.price_per_km) || 0,
         price_per_km_inter: Number(form.price_per_km_inter) || 0,
-        rate_per_hour: Number(form.rate_per_hour) || 0,
-        rate_per_hour_inter: Number(form.rate_per_hour_inter) || 0,
+        // El usuario ingresa precio por segundo; guardamos por minuto (×60).
+        rate_per_hour: (Number(form.price_per_second) || 0) * 60,
+        rate_per_hour_inter: (Number(form.price_per_second_inter) || 0) * 60,
         valor_hora: Number(form.valor_hora) || 0,
         min_fare: Number(form.min_fare) || 0,
         min_fare_inter: Number(form.min_fare_inter) || 0,
@@ -279,21 +281,21 @@ export const CreateCategoryModal: React.FC<Props> = ({
 
         {/* Sección: Hora */}
         <fieldset className="border border-slate-200 rounded-xl p-4 space-y-4">
-          <legend className="text-xs font-semibold text-slate-500 uppercase px-2">Tarifas por Hora</legend>
+          <legend className="text-xs font-semibold text-slate-500 uppercase px-2">Tarifas por Tiempo</legend>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FloatingInput
-              id="rate_per_hour"
-              label="Rate per Hour (Local)"
+              id="price_per_second"
+              label="Precio por segundo (Local)"
               type="number"
-              value={form.rate_per_hour}
-              onChange={(e) => update("rate_per_hour", e.target.value)}
+              value={form.price_per_second}
+              onChange={(e) => update("price_per_second", e.target.value)}
             />
             <FloatingInput
-              id="rate_per_hour_inter"
-              label="Rate per Hour (Intermunicipal)"
+              id="price_per_second_inter"
+              label="Precio por segundo (Intermunicipal)"
               type="number"
-              value={form.rate_per_hour_inter}
-              onChange={(e) => update("rate_per_hour_inter", e.target.value)}
+              value={form.price_per_second_inter}
+              onChange={(e) => update("price_per_second_inter", e.target.value)}
             />
             <FloatingInput
               id="valor_hora"

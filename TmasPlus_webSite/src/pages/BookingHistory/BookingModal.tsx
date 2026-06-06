@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
-import type { BookingRecord } from "@/services/bookings.service";
+import { serviceTotal, type BookingRecord } from "@/services/bookings.service";
 
 function formatDate(value?: string | number | null) {
   if (value === null || value === undefined || value === "") return "—";
@@ -20,6 +20,8 @@ function formatMoney(v: string | number | null | undefined) {
   if (v === null || v === undefined || v === "") return "—";
   const num = typeof v === "string" ? Number(v) : v;
   if (isNaN(num)) return String(v);
+  // Un importe en 0 se trata como "sin dato" para no mostrar nunca $0.
+  if (num === 0) return "—";
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -129,7 +131,7 @@ export function BookingModal({
                 <div>
                   <p className="text-xs text-sky-700">Total cobrado</p>
                   <p className="text-lg font-bold text-sky-900">
-                    {formatMoney(booking.total_cost)}
+                    {formatMoney(serviceTotal(booking))}
                   </p>
                 </div>
                 <div className="text-right">
@@ -200,7 +202,7 @@ export function BookingModal({
                 <Row label="Precio" value={formatMoney(booking.price)} />
                 <Row
                   label="Costo total"
-                  value={formatMoney(booking.total_cost)}
+                  value={formatMoney(serviceTotal(booking))}
                 />
                 <Row
                   label="Comisión del conductor"
@@ -237,6 +239,19 @@ export function BookingModal({
                   value={formatDate(booking.updated_at)}
                 />
               </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">
+                Observaciones
+              </h3>
+              <p
+                className={`text-sm whitespace-pre-wrap break-words ${
+                  booking.observations ? "text-slate-800" : "text-slate-400"
+                }`}
+              >
+                {booking.observations || "—"}
+              </p>
             </div>
 
             {isCancelled && (

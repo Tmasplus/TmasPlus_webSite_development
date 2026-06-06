@@ -436,6 +436,7 @@ export class UsersSecondaryService {
     profile_image?: string | null;
     document_type?: string | null;
     document_number?: string | null;
+    referral_id?: string | null;
     approved?: boolean | null;
     blocked?: boolean | null;
     vehicle?: {

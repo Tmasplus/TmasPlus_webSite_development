@@ -71,10 +71,20 @@ const DocumentUploadForm: React.FC<{
   profile: ProfileType;
   files: UploadedDocs;
   onChange: (files: UploadedDocs) => void;
-}> = ({ profile, files, onChange }) => {
+  /** Etiqueta del documento de identidad acorde al "Tipo de Documento" seleccionado. */
+  documentLabel?: string;
+}> = ({ profile, files, onChange, documentLabel }) => {
   const documents = useMemo(
-    () => DOCUMENTS_BY_PROFILE[profile],
-    [profile]
+    () => {
+      const base = DOCUMENTS_BY_PROFILE[profile];
+      // El documento de identidad ("cedula") se etiqueta según el tipo de
+      // documento elegido (Cédula, Pasaporte, Licencia, NIT / RIF…).
+      if (!documentLabel) return base;
+      return base.map((doc) =>
+        doc.id === "cedula" ? { ...doc, label: documentLabel } : doc
+      );
+    },
+    [profile, documentLabel]
   );
 
   function handleFiles(docId: string, list: FileList | null) {
