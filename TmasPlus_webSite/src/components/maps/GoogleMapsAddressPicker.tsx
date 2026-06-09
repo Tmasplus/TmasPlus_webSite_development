@@ -79,16 +79,25 @@ function BookingMapInner({
   }, [geocodingLib]);
 
   const reverseGeocode = useCallback(async (lng: number, lat: number): Promise<string> => {
-    if (!geocoderRef.current) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    // The geocoding library loads asynchronously, so on first paint (e.g. the GPS
+    // auto-origin) geocoderRef may still be null. Wait briefly for it to be ready
+    // instead of immediately falling back to raw coordinates.
+    let geocoder = geocoderRef.current;
+    for (let i = 0; i < 50 && !geocoder; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      geocoder = geocoderRef.current;
+    }
+    if (!geocoder) return fallback;
     try {
-      const res = await geocoderRef.current.geocode({
+      const res = await geocoder.geocode({
         location: { lat, lng },
         language: "es",
         region: "co",
       });
-      return res.results?.[0]?.formatted_address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      return res.results?.[0]?.formatted_address || fallback;
     } catch {
-      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      return fallback;
     }
   }, []);
 

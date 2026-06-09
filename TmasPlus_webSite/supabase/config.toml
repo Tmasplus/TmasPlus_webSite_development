@@ -445,6 +445,14 @@ verify_jwt = false
 import_map = "./functions/set-user-blocked/deno.json"
 entrypoint = "./functions/set-user-blocked/index.ts"
 
+[functions.update-user]
+enabled = true
+# Misma razón que delete-user/set-user-blocked: la función valida el JWT contra
+# el proyecto primario, así que el gateway del secundario NO debe verificarlo.
+verify_jwt = false
+import_map = "./functions/update-user/deno.json"
+entrypoint = "./functions/update-user/index.ts"
+
 [functions.send-complaint-response]
 enabled = true
 # Misma razón que import-driver: la función valida el JWT contra el proyecto primario.

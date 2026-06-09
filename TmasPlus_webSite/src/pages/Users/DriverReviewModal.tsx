@@ -6,6 +6,7 @@ import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
+import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
@@ -293,29 +294,40 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 city: editForm.city,
             };
             const cedula = cedulaActual.trim() || null;
-            if (source === 'secondary') {
-                // BD del Dashboard: la cédula se guarda en document_number
-                // (la tabla tiene esa columna). El tipo solo aplica a clientes.
-                userPayload.document_number = cedula;
-                if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
-            } else {
-                // BD de la App (primaria): la cédula se guarda en license_number.
-                userPayload.license_number = cedula;
-            }
-            const { error: userError } = await dbClient.from('users').update(userPayload).eq('id', driver.id);
-            if (userError) throw userError;
-
-            if (driver.vehicle && editForm.vehicle) {
-                const { error: carError } = await dbClient.from('cars').update({
+            const carPayload = driver.vehicle && editForm.vehicle
+                ? {
+                    id: driver.vehicle.id,
                     make: editForm.vehicle.make,
                     model: editForm.vehicle.model,
                     plate: editForm.vehicle.plate,
                     color: editForm.vehicle.color,
                     fuel_type: editForm.vehicle.fuel_type,
                     transmission: editForm.vehicle.transmission,
-                    capacity: editForm.vehicle.capacity
-                }).eq('id', driver.vehicle.id);
-                if (carError) throw carError;
+                    capacity: editForm.vehicle.capacity,
+                }
+                : undefined;
+
+            if (source === 'secondary') {
+                // BD del Dashboard (proyecto secundario): el dashboard se autentica
+                // contra el proyecto PRIMARIO, por lo que un UPDATE directo se trata
+                // como anon y no persiste (antes "guardaba" sin escribir nada). Por
+                // eso la escritura se hace vía Edge Function con service role.
+                // La cédula se guarda en document_number; el tipo solo en clientes.
+                userPayload.document_number = cedula;
+                if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
+                await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
+            } else {
+                // BD de la App (primaria): el dashboard SÍ está autenticado aquí, así
+                // que el UPDATE directo funciona. La cédula vive en license_number.
+                userPayload.license_number = cedula;
+                const { error: userError } = await dbClient.from('users').update(userPayload).eq('id', driver.id);
+                if (userError) throw userError;
+
+                if (carPayload) {
+                    const { id: carId, ...carFields } = carPayload;
+                    const { error: carError } = await dbClient.from('cars').update(carFields).eq('id', carId);
+                    if (carError) throw carError;
+                }
             }
 
             // Reflejamos de inmediato lo guardado en la copia local para que el

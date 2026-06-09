@@ -88,43 +88,52 @@ export class UsersSecondaryService {
     id: string,
     input: UpdateUserInput
   ): Promise<SecondaryUser> {
-    await syncSession();
+    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
+    // se trata como anon en el proyecto secundario: un UPDATE directo no afecta
+    // filas y PostgREST no devuelve error (antes el cambio "se guardaba" pero no
+    // persistía). Por eso, igual que toggleBlock/setApproved/delete, la
+    // actualización se hace vía Edge Function con service role.
+    const { user } = await this.updateViaFunction(id, { ...input });
+    if (!user) throw new Error('No se pudo actualizar el usuario');
+    return user;
+  }
 
-    const payload: any = {
-      ...(input.first_name !== undefined && { first_name: input.first_name }),
-      ...(input.last_name !== undefined && { last_name: input.last_name }),
-      ...(input.email !== undefined && { email: input.email }),
-      ...(input.mobile !== undefined && { mobile: input.mobile }),
-      ...(input.user_type !== undefined && { user_type: input.user_type }),
-      ...(input.city !== undefined && { city: input.city }),
-      ...(input.blocked !== undefined && { blocked: input.blocked }),
-      ...(input.approved !== undefined && { approved: input.approved }),
-      updated_at: new Date().toISOString(),
-    };
+  /**
+   * Actualiza la fila de `users` (y opcionalmente su `cars`) en la BD secundaria
+   * mediante la Edge Function `update-user` (service role). Devuelve las filas
+   * realmente guardadas para reflejarlas en la UI.
+   */
+  static async updateViaFunction(
+    id: string,
+    userFields: Record<string, any>,
+    car?: { id: string } & Record<string, any>,
+  ): Promise<{ user: SecondaryUser | null; car: any | null }> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
 
-    if (Object.keys(payload).length === 1) {
-      throw new Error('No hay campos para actualizar');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('update-user', {
+      body: { id, user: userFields, car },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al actualizar usuario';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error) message = body.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
     }
 
-    const { data, error } = await sb
-      .from('users')
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-
-    if (error) throw new Error(error.message || 'Error al actualizar usuario');
-
-    // Si el UPDATE afectó 0 filas, PostgREST devuelve una representación vacía
-    // (antes provocaba un 406 críptico con .single()). Esto ocurre cuando la
-    // política RLS del proyecto secundario no permite la escritura con el rol
-    // actual. Lo señalamos con un mensaje claro.
-    if (!data) {
-      throw new Error(
-        'No se pudo actualizar el usuario (no encontrado o sin permisos de escritura en la BD).'
-      );
+    if (!data?.success) {
+      throw new Error('No se pudo actualizar el usuario');
     }
-    return data as SecondaryUser;
+    return { user: (data.user as SecondaryUser) ?? null, car: data.car ?? null };
   }
 
   static async toggleBlock(
