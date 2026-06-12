@@ -36,6 +36,40 @@ async function isPrimaryAdmin(token: string): Promise<boolean> {
   return profile?.user_type === "admin" && profile?.approved === true && profile?.blocked !== true;
 }
 
+/**
+ * Escapa los comodines de LIKE/ILIKE (% y _) para buscar emails de forma
+ * literal. Sin esto, un email como juan_perez@x.com también coincide con
+ * juanXperez@x.com y se puede actualizar la fila equivocada.
+ */
+function likeEscape(value: string): string {
+  return value.replace(/([\\%_])/g, "\\$1");
+}
+
+/**
+ * Busca una cuenta de Auth por email recorriendo todas las páginas. El
+ * listado de Auth no se puede filtrar por email desde supabase-js, y limitar
+ * la búsqueda a la primera página deja de funcionar cuando la App supera esa
+ * cantidad de usuarios.
+ */
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<string | null> {
+  const target = email.toLowerCase();
+  const perPage = 1000;
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) throw new Error(error.message || "Error listando cuentas de Auth");
+    const users = data?.users ?? [];
+    if (users.length === 0) break;
+    const match = users.find((u: { email?: string | null }) => u.email?.toLowerCase() === target);
+    if (match) return match.id;
+    // Cortar solo con página vacía: el servidor puede devolver menos filas
+    // que perPage por límite propio y aún quedar páginas pendientes.
+  }
+  return null;
+}
+
 interface ImportVehicle {
   make?: string | null;
   model?: string | null;
@@ -92,14 +126,21 @@ async function syncCar(
   if (vehicle.capacity != null) carFields.capacity = vehicle.capacity;
   if (vehicle.service_type != null) carFields.service_type = vehicle.service_type;
 
-  const { data: existingCar, error: findErr } = await admin
+  // limit(1) en vez de maybeSingle(): si el conductor tiene varios vehículos
+  // en la App, maybeSingle() falla con PGRST116 y se terminaba INSERTANDO un
+  // vehículo nuevo en cada re-sincronización. Se actualiza el activo/más
+  // reciente, igual que hace la App para elegir el vehículo vigente.
+  const { data: existingCars, error: findErr } = await admin
     .from("cars")
     .select("id")
     .eq("driver_id", driverId)
-    .maybeSingle();
-  if (findErr && (findErr as { code?: string }).code !== "PGRST116") {
+    .order("is_active", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (findErr) {
     return `No se pudo verificar el vehículo: ${findErr.message}`;
   }
+  const existingCar = existingCars?.[0];
 
   if (existingCar?.id) {
     const { error } = await admin.from("cars").update(carFields).eq("id", existingCar.id);
@@ -177,11 +218,7 @@ serve(async (req: Request) => {
 
     if (!resetAuthId) {
       try {
-        const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-        const match = list?.users?.find(
-          (u: { email?: string | null }) => u.email?.toLowerCase() === body.email.toLowerCase(),
-        );
-        if (match) resetAuthId = match.id;
+        resetAuthId = await findAuthUserByEmail(admin, body.email);
       } catch (e) {
         resetWarning = `Error buscando cuenta de Auth: ${(e as Error)?.message || "desconocido"}.`;
       }
@@ -261,10 +298,9 @@ serve(async (req: Request) => {
     if (/already (been )?registered|already exists|duplicate/i.test(msg)) {
       // Buscar el usuario existente por email para enlazar auth_id
       try {
-        const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-        const match = list?.users?.find((u) => u.email?.toLowerCase() === body.email.toLowerCase());
+        const match = await findAuthUserByEmail(admin, body.email);
         if (match) {
-          authId = match.id;
+          authId = match;
           authCreated = false;
           authWarning = "El email ya tenía cuenta en la App; se reutilizó la cuenta existente.";
         } else {
@@ -286,7 +322,7 @@ serve(async (req: Request) => {
   const { data: byEmailList, error: byEmailErr } = await admin
     .from("users")
     .select("id, email")
-    .ilike("email", normalizedEmail)
+    .ilike("email", likeEscape(normalizedEmail))
     .limit(2);
   if (byEmailErr) {
     return json({ error: `Error verificando email: ${byEmailErr.message}` }, 500);
@@ -325,11 +361,15 @@ serve(async (req: Request) => {
   let upsertErr: any;
 
   if (byEmail && byEmail.id !== body.id) {
-    // Reutilizar fila existente: alinear su id con el del proyecto primario
-    const reuseNotice = `Ya existía un usuario con ese email (id previo ${byEmail.id}); se reutilizó la fila y se actualizó su id.`;
+    // Reutilizar la fila existente CONSERVANDO su id: otras tablas de la App
+    // (referral_codes, etc.) referencian users.id por FK, así que cambiarlo
+    // viola esas restricciones. El dashboard reconcilia este caso por email.
+    const reuseNotice = `Ya existía un usuario con ese email en la App (id ${byEmail.id}); se actualizaron sus datos conservando ese id.`;
     authWarning = authWarning ? `${authWarning} ${reuseNotice}` : reuseNotice;
 
-    const updatePayload = { ...baseFields, id: body.id };
+    const updatePayload: Record<string, unknown> = { ...baseFields };
+    // No pisar un auth_id válido de la App si no se pudo resolver la cuenta.
+    if (!authId) delete updatePayload.auth_id;
     const res = await admin
       .from("users")
       .update(updatePayload)

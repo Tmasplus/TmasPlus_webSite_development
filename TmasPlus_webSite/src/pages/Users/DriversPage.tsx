@@ -22,6 +22,13 @@ type StatusFilter = 'todos' | 'pendiente' | 'aprobado' | 'bloqueado';
 type ReferralFilter = 'todos' | 'con_referido';
 type SortFilter = 'fecha_desc' | 'fecha_asc' | 'nombre_asc';
 type AppAccessFilter = 'todos' | 'con_acceso' | 'sin_acceso';
+type AppAccessIndex = {
+    ids: Set<string>;
+    emailById: Record<string, string>;
+    idByEmail: Record<string, string>;
+};
+
+const EMPTY_ACCESS_INDEX: AppAccessIndex = { ids: new Set(), emailById: {}, idByEmail: {} };
 
 export const DriversPage: React.FC = () => {
     const [drivers, setDrivers] = useState<EnrichedDriverProfile[]>([]);
@@ -37,7 +44,7 @@ export const DriversPage: React.FC = () => {
     const pageSize = 10;
     const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
 
-    const [appAccessIds, setAppAccessIds] = useState<Set<string>>(new Set());
+    const [appAccess, setAppAccess] = useState<AppAccessIndex>(EMPTY_ACCESS_INDEX);
     // Respaldo desde la BD secundaria (App) cuando la primaria no tiene el dato.
     const [cedulaFallback, setCedulaFallback] = useState<Record<string, string>>({});
     const [categoryFallback, setCategoryFallback] = useState<Record<string, string>>({});
@@ -51,11 +58,11 @@ export const DriversPage: React.FC = () => {
 
     const fetchAppAccess = useCallback(async () => {
         try {
-            const ids = await UsersSecondaryService.listIds();
-            setAppAccessIds(ids);
+            const index = await UsersSecondaryService.listAccessIndex();
+            setAppAccess(index);
         } catch (error: any) {
             console.warn('No se pudo cargar el estado de acceso a la App:', error?.message);
-            setAppAccessIds(new Set());
+            setAppAccess(EMPTY_ACCESS_INDEX);
         }
     }, []);
 
@@ -146,6 +153,23 @@ export const DriversPage: React.FC = () => {
         return () => { cancelled = true; };
     }, [drivers]);
 
+    // Acceso efectivo a la App: por id y, como respaldo, por email. Así se
+    // reconocen como importados los conductores que existen en la App con un
+    // id distinto al del proyecto primario (filas heredadas); al re-sincronizar,
+    // la Edge Function los reconcilia por email y alinea el id.
+    const appAccessIds = useMemo(() => {
+        const set = new Set(appAccess.ids);
+        for (const d of drivers) {
+            const email = d.email?.trim().toLowerCase();
+            if (email && appAccess.idByEmail[email]) set.add(d.id);
+        }
+        return set;
+    }, [drivers, appAccess]);
+
+    const emailFor = (d: EnrichedDriverProfile): string =>
+        // Si el conductor no tiene email en la primaria, usamos el de la App.
+        d.email || appAccess.emailById[d.id] || '';
+
     const cedulaFor = (d: EnrichedDriverProfile): string =>
         // En la App (primaria) la cédula del conductor está en license_number.
         (d as any).license_number || (d as any).document_number || cedulaFallback[d.id] || '';
@@ -186,14 +210,15 @@ export const DriversPage: React.FC = () => {
     };
 
     const importOne = async (driver: EnrichedDriverProfile): Promise<{ ok: boolean; authCreated: boolean }> => {
-        if (!driver.email) {
+        const email = emailFor(driver);
+        if (!email) {
             toast.error(`${driver.first_name} ${driver.last_name} no tiene email; no se puede importar.`);
             return { ok: false, authCreated: false };
         }
         try {
             const res = await UsersSecondaryService.importDriverWithAuth({
                 id: driver.id,
-                email: driver.email,
+                email,
                 first_name: driver.first_name,
                 last_name: driver.last_name,
                 mobile: driver.mobile,
@@ -223,10 +248,9 @@ export const DriversPage: React.FC = () => {
                       }
                     : null,
             });
-            setAppAccessIds(prev => {
-                const next = new Set(prev);
-                next.add(driver.id);
-                return next;
+            setAppAccess(prev => {
+                if (prev.ids.has(driver.id)) return prev;
+                return { ...prev, ids: new Set(prev.ids).add(driver.id) };
             });
             if (res.authWarning) toast.warning(`${driver.first_name}: ${res.authWarning}`);
 
@@ -246,7 +270,10 @@ export const DriversPage: React.FC = () => {
                 soat_image: v?.soat_image,
                 tecnomecanica_image: v?.tecnomecanica_image,
             };
-            const { warnings } = await DriverDocumentsService.replicateAllToSecondary(driver.id, docs);
+            // La fila en la App puede conservar un id distinto al del primario:
+            // replicar usando el id real devuelto por import-driver.
+            const secondaryId = res.user?.id ?? driver.id;
+            const { warnings } = await DriverDocumentsService.replicateAllToSecondary(secondaryId, docs, email);
             if (warnings.length) {
                 toast.warning(`${driver.first_name}: documentos sin replicar → ${warnings.join('; ')}`);
             }
@@ -292,14 +319,16 @@ export const DriversPage: React.FC = () => {
 
     const handleBulkResync = async () => {
         // Re-sincroniza a los conductores ya importados que estén en la lista filtrada
-        const targets = filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && d.email);
+        const targets = filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && emailFor(d));
         if (targets.length === 0) {
             toast.error('No hay conductores importados para re-sincronizar.');
             return;
         }
         if (!window.confirm(
             `¿Re-sincronizar estado y vehículo de ${targets.length} conductor(es) ya importado(s)?\n\n` +
-            `Nota: esto restablece su contraseña en la App a la genérica.`
+            `Nota: a los conductores importados desde el dashboard se les restablece ` +
+            `la contraseña de la App a la genérica; los que se registraron directo ` +
+            `en la App conservan la suya.`
         )) return;
 
         setBulkResyncing(true);
@@ -404,7 +433,11 @@ export const DriversPage: React.FC = () => {
                     : <span className="text-slate-400 text-xs italic">Sin vehículo</span>;
             }
         },
-        { header: "Correo", accessor: (r) => r.email },
+        {
+            header: "Correo",
+            accessor: (r) => emailFor(r)
+                || <span className="text-slate-400 text-xs italic">Sin email</span>
+        },
         { header: "Teléfono", accessor: (r) => r.mobile },
         {
             header: "Referido Por",
@@ -435,8 +468,9 @@ export const DriversPage: React.FC = () => {
     ];
 
     const importedCount = useMemo(
-        () => filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && d.email).length,
-        [filteredAndSortedDrivers, appAccessIds]
+        () => filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && emailFor(d)).length,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [filteredAndSortedDrivers, appAccessIds, appAccess]
     );
 
     const pendingImportCount = useMemo(
@@ -458,7 +492,7 @@ export const DriversPage: React.FC = () => {
             { header: 'Apellido', value: (d) => d.last_name },
             { header: 'Cédula', value: (d) => cedulaFor(d) },
             { header: 'Categoría', value: (d) => { const c = categoryFor(d); return c ? vehicleCategoryLabel(c) : ''; } },
-            { header: 'Correo', value: (d) => d.email },
+            { header: 'Correo', value: (d) => emailFor(d) },
             { header: 'Teléfono', value: (d) => d.mobile },
             { header: 'Estado', value: statusLabel },
             { header: 'Acceso App', value: (d) => (appAccessIds.has(d.id) ? 'Sí' : 'No') },
@@ -572,7 +606,7 @@ export const DriversPage: React.FC = () => {
                                 <Button
                                     variant="secondary"
                                     onClick={() => handleResyncOne(r)}
-                                    disabled={importingIds.has(r.id) || !r.email}
+                                    disabled={importingIds.has(r.id) || !emailFor(r)}
                                     className="!px-3 !py-1.5 !text-xs"
                                     title="Vuelve a enviar estado y datos del vehículo a la App"
                                 >
@@ -582,7 +616,7 @@ export const DriversPage: React.FC = () => {
                             : (
                                 <Button
                                     onClick={() => handleImportOne(r)}
-                                    disabled={importingIds.has(r.id) || !r.email}
+                                    disabled={importingIds.has(r.id) || !emailFor(r)}
                                     className="!px-3 !py-1.5 !text-xs"
                                 >
                                     {importingIds.has(r.id) ? 'Importando...' : 'Importar a App'}

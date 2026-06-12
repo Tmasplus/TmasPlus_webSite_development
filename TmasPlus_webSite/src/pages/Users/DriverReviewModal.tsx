@@ -137,9 +137,10 @@ const DocumentManager: React.FC<{
     primaryUrl?: string | null;
     secondaryUrl?: string | null;
     driverId: string;
+    driverEmail?: string | null;
     carId?: string | null;
     onUploaded: () => void;
-}> = ({ def, primaryUrl, secondaryUrl, driverId, carId, onUploaded }) => {
+}> = ({ def, primaryUrl, secondaryUrl, driverId, driverEmail, carId, onUploaded }) => {
     const [uploading, setUploading] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const needsCar = def.scope === 'car';
@@ -149,7 +150,7 @@ const DocumentManager: React.FC<{
         if (!file) return;
         setUploading(true);
         try {
-            const res = await DriverDocumentsService.uploadBoth(def.field, file, driverId, carId);
+            const res = await DriverDocumentsService.uploadBoth(def.field, file, driverId, carId, driverEmail);
             if (res.secondaryWarning) {
                 toast.warning(`${def.label}: guardado en el panel. App: ${res.secondaryWarning}`);
             } else {
@@ -211,8 +212,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
 
-    const loadSecondaryDocs = (id: string) => {
-        DriverDocumentsService.getSecondaryDocs(id)
+    const loadSecondaryDocs = (id: string, email?: string | null) => {
+        DriverDocumentsService.getSecondaryDocs(id, email)
             .then(setSecondaryDocs)
             .catch(() => setSecondaryDocs({}));
     };
@@ -223,7 +224,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setDisplayDriver(driver);
         setIsEditing(false);
         setSecondaryDocs({});
-        loadSecondaryDocs(driver.id);
+        loadSecondaryDocs(driver.id, driver.email);
 
         // Tanto conductores como clientes tienen su propio código de referido en
         // la tabla referral_codes (driver_id = users.id). Lo cargamos para ambos.
@@ -261,7 +262,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             : ((driver as any)[def.field] ?? null);
 
     const handleDocUploaded = () => {
-        loadSecondaryDocs(driver.id);
+        loadSecondaryDocs(driver.id, driver.email);
         onRefresh();
     };
 
@@ -527,6 +528,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                 primaryUrl={primaryUrlFor(DOC_DEFS.verify_id_image)}
                                 secondaryUrl={secondaryDocs['verify_id_image'] ?? null}
                                 driverId={driver.id}
+                                driverEmail={driver.email}
                                 carId={carId}
                                 onUploaded={handleDocUploaded}
                             />
@@ -550,6 +552,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     primaryUrl={primaryUrlFor(DOC_DEFS[f])}
                                     secondaryUrl={secondaryDocs[f] ?? null}
                                     driverId={driver.id}
+                                    driverEmail={driver.email}
                                     carId={carId}
                                     onUploaded={handleDocUploaded}
                                 />
@@ -565,6 +568,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     primaryUrl={primaryUrlFor(DOC_DEFS[f])}
                                     secondaryUrl={secondaryDocs[f] ?? null}
                                     driverId={driver.id}
+                                    driverEmail={driver.email}
                                     carId={carId}
                                     onUploaded={handleDocUploaded}
                                 />

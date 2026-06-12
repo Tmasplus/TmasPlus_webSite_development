@@ -64,6 +64,14 @@ interface UploadBody {
   fileBase64: string; // contenido del archivo (sin el prefijo data:)
   contentType: string;
   fileName?: string;
+  // Email del conductor en el proyecto primario. Permite resolver la fila en
+  // la App cuando su id no coincide con el del primario (registro directo).
+  email?: string | null;
+}
+
+// Escapa los comodines de LIKE/ILIKE (% y _) para buscar emails literalmente.
+function likeEscape(value: string): string {
+  return value.replace(/([\\%_])/g, "\\$1");
 }
 
 function base64ToUint8Array(b64: string): Uint8Array {
@@ -126,28 +134,47 @@ serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // 3. Resolver la fila destino (usuario o vehículo) en la base secundaria
+  // 3. Resolver la fila destino (usuario o vehículo) en la base secundaria.
+  // Primero por id; si no está y llega email, por email (el conductor puede
+  // existir en la App con un id distinto al del proyecto primario).
+  let userId: string | null = null;
   const { data: userRow, error: userRowErr } = await admin
     .from("users")
     .select("id")
     .eq("id", body.driverId)
     .maybeSingle();
   if (userRowErr) return json({ error: `Error buscando usuario: ${userRowErr.message}` }, 500);
-  if (!userRow) {
+  if (userRow) {
+    userId = userRow.id;
+  } else if (body.email) {
+    const { data: byEmail, error: byEmailErr } = await admin
+      .from("users")
+      .select("id")
+      .ilike("email", likeEscape(body.email.trim()))
+      .limit(2);
+    if (byEmailErr) return json({ error: `Error buscando usuario por email: ${byEmailErr.message}` }, 500);
+    if (byEmail && byEmail.length === 1) userId = byEmail[0].id;
+  }
+  if (!userId) {
     return json({ error: "El conductor no está importado a la App todavía. Impórtalo primero." }, 409);
   }
 
-  let folderId = body.driverId;
+  let folderId = userId;
   let targetTable = "users";
-  let targetId = body.driverId;
+  let targetId = userId;
 
   if (def.scope === "car") {
-    const { data: carRow, error: carErr } = await admin
+    // limit(1) en vez de maybeSingle(): con varios vehículos en la App,
+    // maybeSingle() falla. El documento va al vehículo activo/más reciente.
+    const { data: carRows, error: carErr } = await admin
       .from("cars")
       .select("id")
-      .eq("driver_id", body.driverId)
-      .maybeSingle();
+      .eq("driver_id", userId)
+      .order("is_active", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(1);
     if (carErr) return json({ error: `Error buscando vehículo: ${carErr.message}` }, 500);
+    const carRow = carRows?.[0];
     if (!carRow) {
       return json({ error: "El conductor no tiene vehículo en la App. Re-sincronízalo primero." }, 409);
     }

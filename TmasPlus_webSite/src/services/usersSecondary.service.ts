@@ -236,12 +236,53 @@ export class UsersSecondaryService {
     }
   }
 
-  static async listIds(): Promise<Set<string>> {
+  /**
+   * Índice de acceso a la App: ids y emails de todos los usuarios de la BD
+   * secundaria. Se pagina de a 1000 filas para superar el límite por defecto
+   * de PostgREST (sin esto, los conductores más allá de la fila 1000
+   * aparecían "Sin acceso"). El email permite reconocer conductores
+   * importados cuyo id en la App no coincide con el del proyecto primario.
+   */
+  static async listAccessIndex(): Promise<{
+    ids: Set<string>;
+    emailById: Record<string, string>;
+    idByEmail: Record<string, string>;
+  }> {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();
-    const { data, error } = await sb.from('users').select('id');
-    if (error) throw new Error(error.message || 'Error al obtener IDs de usuarios');
-    return new Set((data || []).map((u: { id: string }) => u.id));
+    const ids = new Set<string>();
+    const emailById: Record<string, string> = {};
+    const idByEmail: Record<string, string> = {};
+    const pageSize = 1000;
+    // Se avanza por las filas realmente recibidas (el max_rows del API puede
+    // ser menor a pageSize) y se ordena por id para que las páginas sean
+    // estables aunque haya inserciones entre peticiones.
+    for (let from = 0; ; ) {
+      const { data, error } = await sb
+        .from('users')
+        .select('id, email')
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      // PGRST103: rango fuera del total → fin de la lista, no es un error.
+      if (error && (error as { code?: string }).code === 'PGRST103') break;
+      if (error) throw new Error(error.message || 'Error al obtener usuarios de la App');
+      const rows = (data || []) as Array<{ id: string; email: string | null }>;
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        ids.add(row.id);
+        const email = row.email?.trim();
+        if (email) {
+          emailById[row.id] = email;
+          idByEmail[email.toLowerCase()] = row.id;
+        }
+      }
+      from += rows.length;
+    }
+    return { ids, emailById, idByEmail };
+  }
+
+  static async listIds(): Promise<Set<string>> {
+    return (await this.listAccessIndex()).ids;
   }
 
   /**

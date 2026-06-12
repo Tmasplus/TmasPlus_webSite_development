@@ -34,6 +34,11 @@ export const DOC_DEFS: Record<string, DocDef> = {
   tecnomecanica_image: { field: 'tecnomecanica_image', label: 'Tecnomecánica', scope: 'car', bucket: 'vehicle-documents', accept: 'image/*,application/pdf' },
 };
 
+// Escapa los comodines de LIKE/ILIKE (% y _) para buscar emails literalmente.
+function likeEscape(value: string): string {
+  return value.replace(/([\\%_])/g, '\\$1');
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -98,7 +103,12 @@ export class DriverDocumentsService {
    * service role. Lanza error si el conductor no está importado o no tiene
    * vehículo en la App.
    */
-  static async uploadToSecondary(field: string, file: File, driverId: string): Promise<string | null> {
+  static async uploadToSecondary(
+    field: string,
+    file: File,
+    driverId: string,
+    email?: string | null,
+  ): Promise<string | null> {
     if (!supabaseSecondary) throw new Error('Cliente secundario no configurado');
 
     const { data: { session } } = await supabase.auth.getSession();
@@ -112,6 +122,9 @@ export class DriverDocumentsService {
         fileBase64,
         contentType: file.type || 'application/octet-stream',
         fileName: file.name,
+        // Respaldo para resolver al conductor en la App cuando su id no
+        // coincide con el del proyecto primario.
+        email: email ?? undefined,
       },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
@@ -141,12 +154,13 @@ export class DriverDocumentsService {
     file: File,
     driverId: string,
     carId?: string | null,
+    email?: string | null,
   ): Promise<UploadDocResult> {
     const primaryUrl = await this.uploadToPrimary(field, file, driverId, carId);
     let secondaryUrl: string | null = null;
     let secondaryWarning: string | undefined;
     try {
-      secondaryUrl = await this.uploadToSecondary(field, file, driverId);
+      secondaryUrl = await this.uploadToSecondary(field, file, driverId, email);
     } catch (e: any) {
       secondaryWarning = e?.message || 'No se pudo replicar a la App';
     }
@@ -189,6 +203,7 @@ export class DriverDocumentsService {
   static async replicateAllToSecondary(
     driverId: string,
     docs: Record<string, string | null | undefined>,
+    email?: string | null,
   ): Promise<{ replicated: string[]; warnings: string[] }> {
     const replicated: string[] = [];
     const warnings: string[] = [];
@@ -197,7 +212,7 @@ export class DriverDocumentsService {
       if (!url || !def) continue;
       try {
         const file = await this.fetchPrimaryDocAsFile(field, url);
-        await this.uploadToSecondary(field, file, driverId);
+        await this.uploadToSecondary(field, file, driverId, email);
         replicated.push(def.label);
       } catch (e: any) {
         warnings.push(`${def.label}: ${e?.message || 'no se pudo replicar'}`);
@@ -210,7 +225,7 @@ export class DriverDocumentsService {
    * Devuelve, para un conductor, las URLs de cada documento existentes en la
    * base SECUNDARIA (App). Útil para mostrar el indicador "En App".
    */
-  static async getSecondaryDocs(driverId: string): Promise<Record<string, string | null>> {
+  static async getSecondaryDocs(driverId: string, email?: string | null): Promise<Record<string, string | null>> {
     const result: Record<string, string | null> = {};
     if (!supabaseSecondary) return result;
 
@@ -218,20 +233,35 @@ export class DriverDocumentsService {
     const userCols = Object.values(DOC_DEFS).filter(d => d.scope === 'user').map(d => d.field);
     const carCols = Object.values(DOC_DEFS).filter(d => d.scope === 'car').map(d => d.field);
 
-    const { data: userRow } = await sb
+    let { data: userRow } = await sb
       .from('users')
       .select(['id', ...userCols].join(','))
       .eq('id', driverId)
       .maybeSingle();
+    // Respaldo por email: el conductor puede existir en la App con un id
+    // distinto al del proyecto primario (registro directo en la App).
+    if (!userRow && email) {
+      const { data: byEmail } = await sb
+        .from('users')
+        .select(['id', ...userCols].join(','))
+        .ilike('email', likeEscape(email.trim()))
+        .limit(1);
+      if (byEmail?.[0]) userRow = byEmail[0];
+    }
     if (userRow) {
       userCols.forEach(c => { result[c] = userRow[c] ?? null; });
     }
 
-    const { data: carRow } = await sb
+    // limit(1) con orden: con varios vehículos, maybeSingle() falla y el
+    // indicador "En App" quedaba vacío. Se muestra el activo/más reciente.
+    const { data: carRows } = await sb
       .from('cars')
       .select(['id', ...carCols].join(','))
-      .eq('driver_id', driverId)
-      .maybeSingle();
+      .eq('driver_id', userRow?.id ?? driverId)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    const carRow = carRows?.[0];
     if (carRow) {
       carCols.forEach(c => { result[c] = carRow[c] ?? null; });
     }
