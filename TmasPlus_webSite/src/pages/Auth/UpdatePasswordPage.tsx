@@ -1,48 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '@/config/supabase';
+import React, { useState, useEffect, useRef } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 import { useNavigate } from 'react-router-dom';
 
 export const UpdatePasswordPage: React.FC = () => {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    // El enlace de recuperación pertenece a UNO de los dos proyectos (principal
+    // = admin, secundario = drivers/membresías). Guardamos el cliente cuya
+    // sesión de recuperación quedó activa para actualizar la contraseña ahí.
+    const activeClientRef = useRef<SupabaseClient | null>(null);
     const navigate = useNavigate();
 
     useEffect(() => {
-        // 1. Atrapamos el código temporal de la URL
-        const queryParams = new URLSearchParams(window.location.search);
-        const code = queryParams.get('code');
+        const code = new URLSearchParams(window.location.search).get('code');
+        const clients = [supabase, supabaseSecondary].filter(Boolean) as SupabaseClient[];
 
-        if (code) {
-            // 2. Intercambiamos el código por una sesión real
-            supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-                if (error) {
-                    toast.error('El enlace es inválido o ha expirado. Solicita uno nuevo.');
-                    navigate('/login');
-                } else {
-                    // 3. Limpiamos la URL para que no se vea el código feo y largo
-                    window.history.replaceState(null, '', window.location.pathname);
+        // Determina en qué proyecto es válido el enlace. Probamos el intercambio
+        // del código en cada cliente; si `detectSessionInUrl` ya lo consumió,
+        // el intercambio fallará pero `getSession` devolverá la sesión activa.
+        const resolveActiveClient = async () => {
+            for (const client of clients) {
+                if (code) {
+                    await client.auth.exchangeCodeForSession(code).catch(() => {});
                 }
-            });
-        }
-
-        // Por si Supabase usa el flujo antiguo basado en Hash (#)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'PASSWORD_RECOVERY') {
-                // La sesión de recuperación se estableció exitosamente
+                const { data: { session } } = await client.auth.getSession();
+                if (session) {
+                    activeClientRef.current = client;
+                    // Limpiamos la URL para no dejar el código a la vista.
+                    window.history.replaceState(null, '', window.location.pathname);
+                    return;
+                }
             }
-        });
+            toast.error('El enlace es inválido o ha expirado. Solicita uno nuevo.');
+            navigate('/login');
+        };
 
-        return () => subscription.unsubscribe();
+        resolveActiveClient();
     }, [navigate]);
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (password.length < 6) return toast.error('La contraseña debe tener al menos 6 caracteres');
 
+        const client = activeClientRef.current;
+        if (!client) {
+            return toast.error('No hay una sesión de recuperación activa. Abre el enlace del correo nuevamente.');
+        }
+
         setLoading(true);
         try {
-            const { error } = await supabase.auth.updateUser({ password });
+            const { error } = await client.auth.updateUser({ password });
             if (error) throw error;
 
             toast.success('¡Contraseña actualizada exitosamente!');

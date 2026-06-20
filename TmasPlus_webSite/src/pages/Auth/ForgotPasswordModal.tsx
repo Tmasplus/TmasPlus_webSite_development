@@ -1,15 +1,21 @@
-import React, { useState } from 'react';
-import { supabase } from '@/config/supabase';
+import React, { useState, useEffect } from 'react';
+import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
 
 interface Props {
     open: boolean;
     onClose: () => void;
+    initialEmail?: string;
 }
 
-export const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
+export const ForgotPasswordModal: React.FC<Props> = ({ open, onClose, initialEmail }) => {
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Al abrir el modal, precargamos el correo ya escrito en el login.
+    useEffect(() => {
+        if (open) setEmail(initialEmail ?? '');
+    }, [open, initialEmail]);
 
     if (!open) return null;
 
@@ -19,12 +25,16 @@ export const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
         setLoading(true);
         try {
-            // Esta es la función mágica de Supabase
-            const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-                redirectTo: `${window.location.origin}/update-password`,
-            });
-
-            if (error) throw error;
+            const redirectTo = `${window.location.origin}/update-password`;
+            // La cuenta puede vivir en el proyecto principal (admin) o en el
+            // secundario (drivers/membresías). Enviamos el correo a ambos: el
+            // usuario solo lo recibirá del proyecto donde realmente exista.
+            const clients = [supabase, supabaseSecondary].filter(Boolean);
+            await Promise.allSettled(
+                clients.map((client) =>
+                    client.auth.resetPasswordForEmail(email.trim(), { redirectTo })
+                )
+            );
 
             toast.success('¡Correo enviado! Revisa tu bandeja de entrada o SPAM.');
             onClose();

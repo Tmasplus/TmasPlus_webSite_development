@@ -18,6 +18,9 @@ export const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [openForgot, setOpenForgot] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Cuando el fallo es por credenciales, ofrecemos restablecer la contraseña.
+  const [suggestReset, setSuggestReset] = useState(false);
 
   // Redireccionamiento inteligente basado en el perfil/modo del usuario
   useEffect(() => {
@@ -58,8 +61,14 @@ export const LoginPage: React.FC = () => {
     supabase.auth.signOut();
   }, [isAuthenticated, authLoading, profile, mode, navigate]);
 
-  const update = (k: keyof typeof form, v: string) =>
+  const update = (k: keyof typeof form, v: string) => {
+    // Al editar, limpiamos el mensaje de error anterior para no confundir.
+    if (errorMsg) {
+      setErrorMsg(null);
+      setSuggestReset(false);
+    }
     setForm((s) => ({ ...s, [k]: v }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +89,9 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
+    setErrorMsg(null);
+    setSuggestReset(false);
+
     try {
       setLoading(true);
 
@@ -94,8 +106,25 @@ export const LoginPage: React.FC = () => {
       // La redirección se maneja en el useEffect de arriba
 
     } catch (error) {
-      // Los errores ya se manejan en auth.service.ts con toasts
       console.error('Login error:', error);
+
+      const err = error as { code?: string; technicalMessage?: string; message?: string };
+      const isInvalidCreds =
+        err?.code === 'invalid_credentials' ||
+        err?.technicalMessage === 'Invalid login credentials' ||
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('incorrect'));
+
+      if (isInvalidCreds) {
+        const msg = 'Correo o contraseña incorrectos. Si la olvidaste, restablécela.';
+        setErrorMsg(msg);
+        setSuggestReset(true);
+        toast.error(msg);
+      } else {
+        const msg = err?.message || 'No se pudo iniciar sesión. Inténtalo de nuevo.';
+        setErrorMsg(msg);
+        setSuggestReset(false);
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -141,6 +170,25 @@ export const LoginPage: React.FC = () => {
             Panel de administración
           </p>
         </div>
+
+        {/* Banner de error de inicio de sesión */}
+        {errorMsg && (
+          <div
+            role="alert"
+            className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            <p className="font-medium">{errorMsg}</p>
+            {suggestReset && (
+              <button
+                type="button"
+                onClick={() => setOpenForgot(true)}
+                className="mt-2 font-semibold text-red-700 underline underline-offset-2 hover:text-red-900"
+              >
+                Restablecer mi contraseña
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Formulario */}
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -228,7 +276,11 @@ export const LoginPage: React.FC = () => {
         </p>
       </motion.div>
 
-      <ForgotPasswordModal open={openForgot} onClose={() => setOpenForgot(false)} />
+      <ForgotPasswordModal
+        open={openForgot}
+        onClose={() => setOpenForgot(false)}
+        initialEmail={form.email}
+      />
     </div>
   );
 };
