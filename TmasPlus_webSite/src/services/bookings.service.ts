@@ -113,13 +113,32 @@ function buildReference(): string {
 export class BookingsService {
   static async list(): Promise<BookingRecord[]> {
     if (!sb) throw new Error('Cliente secundario no configurado');
-    const { data, error } = await sb
-      .from('bookings')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // El dashboard se autentica contra el proyecto PRIMARIO; su token llega como
+    // anon al secundario y la RLS de `bookings` no concede SELECT a anon (devuelve
+    // 0 filas → historial vacío). Por eso la lectura va por Edge Function con
+    // service role, igual que create-booking / cancel-booking / delete-booking.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    if (error) throw new Error(error.message || 'Error al obtener reservas');
-    return (data || []) as BookingRecord[];
+    const { data, error } = await sb.functions.invoke('list-bookings', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al obtener reservas';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+    if (!data?.success || !Array.isArray(data?.bookings)) {
+      throw new Error('No se pudieron obtener las reservas');
+    }
+    return data.bookings as BookingRecord[];
   }
 
   static async searchCustomers(
