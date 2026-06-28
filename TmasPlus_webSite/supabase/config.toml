@@ -468,3 +468,26 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/upload-driver-document/deno.json"
 entrypoint = "./functions/upload-driver-document/index.ts"
+
+[functions.create-booking]
+enabled = true
+# Misma razón que update-user/set-user-blocked: la función valida el JWT contra
+# el proyecto primario, así que el gateway del secundario NO debe verificarlo
+# (verify_jwt=true devuelve 401 porque el token es del primario, no del secundario).
+verify_jwt = false
+import_map = "./functions/create-booking/deno.json"
+entrypoint = "./functions/create-booking/index.ts"
+
+[functions.cancel-booking]
+enabled = true
+# Igual que create-booking: valida el JWT del primario y escribe con service role.
+verify_jwt = false
+import_map = "./functions/cancel-booking/deno.json"
+entrypoint = "./functions/cancel-booking/index.ts"
+
+[functions.delete-booking]
+enabled = true
+# Igual que create-booking: valida el JWT del primario y escribe con service role.
+verify_jwt = false
+import_map = "./functions/delete-booking/deno.json"
+entrypoint = "./functions/delete-booking/index.ts"

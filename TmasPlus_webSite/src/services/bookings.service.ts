@@ -67,13 +67,6 @@ export function serviceTotal(
 
 const sb = supabaseSecondary as any;
 
-async function syncSession() {
-  if (!sb) throw new Error('Cliente secundario no configurado');
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('No hay sesión activa');
-  sb.rest.headers['Authorization'] = `Bearer ${session.access_token}`;
-}
-
 export interface CustomerLite {
   id: string;
   first_name: string | null;
@@ -150,7 +143,13 @@ export class BookingsService {
   }
 
   static async create(input: CreateBookingInput): Promise<BookingRecord> {
-    await syncSession();
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    // El dashboard se autentica contra el proyecto PRIMARIO; su token no es
+    // válido para escribir en el secundario (se trata como anon y RLS lo
+    // rechaza). Por eso la inserción se hace vía Edge Function `create-booking`
+    // con service role, igual que update-user / set-user-blocked / delete-user.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
 
     const pickupLoc = {
       lat: input.pickup.lat,
@@ -206,42 +205,82 @@ export class BookingsService {
       otp_timer_duration: 180,
     };
 
-    const { data, error } = await sb
-      .from('bookings')
-      .insert(payload)
-      .select()
-      .single();
+    const { data, error } = await sb.functions.invoke('create-booking', {
+      body: { booking: payload },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
 
-    if (error) throw new Error(error.message || 'Error al crear reserva');
-    return data as BookingRecord;
+    if (error) {
+      let message = error.message || 'Error al crear reserva';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+    if (!data?.success || !data?.booking) {
+      throw new Error('No se pudo crear la reserva');
+    }
+    return data.booking as BookingRecord;
   }
 
   static async cancel(id: string, reason?: string): Promise<BookingRecord> {
-    await syncSession();
-    // cancelled_at -> bigint (epoch ms) ; cancellation_time -> time (HH:MM:SS)
-    const now = new Date();
-    const nowMs = now.getTime();
-    const nowTime = now.toISOString().slice(11, 19);
-    const { data, error } = await sb
-      .from('bookings')
-      .update({
-        status: 'CANCELLED',
-        cancelled_at: nowMs,
-        cancellation_time: nowTime,
-        reason: reason || 'Cancelada por administrador',
-        cancelled_by: 'admin',
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    // El token del dashboard (proyecto primario) no es válido para escribir en
+    // el secundario, así que la cancelación va por Edge Function con service role.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    if (error) throw new Error(error.message || 'Error al cancelar reserva');
-    return data as BookingRecord;
+    const { data, error } = await sb.functions.invoke('cancel-booking', {
+      body: { id, reason },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al cancelar reserva';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+    if (!data?.success || !data?.booking) {
+      throw new Error('No se pudo cancelar la reserva');
+    }
+    return data.booking as BookingRecord;
   }
 
   static async delete(id: string): Promise<void> {
-    await syncSession();
-    const { error } = await sb.from('bookings').delete().eq('id', id);
-    if (error) throw new Error(error.message || 'Error al eliminar reserva');
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    // El token del dashboard (proyecto primario) no es válido para escribir en
+    // el secundario, así que la eliminación va por Edge Function con service role.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('delete-booking', {
+      body: { id },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al eliminar reserva';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json();
+          if (errBody?.error) message = errBody.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+    if (!data?.success) {
+      throw new Error('No se pudo eliminar la reserva');
+    }
   }
 }

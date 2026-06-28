@@ -32,6 +32,7 @@ const USER_FIELDS = [
   "document_number",
   "document_type",
   "license_number",
+  "car_type",
   "blocked",
   "approved",
 ] as const;

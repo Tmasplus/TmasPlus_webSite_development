@@ -59,6 +59,8 @@ export const DriverStatusPage: React.FC = () => {
   const [status, setStatus] = useState<StatusKind>('LOADING');
   const [vehicle, setVehicle] = useState<CarRow | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
+  const [vehicleForm, setVehicleForm] = useState({ plate: '', make: '', model: '' });
+  const [creatingVehicle, setCreatingVehicle] = useState(false);
 
   const isSecondaryDriver = mode === 'driver' && !!supabaseSecondary;
 
@@ -245,6 +247,60 @@ export const DriverStatusPage: React.FC = () => {
     }
   };
 
+  const handleCreateVehicle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !supabaseSecondary) return;
+
+    const plate = vehicleForm.plate.trim().toUpperCase();
+    const make = vehicleForm.make.trim();
+    const model = vehicleForm.model.trim();
+    if (!plate || !make || !model) {
+      toast.error('Completa placa, marca y modelo.');
+      return;
+    }
+
+    setCreatingVehicle(true);
+    try {
+      // Validar placa única en la base secundaria (App)
+      const { data: existing, error: existErr } = await supabaseSecondary
+        .from('cars')
+        .select('id')
+        .eq('plate', plate)
+        .limit(1);
+      if (existErr) throw existErr;
+      if (existing && existing.length > 0) {
+        toast.error('Esa placa ya está registrada.');
+        return;
+      }
+
+      const { data: created, error: insertErr } = await supabaseSecondary
+        .from('cars')
+        .insert({
+          driver_id: profile.id,
+          plate,
+          make,
+          model,
+          capacity: 4,
+          fuel_type: 'gasolina',
+          transmission: 'manual',
+          is_active: true,
+        })
+        .select()
+        .single();
+      if (insertErr) throw insertErr;
+
+      toast.success('Vehículo registrado. Ya puedes subir la tarjeta de propiedad y el SOAT.');
+      setVehicleForm({ plate: '', make: '', model: '' });
+      if (created) setVehicle(created as CarRow);
+      await reloadStatus();
+    } catch (err: any) {
+      console.error('Error registrando vehículo:', err);
+      toast.error(err?.message || 'No se pudo registrar el vehículo');
+    } finally {
+      setCreatingVehicle(false);
+    }
+  };
+
   const handleContinueRegistration = () => navigate('/register-driver');
 
   const handleLogout = async () => {
@@ -382,11 +438,42 @@ export const DriverStatusPage: React.FC = () => {
               />
             ))}
           </ul>
-          {canUpload && docItems.some((d) => d.target === 'car-missing') && (
-            <p className="text-xs text-slate-500 mt-3">
-              Para subir la <b>tarjeta de propiedad</b> y el <b>SOAT</b>, primero registra tu vehículo
-              desde la App Móvil de T+Plus.
-            </p>
+          {canUpload && !vehicle && (
+            <form
+              onSubmit={handleCreateVehicle}
+              className="mt-3 p-4 rounded-xl bg-sky-50 border border-sky-200"
+            >
+              <p className="text-xs text-slate-600 mb-3">
+                Registra tu vehículo para poder subir la <b>tarjeta de propiedad</b> y el <b>SOAT</b>.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                <input
+                  type="text"
+                  value={vehicleForm.plate}
+                  onChange={(e) => setVehicleForm((f) => ({ ...f, plate: e.target.value }))}
+                  placeholder="Placa"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 uppercase placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  maxLength={10}
+                />
+                <input
+                  type="text"
+                  value={vehicleForm.make}
+                  onChange={(e) => setVehicleForm((f) => ({ ...f, make: e.target.value }))}
+                  placeholder="Marca"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                <input
+                  type="text"
+                  value={vehicleForm.model}
+                  onChange={(e) => setVehicleForm((f) => ({ ...f, model: e.target.value }))}
+                  placeholder="Modelo"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                />
+              </div>
+              <Button type="submit" disabled={creatingVehicle} className="w-full sm:w-auto">
+                {creatingVehicle ? 'Guardando…' : 'Guardar vehículo'}
+              </Button>
+            </form>
           )}
         </section>
 

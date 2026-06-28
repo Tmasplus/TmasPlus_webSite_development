@@ -8,6 +8,11 @@ import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
+import {
+    vehicleCategoryLabel,
+    VEHICLE_CATEGORY_OPTIONS,
+    carTypeLabelForServiceType,
+} from '@/utils/vehicleCategory';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
@@ -305,6 +310,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     fuel_type: editForm.vehicle.fuel_type,
                     transmission: editForm.vehicle.transmission,
                     capacity: editForm.vehicle.capacity,
+                    // Categoría corregida por el admin (la elegida en el registro).
+                    service_type: editForm.vehicle.service_type,
                 }
                 : undefined;
 
@@ -316,6 +323,12 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 // La cédula se guarda en document_number; el tipo solo en clientes.
                 userPayload.document_number = cedula;
                 if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
+                // La App guarda la categoría también denormalizada en users.car_type
+                // y la lista la prioriza, así que la mantenemos en sincronía con la
+                // nueva categoría del vehículo. (La BD primaria no tiene car_type.)
+                if (carPayload?.service_type) {
+                    userPayload.car_type = carTypeLabelForServiceType(carPayload.service_type);
+                }
                 await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
             } else {
                 // BD de la App (primaria): el dashboard SÍ está autenticado aquí, así
@@ -462,6 +475,28 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                             <div>
                                 <h3 className="text-lg font-bold text-[#002f45] border-b pb-2 mb-3">Datos del Vehículo</h3>
                                 <div className="space-y-3 text-sm">
+                                    {/* Categoría (service_type). El conductor la elige al registrar el
+                                        vehículo; aquí el admin puede corregirla si se equivocó. */}
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Categoría:</span>
+                                        {isEditing ? (
+                                            <select
+                                                className="border p-1 rounded w-full mt-1"
+                                                value={editForm.vehicle?.service_type || ''}
+                                                onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, service_type: e.target.value } : { service_type: e.target.value } as any })}
+                                            >
+                                                <option value="">Seleccionar</option>
+                                                {VEHICLE_CATEGORY_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <span className="inline-flex items-center rounded-full px-2 py-0.5 mt-1 text-xs border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">
+                                                {vehicleCategoryLabel(d.vehicle.service_type)}
+                                            </span>
+                                        )}
+                                    </div>
+
                                     <div>
                                         <span className="font-semibold text-slate-500 block">Marca / Modelo:</span>
                                         {isEditing ? (
