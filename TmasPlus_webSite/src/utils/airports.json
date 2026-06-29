@@ -1,0 +1,51 @@
+[
+  {"name": "El Dorado - Bogotá", "lat": 4.6988, "lng": -74.1414},
+
+  {"name": "Olaya Herrera - Medellín", "lat": 6.2189, "lng": -75.5869},
+  {"name": "José María Córdova - Rionegro", "lat": 6.1713, "lng": -75.4284},
+
+  {"name": "Rafael Núñez - Cartagena", "lat": 10.4424, "lng": -75.5130},
+  {"name": "Ernesto Cortissoz - Barranquilla", "lat": 10.8896, "lng": -74.7808},
+  {"name": "Simón Bolívar - Santa Marta", "lat": 11.1196, "lng": -74.2306},
+  {"name": "Almirante Padilla - Riohacha", "lat": 11.5263, "lng": -72.9260},
+  {"name": "Las Brujas - Corozal", "lat": 9.3327, "lng": -75.2856},
+
+  {"name": "Matecaña - Pereira", "lat": 4.8128, "lng": -75.7395},
+  {"name": "La Nubia - Manizales", "lat": 5.0296, "lng": -75.4647},
+  {"name": "El Edén - Armenia", "lat": 4.4528, "lng": -75.7664},
+  {"name": "Perales - Ibagué", "lat": 4.4216, "lng": -75.1333},
+
+  {"name": "Alfonso Bonilla Aragón - Cali", "lat": 3.5367, "lng": -76.3877},
+  {"name": "Gerardo Tobar López - Buenaventura", "lat": 3.8196, "lng": -76.9898},
+  {"name": "Guillermo León Valencia - Popayán", "lat": 2.4544, "lng": -76.6093},
+  {"name": "Antonio Nariño - Pasto", "lat": 1.3963, "lng": -77.2956},
+  {"name": "San Luis - Ipiales", "lat": 0.8619, "lng": -77.6718},
+  {"name": "Benito Salas - Neiva", "lat": 2.9515, "lng": -75.2937},
+  {"name": "Contador - Pitalito", "lat": 1.8578, "lng": -76.0857},
+
+  {"name": "Palonegro - Bucaramanga", "lat": 7.1265, "lng": -73.1848},
+  {"name": "Yariguíes - Barrancabermeja", "lat": 7.1228, "lng": -73.7948},
+  {"name": "Camilo Daza - Cúcuta", "lat": 7.9276, "lng": -72.5115},
+  {"name": "Aguachica - Hacaritama", "lat": 8.2472, "lng": -73.5797},
+
+  {"name": "Los Garzones - Montería", "lat": 8.8236, "lng": -75.8259},
+  {"name": "Golfo de Morrosquillo - Tolú", "lat": 9.5094, "lng": -75.5854},
+
+  {"name": "Gustavo Rojas Pinilla - San Andrés", "lat": 12.5836, "lng": -81.7112},
+  {"name": "El Embrujo - Providencia", "lat": 13.3569, "lng": -81.3583},
+
+  {"name": "Alfredo Vásquez Cobo - Leticia", "lat": -4.1935, "lng": -69.9432},
+  {"name": "César Gaviria Trujillo - Inírida", "lat": 3.8194, "lng": -67.9062},
+  {"name": "Fabio Alberto León Bentley - Mitú", "lat": 1.2537, "lng": -70.2339},
+  {"name": "Jorge Enrique González Torres - San José del Guaviare", "lat": 2.5797, "lng": -72.6394},
+
+  {"name": "Vanguardia - Villavicencio", "lat": 4.1679, "lng": -73.6138},
+  {"name": "Gustavo Artunduaga - Florencia", "lat": 1.5892, "lng": -75.5644},
+  {"name": "Santiago Pérez Quiroz - Arauca", "lat": 7.0689, "lng": -70.7369},
+  {"name": "El Yopal - El Alcaraván", "lat": 5.3191, "lng": -72.3840},
+  {"name": "La Florida - Tumaco", "lat": 1.8144, "lng": -78.7492},
+
+  {"name": "Reyes Murillo - Nuquí", "lat": 5.6964, "lng": -77.2806},
+  {"name": "José Celestino Mutis - Bahía Solano", "lat": 6.2029, "lng": -77.3947},
+  {"name": "Mandinga - Pizarro", "lat": 4.9544, "lng": -77.3650}
+]
