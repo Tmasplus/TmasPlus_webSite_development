@@ -491,3 +491,10 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/delete-booking/deno.json"
 entrypoint = "./functions/delete-booking/index.ts"
+
+[functions.list-bookings]
+enabled = true
+# Igual que create-booking: valida el JWT del primario y lee con service role.
+verify_jwt = false
+import_map = "./functions/list-bookings/deno.json"
+entrypoint = "./functions/list-bookings/index.ts"

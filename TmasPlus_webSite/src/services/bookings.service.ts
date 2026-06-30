@@ -110,16 +110,67 @@ function buildReference(): string {
   return `TMP-${stamp}`;
 }
 
+async function currentPrimaryAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('No hay sesión activa');
+  return session.access_token;
+}
+
+async function invokeBookingFunction<T>(
+  name: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  if (!sb) throw new Error('Cliente secundario no configurado');
+
+  const token = await currentPrimaryAccessToken();
+  const { data, error } = await sb.functions.invoke(name, {
+    body,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (error) {
+    let message = error.message || `Error al ejecutar ${name}`;
+    const ctx: any = (error as any).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const errBody = await ctx.json();
+        if (errBody?.error) message = errBody.error;
+      } catch { /* noop */ }
+    }
+    throw new Error(message);
+  }
+
+  return data as T;
+}
+
 export class BookingsService {
   static async list(): Promise<BookingRecord[]> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-    const { data, error } = await sb
-      .from('bookings')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      bookings?: BookingRecord[];
+      error?: string;
+    }>('list-bookings', {});
 
-    if (error) throw new Error(error.message || 'Error al obtener reservas');
-    return (data || []) as BookingRecord[];
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener reservas');
+    }
+    return data.bookings || [];
+  }
+
+  static async findByReferenceOrId(query: string): Promise<BookingRecord | null> {
+    const q = query.trim();
+    if (!q) return null;
+
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      bookings?: BookingRecord[];
+      error?: string;
+    }>('list-bookings', { query: q, limit: 1 });
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al buscar la reserva');
+    }
+    return data.bookings?.[0] || null;
   }
 
   static async searchCustomers(
