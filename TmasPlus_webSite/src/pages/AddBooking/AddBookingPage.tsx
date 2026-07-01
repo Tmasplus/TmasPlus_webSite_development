@@ -269,12 +269,17 @@ export default function AddBookingPage() {
       ? new Date(dateTime).toISOString()
       : new Date().toISOString();
 
-    const driverSharePct = 0.8;
+    // Cobro inicial = mínimo del rango (totalConductor). El máximo (valorCliente)
+    // queda como estimación superior; puede ajustarse al finalizar el servicio
+    // real según distancia/tiempo efectivos.
+    const minCharge = fareBreakdown?.totalConductor ?? fare;
+    const maxCharge = fareBreakdown?.valorCliente ?? fare;
+
     const conveniencePct =
       cat.convenience_fee_type === "percentage" ? cat.convenience_fee : 0;
     const convenience_fees =
       cat.convenience_fee_type === "percentage"
-        ? Math.round(fare * (conveniencePct / 100))
+        ? Math.round(minCharge * (conveniencePct / 100))
         : cat.convenience_fee;
 
     setSubmitting(true);
@@ -302,9 +307,9 @@ export default function AddBookingPage() {
         booking_type: isScheduled ? "reservation" : "immediate",
         booking_date: bookingDate,
         payment_mode: PAYMENT_LABEL_TO_DB[paymentMethod] || "cash",
-        estimate: fare,
-        total_cost: fare,
-        driver_share: Math.round(fare * driverSharePct),
+        estimate: maxCharge,        // estimación superior (referencia)
+        total_cost: minCharge,      // cobro inicial = mínimo del rango
+        driver_share: minCharge,    // conductor recibe el valor conductor íntegro
         convenience_fees,
         discount: 0,
         observations: observationsEnabled ? observations : null,
@@ -594,8 +599,11 @@ export default function AddBookingPage() {
             </div>
             <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between text-lg font-semibold text-primary">
               <span>Total a cobrar</span>
-              <span>${fare.toLocaleString("es-CO")}</span>
+              <span>${fareBreakdown.totalConductor.toLocaleString("es-CO")}</span>
             </div>
+            <p className="mt-1 text-xs text-slate-500 italic">
+              Cobro inicial estimado. Puede ajustarse al finalizar el servicio según la ruta real.
+            </p>
             <div className="mt-2 flex justify-between text-sm text-slate-600">
               <span>Rango estimado</span>
               <span>
