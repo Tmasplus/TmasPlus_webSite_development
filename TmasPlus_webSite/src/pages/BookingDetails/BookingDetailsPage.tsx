@@ -1,114 +1,93 @@
-import React, { useState } from "react";
-import { FloatingInput } from "@/components/ui/FloatingField";
-import { Button } from "@/components/ui/Button";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
+import { BookingDetailBody, BookingDetailHeader } from "@/components/bookings/BookingDetailView";
+import { Button } from "@/components/ui/Button";
+import { FloatingInput } from "@/components/ui/FloatingField";
+import { BookingsService, type BookingRecord } from "@/services/bookings.service";
 
 export default function BookingDetailsPage() {
-  const [reference, setReference] = useState("");
-  const [booking, setBooking] = useState<any>(null);
+  const [searchParams] = useSearchParams();
+  const [reference, setReference] = useState(searchParams.get("reference") || "");
+  const [booking, setBooking] = useState<BookingRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
+  const searchBooking = async (value: string) => {
+    const q = value.trim();
+    if (!q) return;
+
     setLoading(true);
     setSearched(true);
+    setError(null);
+    setBooking(null);
 
-    // const res = await fetch(`/api/bookings/${reference}`);
-    // const data = await res.json();
-    // setBooking(data);
-
-    // 🔹 Mock temporal — simula búsqueda
-    setTimeout(() => {
-      if (reference === "TPLUS123") {
-        setBooking({
-          id: "TPLUS123",
-          usuario: "Juan Pérez",
-          origen: "Calle 12 #5-32",
-          destino: "Centro Comercial Gran Plaza",
-          estado: "Completado",
-          fecha: "2025-10-10 15:40",
-          costo: "$23.000",
-        });
-      } else {
-        setBooking(null);
-      }
+    try {
+      const data = await BookingsService.findByReferenceOrId(q);
+      setBooking(data);
+    } catch (err: any) {
+      setError(err?.message || "Error al buscar la reserva");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
-  return (
-    <div className="p-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Resumen del Servicio
-        </h1>
-        <h4>(buscar TPLUS123)</h4>
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await searchBooking(reference);
+  };
 
-        <form
-          onSubmit={handleSearch}
-          className="flex items-center gap-2 w-full md:w-auto"
-        >
+  useEffect(() => {
+    const paramReference = searchParams.get("reference");
+    if (paramReference) searchBooking(paramReference);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-full bg-slate-50/70 p-4 sm:p-6">
+      <div className="mb-8 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900">Resumen del Servicio</h1>
+          <p className="mt-1 text-sm text-slate-500">Busca por referencia de reserva o por ID.</p>
+        </div>
+
+        <form onSubmit={handleSearch} className="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
           <FloatingInput
-            id="referencia"
-            label="Referencia de reserva"
+            id="booking-reference"
+            label="Referencia o ID de reserva"
             value={reference}
             onChange={(e) => setReference(e.target.value)}
           />
-          <Button
-            type="submit"
-            disabled={!reference.trim() || loading}
-            className="whitespace-nowrap px-6 py-3"
-          >
+          <Button type="submit" disabled={!reference.trim() || loading} className="whitespace-nowrap px-6 py-3">
             {loading ? "Buscando..." : "Buscar"}
           </Button>
         </form>
       </div>
 
-      {/* Resultado */}
       <div className="mt-6">
         {!searched ? (
-          <p className="text-slate-500 text-center mt-10">
-            Ingresa una referencia para buscar una reserva.
-          </p>
+          <p className="mt-10 text-center text-slate-500">Ingresa una referencia para buscar una reserva.</p>
         ) : loading ? (
-          <p className="text-slate-500 text-center mt-10">Buscando...</p>
+          <p className="mt-10 text-center text-slate-500">Buscando...</p>
+        ) : error ? (
+          <p className="mt-10 text-center text-red-600">{error}</p>
         ) : booking ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="max-w-2xl mx-auto bg-white rounded-2xl shadow-md p-6 space-y-4"
+            className="mx-auto max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl"
           >
-            <h2 className="text-xl font-semibold text-primary-dark">
-              Detalles de la reserva
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-slate-700">
-              <Detail label="ID de Reserva" value={booking.id} />
-              <Detail label="Usuario" value={booking.usuario} />
-              <Detail label="Dirección de Origen" value={booking.origen} />
-              <Detail label="Dirección de Destino" value={booking.destino} />
-              <Detail label="Estado" value={booking.estado} />
-              <Detail label="Fecha" value={booking.fecha} />
-              <Detail label="Costo" value={booking.costo} />
-            </div>
+            <BookingDetailHeader booking={booking} />
+            <BookingDetailBody booking={booking} />
           </motion.div>
         ) : (
-          <p className="text-slate-500 text-center mt-10">
-            No se encontraron reservas con esa referencia.
+          <p className="mt-10 text-center text-slate-500">
+            No se encontraron reservas con esa referencia o ID.
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="font-medium text-slate-800">{value}</p>
     </div>
   );
 }

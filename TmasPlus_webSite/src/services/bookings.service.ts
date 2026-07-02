@@ -40,6 +40,9 @@ export interface BookingRecord {
   otp: string | null;
   rating: number | null;
   review: string | null;
+  driver_rating: number | null;
+  customer_rating: number | null;
+  customer_review: string | null;
   cancellation_time: string | null;
   cancelled_at: string | null;
   cancelled_by: string | null;
@@ -110,35 +113,67 @@ function buildReference(): string {
   return `TMP-${stamp}`;
 }
 
+async function currentPrimaryAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('No hay sesión activa');
+  return session.access_token;
+}
+
+async function invokeBookingFunction<T>(
+  name: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  if (!sb) throw new Error('Cliente secundario no configurado');
+
+  const token = await currentPrimaryAccessToken();
+  const { data, error } = await sb.functions.invoke(name, {
+    body,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (error) {
+    let message = error.message || `Error al ejecutar ${name}`;
+    const ctx: any = (error as any).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const errBody = await ctx.json();
+        if (errBody?.error) message = errBody.error;
+      } catch { /* noop */ }
+    }
+    throw new Error(message);
+  }
+
+  return data as T;
+}
+
 export class BookingsService {
   static async list(): Promise<BookingRecord[]> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-    // El dashboard se autentica contra el proyecto PRIMARIO; su token llega como
-    // anon al secundario y la RLS de `bookings` no concede SELECT a anon (devuelve
-    // 0 filas → historial vacío). Por eso la lectura va por Edge Function con
-    // service role, igual que create-booking / cancel-booking / delete-booking.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      bookings?: BookingRecord[];
+      error?: string;
+    }>('list-bookings', {});
 
-    const { data, error } = await sb.functions.invoke('list-bookings', {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener reservas');
+    }
+    return data.bookings || [];
+  }
 
-    if (error) {
-      let message = error.message || 'Error al obtener reservas';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
+  static async findByReferenceOrId(query: string): Promise<BookingRecord | null> {
+    const q = query.trim();
+    if (!q) return null;
+
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      bookings?: BookingRecord[];
+      error?: string;
+    }>('list-bookings', { query: q, limit: 1 });
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al buscar la reserva');
     }
-    if (!data?.success || !Array.isArray(data?.bookings)) {
-      throw new Error('No se pudieron obtener las reservas');
-    }
-    return data.bookings as BookingRecord[];
+    return data.bookings?.[0] || null;
   }
 
   static async searchCustomers(
