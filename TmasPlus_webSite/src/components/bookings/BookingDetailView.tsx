@@ -6,6 +6,7 @@ import {
   MessageSquareText,
   Navigation,
   Route,
+  Star,
   UserRound,
 } from "lucide-react";
 import { serviceTotal, type BookingRecord } from "@/services/bookings.service";
@@ -61,6 +62,23 @@ function formatMoney(v: string | number | null | undefined) {
 
 function display(value?: React.ReactNode | null) {
   return value === null || value === undefined || value === "" ? "—" : value;
+}
+
+// La tarifa se estima como un rango de ±10% sobre el valor calculado (misma
+// regla que /addbooking, ver AddBookingPage "Rango estimado (±10%)"). En la BD
+// estimate = price = total_cost, así que el rango se deriva de ese valor base.
+function estimateBase(b: BookingRecord): number | null {
+  const est = getNumberValue(b.estimate);
+  if (est != null && est > 0) return est;
+  return serviceTotal(b);
+}
+
+function formatEstimateRange(b: BookingRecord) {
+  const base = estimateBase(b);
+  if (base == null || base <= 0) return "—";
+  const low = Math.round(base * 0.9);
+  const high = Math.round(base * 1.1);
+  return `${formatMoney(low)} – ${formatMoney(high)}`;
 }
 
 function statusLabel(status: string) {
@@ -180,10 +198,12 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
           </SectionCard>
 
           <SectionCard title="Pago" icon={<CircleDollarSign size={19} />}>
-            <InfoRow label="Estimado" value={formatMoney(booking.estimate)} />
+            <InfoRow label="Estimado" value={formatEstimateRange(booking)} />
             <InfoRow label="Precio" value={formatMoney(booking.price)} />
             <InfoRow label="Costo total" value={formatMoney(serviceTotal(booking))} />
-            <InfoRow label="Comisión del conductor" value={formatMoney(booking.driver_share)} />
+            {/* La comisión del conductor es 0 (no existe columna de comisión;
+                driver_share es la ganancia del conductor, no una comisión). */}
+            <InfoRow label="Comisión del conductor" value={null} />
             <InfoRow label="Cargo por conveniencia" value={formatMoney(booking.convenience_fees)} />
             <InfoRow label="Descuento" value={formatMoney(booking.discount)} />
             <InfoRow label="Forma de pago" value={booking.payment_mode} />
@@ -212,6 +232,21 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
             </div>
           </SectionCard>
         </div>
+
+        <SectionCard title="Calificaciones" icon={<Star size={19} />}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <RatingBlock
+              title="Conductor"
+              rating={getNumberValue(booking.driver_rating) ?? getNumberValue(booking.rating)}
+              comment={booking.review}
+            />
+            <RatingBlock
+              title="Cliente"
+              rating={getNumberValue(booking.customer_rating)}
+              comment={booking.customer_review}
+            />
+          </div>
+        </SectionCard>
 
         <SectionCard title="Observaciones" icon={<MessageSquareText size={19} />}>
           <p
@@ -272,6 +307,60 @@ function InfoRow({
       >
         {empty ? "—" : value}
       </span>
+    </div>
+  );
+}
+
+function StarRating({ value }: { value: number }) {
+  const rounded = Math.round(value);
+  return (
+    <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <Star
+            key={i}
+            size={16}
+            className={
+              i <= rounded
+                ? "fill-amber-400 text-amber-400"
+                : "fill-slate-200 text-slate-200"
+            }
+          />
+        ))}
+      </div>
+      <span className="ml-1 text-sm font-bold text-slate-700">{value.toFixed(1)}</span>
+    </div>
+  );
+}
+
+function RatingBlock({
+  title,
+  rating,
+  comment,
+}: {
+  title: string;
+  rating: number | null;
+  comment?: string | null;
+}) {
+  const hasRating = rating !== null && rating > 0;
+
+  return (
+    <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-black uppercase tracking-wide text-blue-700">{title}</p>
+        {hasRating ? (
+          <StarRating value={rating} />
+        ) : (
+          <span className="text-xs font-medium text-slate-400">Sin calificación</span>
+        )}
+      </div>
+      <p
+        className={`mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere] ${
+          comment ? "text-slate-700" : "text-slate-400"
+        }`}
+      >
+        {comment || "Sin comentarios"}
+      </p>
     </div>
   );
 }

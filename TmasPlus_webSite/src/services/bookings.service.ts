@@ -40,6 +40,9 @@ export interface BookingRecord {
   otp: string | null;
   rating: number | null;
   review: string | null;
+  driver_rating: number | null;
+  customer_rating: number | null;
+  customer_review: string | null;
   cancellation_time: string | null;
   cancelled_at: string | null;
   cancelled_by: string | null;
