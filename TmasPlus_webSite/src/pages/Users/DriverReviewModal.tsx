@@ -29,22 +29,8 @@ interface DriverReviewModalProps {
     onRefresh: () => void;
 }
 
-function pickStorageClientByUrl(url: string, fallbackSource: DriverSource) {
-    try {
-        const u = new URL(url);
-        const primaryHost = (import.meta as any).env?.VITE_SUPABASE_URL
-            ? new URL((import.meta as any).env.VITE_SUPABASE_URL).host
-            : '';
-        const secondaryHost = (import.meta as any).env?.VITE_SUPABASE_SECONDARY_URL
-            ? new URL((import.meta as any).env.VITE_SUPABASE_SECONDARY_URL).host
-            : '';
-        if (secondaryHost && u.host === secondaryHost && supabaseSecondary) return supabaseSecondary;
-        if (primaryHost && u.host === primaryHost) return supabase;
-    } catch { /* noop */ }
-    return fallbackSource === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
-}
-
-// Enlace compacto que firma la URL (primaria o secundaria, según el host).
+// Enlace compacto que resuelve/firma la URL (primaria o secundaria, según el
+// host) mediante el resolvedor centralizado de DriverDocumentsService.
 const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: string }> = ({
     url,
     label = 'Ver Documento ↗',
@@ -56,17 +42,8 @@ const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: 
         if (!url) { setSecureUrl(null); return; }
         let isMounted = true;
         (async () => {
-            if (url.includes('/object/public/')) {
-                const parts = url.split('/object/public/');
-                const pathParts = parts[1].split('/');
-                const bucket = pathParts[0];
-                const filePath = pathParts.slice(1).join('/');
-                const client = pickStorageClientByUrl(url, 'primary');
-                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
-                if (isMounted) setSecureUrl(error ? url : (data?.signedUrl || url));
-            } else if (isMounted) {
-                setSecureUrl(url);
-            }
+            const resolved = await DriverDocumentsService.resolveViewUrl(url);
+            if (isMounted) setSecureUrl(resolved || url);
         })();
         return () => { isMounted = false; };
     }, [url]);
@@ -96,17 +73,8 @@ const SignedImage: React.FC<{ url?: string | null; alt?: string; missingText?: s
         if (!url) { setSecureUrl(null); return; }
         let isMounted = true;
         (async () => {
-            if (url.includes('/object/public/')) {
-                const parts = url.split('/object/public/');
-                const pathParts = parts[1].split('/');
-                const bucket = pathParts[0];
-                const filePath = pathParts.slice(1).join('/');
-                const client = pickStorageClientByUrl(url, 'primary');
-                const { data, error } = await client.storage.from(bucket).createSignedUrl(filePath, 3600);
-                if (isMounted) setSecureUrl(error ? url : (data?.signedUrl || url));
-            } else if (isMounted) {
-                setSecureUrl(url);
-            }
+            const resolved = await DriverDocumentsService.resolveViewUrl(url);
+            if (isMounted) setSecureUrl(resolved || url);
         })();
         return () => { isMounted = false; };
     }, [url]);
@@ -216,11 +184,21 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [displayDriver, setDisplayDriver] = useState<EnrichedDriverProfile | null>(driver);
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
+    // Documentos que viven en el proyecto PRIMARIO (panel). Cuando el modal se
+    // abre desde la lista de la App, `driver`/`driver.vehicle` son filas
+    // secundarias y los documentos subidos por el panel no se veían ("Falta").
+    const [primaryDocs, setPrimaryDocs] = useState<Record<string, string | null>>({});
 
     const loadSecondaryDocs = (id: string, email?: string | null) => {
         DriverDocumentsService.getSecondaryDocs(id, email)
             .then(setSecondaryDocs)
             .catch(() => setSecondaryDocs({}));
+    };
+
+    const loadPrimaryDocs = (id: string, email?: string | null) => {
+        DriverDocumentsService.getPrimaryDocs(id, email)
+            .then(setPrimaryDocs)
+            .catch(() => setPrimaryDocs({}));
     };
 
     useEffect(() => {
@@ -229,7 +207,9 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setDisplayDriver(driver);
         setIsEditing(false);
         setSecondaryDocs({});
+        setPrimaryDocs({});
         loadSecondaryDocs(driver.id, driver.email);
+        if (source === 'secondary') loadPrimaryDocs(driver.id, driver.email);
 
         // Tanto conductores como clientes tienen su propio código de referido en
         // la tabla referral_codes (driver_id = users.id). Lo cargamos para ambos.
@@ -262,12 +242,15 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setEditForm(prev => ({ ...prev, document_number: value, license_number: value } as any));
 
     const primaryUrlFor = (def: DocDef): string | null =>
-        def.scope === 'car'
+        (def.scope === 'car'
             ? ((driver.vehicle as any)?.[def.field] ?? null)
-            : ((driver as any)[def.field] ?? null);
+            : ((driver as any)[def.field] ?? null))
+        ?? primaryDocs[def.field]
+        ?? null;
 
     const handleDocUploaded = () => {
         loadSecondaryDocs(driver.id, driver.email);
+        if (source === 'secondary') loadPrimaryDocs(driver.id, driver.email);
         onRefresh();
     };
 
@@ -341,6 +324,28 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     const { id: carId, ...carFields } = carPayload;
                     const { error: carError } = await dbClient.from('cars').update(carFields).eq('id', carId);
                     if (carError) throw carError;
+                }
+
+                // La App móvil lee la categoría de la BD secundaria (utof); el
+                // UPDATE anterior solo tocó el primario. Propagamos la categoría
+                // a la App para que el conductor la vea reflejada. Best-effort:
+                // no aborta el guardado si el conductor no está en la App.
+                if (carPayload?.service_type) {
+                    try {
+                        const res = await UsersSecondaryService.syncCategory({
+                            id: driver.id,
+                            email: driver.email,
+                            authId: (driver as any).auth_id ?? null,
+                            serviceType: carPayload.service_type,
+                        });
+                        if (!res.synced) {
+                            toast.warning('Guardado en el panel. El conductor no está en la App: la categoría no se sincronizó allí.');
+                        } else if (res.reason === 'sin-vehiculo-en-app') {
+                            toast.warning('Categoría guardada. El conductor no tiene vehículo en la App; se actualizó solo la etiqueta.');
+                        }
+                    } catch (e: any) {
+                        toast.warning('Guardado en el panel, pero no se pudo sincronizar la categoría con la App: ' + (e?.message || 'error'));
+                    }
                 }
             }
 

@@ -1,5 +1,22 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { StorageService } from './storage.service';
+
+/**
+ * Devuelve el cliente (primario o secundario) cuyo host coincide con el de la
+ * URL de storage. `null` si no coincide con ninguno de los proyectos conocidos.
+ */
+function clientForHost(host: string): SupabaseClient | null {
+  try {
+    const primary = (import.meta as any).env?.VITE_SUPABASE_URL;
+    if (primary && new URL(primary).host === host) return supabase;
+  } catch { /* noop */ }
+  try {
+    const secondary = (import.meta as any).env?.VITE_SUPABASE_SECONDARY_URL;
+    if (secondary && supabaseSecondary && new URL(secondary).host === host) return supabaseSecondary;
+  } catch { /* noop */ }
+  return null;
+}
 
 /**
  * Gestión de documentos de conductores/vehículos para el panel de administración.
@@ -55,6 +72,65 @@ export interface UploadDocResult {
 }
 
 export class DriverDocumentsService {
+  /**
+   * Convierte una referencia de documento almacenada en una URL abrible.
+   *
+   * El mismo documento puede haber sido guardado por dos pipelines distintos:
+   *  - App móvil → URL ya firmada (`/object/sign/…?token=`) sobre un bucket que
+   *    el dashboard (anon del secundario) NO siempre puede re-firmar; su token
+   *    embebido ya es válido, así que se devuelve tal cual.
+   *  - Sitio web → URL pública (`/object/public/…`) sobre un bucket PRIVADO, que
+   *    da 404 al abrirla directo; se re-firma con el proyecto correcto. Se prueba
+   *    primero el cliente cuyo host coincide y, si falla (por el doble pipeline
+   *    el objeto puede vivir en el otro proyecto), se prueban los demás.
+   *
+   * Si nada resuelve, se devuelve la referencia original para no romper el enlace.
+   */
+  static async resolveViewUrl(ref?: string | null): Promise<string | null> {
+    if (!ref) return null;
+
+    // URL ya firmada: el token embebido es válido; no intentar re-firmar (el
+    // dashboard puede no tener permiso sobre ese bucket, p. ej. user-documents).
+    if (ref.includes('/object/sign/')) return ref;
+
+    let bucket = '';
+    let objectPath = '';
+    let hostClient: SupabaseClient | null = null;
+
+    if (ref.includes('/object/public/')) {
+      try { hostClient = clientForHost(new URL(ref).host); } catch { /* noop */ }
+      const after = ref.split('/object/public/')[1]?.split('?')[0] ?? '';
+      const segs = after.split('/');
+      bucket = segs.shift() ?? '';
+      objectPath = segs.join('/');
+    } else if (!/^https?:\/\//i.test(ref)) {
+      // Ruta cruda "bucket/objeto".
+      const segs = ref.replace(/^\/+/, '').split('/');
+      bucket = segs.shift() ?? '';
+      objectPath = segs.join('/');
+    } else {
+      // URL http externa desconocida: usar tal cual.
+      return ref;
+    }
+
+    if (!bucket || !objectPath) return ref;
+
+    // Clientes a probar, sin duplicados: el del host primero, luego el secundario
+    // (donde suelen vivir los documentos de la App) y por último el primario.
+    const clients: SupabaseClient[] = [];
+    for (const c of [hostClient, supabaseSecondary, supabase]) {
+      if (c && !clients.includes(c)) clients.push(c);
+    }
+
+    for (const client of clients) {
+      try {
+        const { data, error } = await client.storage.from(bucket).createSignedUrl(objectPath, 3600);
+        if (!error && data?.signedUrl) return data.signedUrl;
+      } catch { /* probar el siguiente cliente */ }
+    }
+    return ref;
+  }
+
   /**
    * Sube un documento a la base PRIMARIA (storage + columna en users/cars).
    * El admin del dashboard sí tiene permiso de escritura en el proyecto primario.
@@ -223,13 +299,14 @@ export class DriverDocumentsService {
 
   /**
    * Devuelve, para un conductor, las URLs de cada documento existentes en la
-   * base SECUNDARIA (App). Útil para mostrar el indicador "En App".
+   * base PRIMARIA (panel). Complemento de getSecondaryDocs: cuando el modal se
+   * abre desde la lista de la App (fila secundaria), el vehículo adjunto es el
+   * de la App y los documentos subidos por el panel (tabla cars del primario)
+   * quedaban invisibles como "Falta" aunque existieran.
    */
-  static async getSecondaryDocs(driverId: string, email?: string | null): Promise<Record<string, string | null>> {
+  static async getPrimaryDocs(driverId: string, email?: string | null): Promise<Record<string, string | null>> {
     const result: Record<string, string | null> = {};
-    if (!supabaseSecondary) return result;
-
-    const sb = supabaseSecondary as any;
+    const sb = supabase as any;
     const userCols = Object.values(DOC_DEFS).filter(d => d.scope === 'user').map(d => d.field);
     const carCols = Object.values(DOC_DEFS).filter(d => d.scope === 'car').map(d => d.field);
 
@@ -238,12 +315,68 @@ export class DriverDocumentsService {
       .select(['id', ...userCols].join(','))
       .eq('id', driverId)
       .maybeSingle();
+    if (!userRow && email) {
+      const { data: byEmail } = await sb
+        .from('users')
+        .select(['id', ...userCols].join(','))
+        .ilike('email', likeEscape(email.trim()))
+        .limit(1);
+      if (byEmail?.[0]) userRow = byEmail[0];
+    }
+    if (userRow) {
+      userCols.forEach(c => { result[c] = userRow[c] ?? null; });
+    }
+
+    const { data: carRows } = await sb
+      .from('cars')
+      .select(['id', ...carCols].join(','))
+      .eq('driver_id', userRow?.id ?? driverId)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    const carRow = carRows?.[0];
+    if (carRow) {
+      carCols.forEach(c => { result[c] = carRow[c] ?? null; });
+    }
+
+    return result;
+  }
+
+  /**
+   * Devuelve, para un conductor, las URLs de cada documento existentes en la
+   * base SECUNDARIA (App). Útil para mostrar el indicador "En App".
+   *
+   * Los documentos del vehículo pueden vivir en dos sitios: la tabla `cars`
+   * (pipeline web) o la propia fila de `users` (la App móvil los guarda ahí,
+   * con `card_prop_image_bk` en vez de `card_prop_image_back`). Se lee `cars`
+   * y se completa lo que falte con las columnas de `users`.
+   */
+  static async getSecondaryDocs(driverId: string, email?: string | null): Promise<Record<string, string | null>> {
+    const result: Record<string, string | null> = {};
+    if (!supabaseSecondary) return result;
+
+    const sb = supabaseSecondary as any;
+    const userCols = Object.values(DOC_DEFS).filter(d => d.scope === 'user').map(d => d.field);
+    const carCols = Object.values(DOC_DEFS).filter(d => d.scope === 'car').map(d => d.field);
+    // Columnas de vehículo que la App escribe sobre users: campo en DOC_DEFS → columna en users.
+    const legacyCarColsOnUsers: Record<string, string> = {
+      card_prop_image: 'card_prop_image',
+      card_prop_image_back: 'card_prop_image_bk',
+      soat_image: 'soat_image',
+      car_image_1: 'car_image',
+    };
+
+    let { data: userRow } = await sb
+      .from('users')
+      .select(['id', ...userCols, ...Object.values(legacyCarColsOnUsers)].join(','))
+      .eq('id', driverId)
+      .maybeSingle();
     // Respaldo por email: el conductor puede existir en la App con un id
     // distinto al del proyecto primario (registro directo en la App).
     if (!userRow && email) {
       const { data: byEmail } = await sb
         .from('users')
-        .select(['id', ...userCols].join(','))
+        .select(['id', ...userCols, ...Object.values(legacyCarColsOnUsers)].join(','))
         .ilike('email', likeEscape(email.trim()))
         .limit(1);
       if (byEmail?.[0]) userRow = byEmail[0];
@@ -264,6 +397,18 @@ export class DriverDocumentsService {
     const carRow = carRows?.[0];
     if (carRow) {
       carCols.forEach(c => { result[c] = carRow[c] ?? null; });
+    }
+
+    // Fallback: completar documentos de vehículo ausentes en `cars` con los
+    // que la App guardó en la fila de `users` (URLs firmadas). Se ignoran
+    // cadenas vacías, que la App deja en columnas sin documento.
+    if (userRow) {
+      for (const [field, userCol] of Object.entries(legacyCarColsOnUsers)) {
+        if (!result[field]) {
+          const v = userRow[userCol];
+          result[field] = typeof v === 'string' && v.trim() ? v : result[field] ?? null;
+        }
+      }
     }
 
     return result;

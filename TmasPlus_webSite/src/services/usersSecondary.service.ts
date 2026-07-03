@@ -1,4 +1,5 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
+import { carTypeLabelForServiceType } from '@/utils/vehicleCategory';
 
 export interface SecondaryUser {
   id: string;
@@ -134,6 +135,74 @@ export class UsersSecondaryService {
       throw new Error('No se pudo actualizar el usuario');
     }
     return { user: (data.user as SecondaryUser) ?? null, car: data.car ?? null };
+  }
+
+  /**
+   * Propaga la categoría (service_type) del vehículo a la BD de la App
+   * (secundaria) para que el conductor la vea reflejada. La App lee la categoría
+   * de la secundaria (cars.service_type + users.car_type denormalizado); cuando
+   * el admin edita desde la pestaña Conductores el guardado va al proyecto
+   * primario, así que sin esta propagación el cambio no llegaba a la App.
+   *
+   * Resuelve al conductor por id y, como respaldo, por email (su id en la App
+   * puede no coincidir con el del primario). El vehículo se resuelve por
+   * driver_id = users.id o auth_id (filas heredadas), priorizando el activo/más
+   * reciente. Best-effort: devuelve { synced:false } si no existe en la App.
+   */
+  static async syncCategory(input: {
+    id: string;
+    email?: string | null;
+    authId?: string | null;
+    serviceType: string;
+  }): Promise<{ synced: boolean; reason?: string }> {
+    if (!sb) return { synced: false, reason: 'sin-cliente-secundario' };
+    await syncSession();
+
+    // 1. Resolver la fila users en la App (por id; respaldo por email).
+    let { data: user } = await sb
+      .from('users')
+      .select('id, auth_id')
+      .eq('id', input.id)
+      .maybeSingle();
+    if (!user && input.email) {
+      const { data: byEmail } = await sb
+        .from('users')
+        .select('id, auth_id')
+        .ilike('email', input.email.trim())
+        .limit(1);
+      user = byEmail?.[0] ?? null;
+    }
+    if (!user) return { synced: false, reason: 'no-esta-en-app' };
+
+    // 2. Resolver el vehículo activo/más reciente del conductor.
+    const driverIds = Array.from(
+      new Set([user.id, user.auth_id, input.authId].filter(Boolean) as string[])
+    );
+    const { data: cars } = await sb
+      .from('cars')
+      .select('id')
+      .in('driver_id', driverIds)
+      .order('is_active', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    const car = cars?.[0] ?? null;
+
+    const carType = carTypeLabelForServiceType(input.serviceType);
+    const userFields: Record<string, any> = {};
+    if (carType) userFields.car_type = carType;
+
+    // Nada que escribir (categoría desconocida y sin vehículo): no forzar la
+    // Edge Function, que rechazaría un payload vacío.
+    if (!car && Object.keys(userFields).length === 0) {
+      return { synced: false, reason: 'sin-datos-que-sincronizar' };
+    }
+
+    await this.updateViaFunction(
+      user.id,
+      userFields,
+      car ? { id: car.id, service_type: input.serviceType } : undefined,
+    );
+    return { synced: true, reason: car ? undefined : 'sin-vehiculo-en-app' };
   }
 
   static async toggleBlock(
