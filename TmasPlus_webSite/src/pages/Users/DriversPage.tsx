@@ -304,6 +304,21 @@ export const DriversPage: React.FC = () => {
         }
     };
 
+    // Reconcilia los contadores de referidos en ambas bases (primaria + App).
+    // Es global: recalcula todos los códigos a partir de users.referral_id, así
+    // que basta llamarla una vez al final de la re-sincronización.
+    const reconcileReferrals = async () => {
+        try {
+            const res = await UsersSecondaryService.reconcileReferrals();
+            if (res.totalUpdated > 0) {
+                toast.success(`Referidos sincronizados: ${res.totalUpdated} contador(es) corregido(s).`);
+                fetchDrivers();
+            }
+        } catch (error: any) {
+            toast.error(`No se pudieron sincronizar los referidos: ${error?.message || 'error desconocido'}`);
+        }
+    };
+
     const handleResyncOne = async (driver: EnrichedDriverProfile) => {
         setImportingIds(prev => new Set(prev).add(driver.id));
         const res = await importOne(driver);
@@ -314,6 +329,7 @@ export const DriversPage: React.FC = () => {
         });
         if (res.ok) {
             toast.success(`${driver.first_name} ${driver.last_name}: estado y vehículo re-sincronizados en la App.`);
+            await reconcileReferrals();
         }
     };
 
@@ -339,6 +355,7 @@ export const DriversPage: React.FC = () => {
             if (res.ok) success++; else failed++;
             if (targets.length > 1) await new Promise(r => setTimeout(r, 350));
         }
+        if (success > 0) await reconcileReferrals();
         setBulkResyncing(false);
         if (success > 0) toast.success(`${success} conductor(es) re-sincronizado(s).`);
         if (failed > 0) toast.error(`${failed} re-sincronización(es) fallaron.`);

@@ -200,7 +200,12 @@ export class UsersSecondaryService {
     await this.updateViaFunction(
       user.id,
       userFields,
-      car ? { id: car.id, service_type: input.serviceType } : undefined,
+      // La App pinta la categoría desde la etiqueta en cars.features.carType,
+      // así que además de service_type propagamos esa etiqueta (features_car_type)
+      // para que la Edge Function la fusione en el JSON del vehículo.
+      car
+        ? { id: car.id, service_type: input.serviceType, features_car_type: carType ?? undefined }
+        : undefined,
     );
     return { synced: true, reason: car ? undefined : 'sin-vehiculo-en-app' };
   }
@@ -597,6 +602,46 @@ export class UsersSecondaryService {
       user: data.user as SecondaryUser,
       authCreated: !!data.authCreated,
       authWarning: data.authWarning,
+    };
+  }
+
+  /**
+   * Reconcilia el contador de referidos (referral_codes.total_referrals) en
+   * ambos proyectos a partir de users.referral_id. Es una operación global
+   * (no por conductor): recalcula todos los códigos de una vez. Se invoca tras
+   * re-sincronizar para que los "Referidos" de /users y /drivers cuadren.
+   */
+  static async reconcileReferrals(): Promise<{
+    totalUpdated: number;
+    primary: { updated: number };
+    secondary: { updated: number };
+  }> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('reconcile-referrals', {
+      body: {},
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    if (error) {
+      let message = error.message || 'Error al reconciliar referidos';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const b = await ctx.json();
+          if (b?.error) message = b.error;
+        } catch { /* noop */ }
+      }
+      throw new Error(message);
+    }
+
+    return {
+      totalUpdated: data?.totalUpdated ?? 0,
+      primary: { updated: data?.primary?.updated ?? 0 },
+      secondary: { updated: data?.secondary?.updated ?? 0 },
     };
   }
 }

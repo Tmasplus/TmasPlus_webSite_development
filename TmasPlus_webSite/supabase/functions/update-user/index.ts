@@ -128,6 +128,41 @@ serve(async (req: Request) => {
   let updatedCar: Record<string, unknown> | null = null;
   if (body.car?.id) {
     const carPayload = pick(body.car, CAR_FIELDS);
+
+    // La App muestra la categoría desde la etiqueta guardada en el JSON
+    // `cars.features.carType` (p.ej. "T+Plus Especial"), no desde
+    // `cars.service_type`. Por eso, si el cliente envía `features_car_type`,
+    // leemos el `features` actual y FUSIONAMOS solo esa clave, preservando el
+    // resto del blob (imageBase64, etc.). Sin este merge el cambio de categoría
+    // nunca llegaba a la App.
+    const featuresCarType = typeof body.car.features_car_type === "string"
+      ? body.car.features_car_type.trim()
+      : "";
+    if (featuresCarType) {
+      const { data: current, error: readErr } = await admin
+        .from("cars")
+        .select("features")
+        .eq("id", body.car.id)
+        .maybeSingle();
+      if (readErr) {
+        return json({ error: `Error al leer el vehículo: ${readErr.message}` }, 500);
+      }
+      let features: Record<string, unknown> = {};
+      const raw = current?.features;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        features = { ...(raw as Record<string, unknown>) };
+      } else if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            features = parsed as Record<string, unknown>;
+          }
+        } catch { /* features no era JSON: se reemplaza por un objeto nuevo */ }
+      }
+      features.carType = featuresCarType;
+      carPayload.features = features;
+    }
+
     if (Object.keys(carPayload).length > 0) {
       carPayload.updated_at = new Date().toISOString();
       const { data, error } = await admin

@@ -307,10 +307,15 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 userPayload.document_number = cedula;
                 if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
                 // La App guarda la categoría también denormalizada en users.car_type
-                // y la lista la prioriza, así que la mantenemos en sincronía con la
-                // nueva categoría del vehículo. (La BD primaria no tiene car_type.)
+                // y en el JSON cars.features.carType (que es de donde la App la pinta),
+                // así que mantenemos ambos en sincronía con la nueva categoría del
+                // vehículo. (La BD primaria no tiene car_type.)
                 if (carPayload?.service_type) {
-                    userPayload.car_type = carTypeLabelForServiceType(carPayload.service_type);
+                    const catLabel = carTypeLabelForServiceType(carPayload.service_type);
+                    if (catLabel) {
+                        userPayload.car_type = catLabel;
+                        (carPayload as any).features_car_type = catLabel;
+                    }
                 }
                 await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
             } else {

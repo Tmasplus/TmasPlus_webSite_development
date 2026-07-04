@@ -6,7 +6,7 @@ import { SlEnvolopeLetter } from "react-icons/sl";
 import { GrMoney, GrUserManager } from "react-icons/gr";
 import { LuUserRound, LuUsersRound, LuCar } from "react-icons/lu";
 import { PiBuildingOfficeBold, PiReadCvLogoBold } from "react-icons/pi";
-import { TbCalendarPlus, TbCalendarStats, TbContract, TbExchange } from "react-icons/tb";
+import { TbCalendarPlus, TbCalendarStats, TbContract, TbExchange, TbBrandToyota } from "react-icons/tb";
 import { RiSettings3Line } from "react-icons/ri";
 import { MdCardMembership } from "react-icons/md";
 import React from "react";
@@ -244,6 +244,15 @@ export const Sidebar: React.FC<Props> = ({
               to="/memberships"
               icon={<MdCardMembership />}
               label="Membresía"
+              isOpen={open}
+            />
+          )}
+
+          {isAdmin && (
+            <NavItem
+              to="/car-brands"
+              icon={<TbBrandToyota />}
+              label="Marcas de Vehículos"
               isOpen={open}
             />
           )}

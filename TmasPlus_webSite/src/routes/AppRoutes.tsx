@@ -28,6 +28,7 @@ import SettingsPage from '@/pages/Settings/SettingsPage';
 import TollsPage from '@/pages/Tolls/TollsPage';
 import NotificationsPage from '@/pages/Notifications/NotificationsPage';
 import MembershipsPage from '@/pages/Memberships/MembershipsPage';
+import CarBrandsPage from '@/pages/CarBrands/CarBrandsPage';
 
 // Página 404
 const NotFound = () => (
@@ -78,6 +79,7 @@ export default function AppRoutes() {
         <Route path="/tolls" element={<TollsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/memberships" element={<MembershipsPage />} />
+        <Route path="/car-brands" element={<CarBrandsPage />} />
       </Route>
 
       {/* 404 */}
