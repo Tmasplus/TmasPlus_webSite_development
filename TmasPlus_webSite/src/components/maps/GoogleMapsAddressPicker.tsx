@@ -383,7 +383,14 @@ function BookingMapInner({
   );
 }
 
-// ── Directions sub-component: draws the route and reports back distance/time ──
+const MAPBOX_ACCESS_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string;
+
+// ── Directions sub-component: draws the route and reports back distance/time.
+// Usa Mapbox Directions API (no Google DirectionsService) para que la
+// distancia/tiempo coincida con la app móvil, que ya usa Mapbox — antes cada
+// canal medía la misma ruta con un proveedor distinto y divergían ~13-27%.
+// El mapa en sí sigue siendo Google Maps (autocompletar/render); solo cambia
+// la fuente del cálculo de ruta. Ver [[26-comparativa-canales-pricing]].
 function Directions({
   origin,
   destination,
@@ -394,73 +401,82 @@ function Directions({
   onRouteInfo: (info: RouteInfo | null) => void;
 }) {
   const map = useMap();
-  const routesLib = useMapsLibrary("routes");
-  const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
-  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
 
   useEffect(() => {
-    if (!routesLib || !map) return;
-    directionsServiceRef.current = new routesLib.DirectionsService();
-    directionsRendererRef.current = new routesLib.DirectionsRenderer({
-      map,
-      suppressMarkers: true,
-      polylineOptions: {
-        strokeColor: "#00204a",
-        strokeOpacity: 0.85,
-        strokeWeight: 5,
-      },
-    });
     return () => {
-      directionsRendererRef.current?.setMap(null);
-      directionsRendererRef.current = null;
+      polylineRef.current?.setMap(null);
+      polylineRef.current = null;
     };
-  }, [routesLib, map]);
+  }, []);
 
   useEffect(() => {
-    const svc = directionsServiceRef.current;
-    const renderer = directionsRendererRef.current;
-    if (!svc || !renderer || !map) return;
+    if (!map) return;
 
     if (!origin || !destination) {
-      renderer.set("directions", null);
+      polylineRef.current?.setMap(null);
+      polylineRef.current = null;
       onRouteInfo(null);
       return;
     }
 
-    svc
-      .route({
-        origin: { lat: origin.latitude, lng: origin.longitude },
-        destination: { lat: destination.latitude, lng: destination.longitude },
-        travelMode: google.maps.TravelMode.DRIVING,
-        region: "co",
-      })
-      .then((res) => {
-        renderer.setDirections(res);
-        const leg = res.routes[0]?.legs[0];
-        if (!leg) {
+    if (!MAPBOX_ACCESS_TOKEN) {
+      console.error("Falta VITE_MAPBOX_ACCESS_TOKEN — no se puede calcular la ruta.");
+      onRouteInfo(null);
+      return;
+    }
+
+    let cancelled = false;
+    const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+
+    fetch(
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
+    )
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const route = data?.routes?.[0];
+        if (!route) {
           onRouteInfo(null);
           return;
         }
-        const distMeters = leg.distance?.value ?? 0;
-        const durSec = leg.duration?.value ?? 0;
-        // Build GeoJSON LineString from the route's overview_path
-        const path = res.routes[0].overview_path.map((p) => [p.lng(), p.lat()] as [number, number]);
+
+        const coordinates: [number, number][] = route.geometry?.coordinates ?? [];
+        const path = coordinates.map(([lng, lat]) => ({ lat, lng }));
+
+        polylineRef.current?.setMap(null);
+        polylineRef.current = new google.maps.Polyline({
+          path,
+          map,
+          strokeColor: "#00204a",
+          strokeOpacity: 0.85,
+          strokeWeight: 5,
+        });
+
         const info: RouteInfo = {
-          distanceKm: +(distMeters / 1000).toFixed(1),
-          durationMin: Math.ceil(durSec / 60),
-          geometry: { type: "LineString", coordinates: path },
+          distanceKm: +(route.distance / 1000).toFixed(1),
+          durationMin: route.duration / 60,
+          geometry: { type: "LineString", coordinates },
         };
         onRouteInfo(info);
 
-        // Fit bounds to the route
-        const bounds = new google.maps.LatLngBounds();
-        res.routes[0].overview_path.forEach((p) => bounds.extend(p));
-        map.fitBounds(bounds, 80);
+        if (path.length) {
+          const bounds = new google.maps.LatLngBounds();
+          path.forEach((p) => bounds.extend(p));
+          map.fitBounds(bounds, 80);
+        }
       })
-      .catch(() => {
-        renderer.set("directions", null);
+      .catch((e) => {
+        if (cancelled) return;
+        console.error("Mapbox Directions error:", e);
+        polylineRef.current?.setMap(null);
+        polylineRef.current = null;
         onRouteInfo(null);
       });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin?.latitude, origin?.longitude, destination?.latitude, destination?.longitude, map]);
 
