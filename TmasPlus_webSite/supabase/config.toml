@@ -507,3 +507,13 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/list-bookings/deno.json"
 entrypoint = "./functions/list-bookings/index.ts"
+
+[functions.reconcile-referrals]
+enabled = true
+# Misma razón que upload-driver-document/sign-document-url: la función valida
+# el JWT contra el proyecto primario. El gateway del proyecto secundario NO
+# debe verificar el JWT (verify_jwt=true devuelve 401 porque el token es del
+# proyecto primario, no del secundario).
+verify_jwt = false
+import_map = "./functions/reconcile-referrals/deno.json"
+entrypoint = "./functions/reconcile-referrals/index.ts"
