@@ -9,6 +9,12 @@ import {
   BookingsService,
   type CustomerLite,
 } from "@/services/bookings.service";
+import { isNearAirport } from "@/utils/airports";
+import {
+  DELTA_AEROPUERTO,
+  DELTA_PROGRAMADO,
+  MARGEN_CLIENTE,
+} from "@/utils/fareConstants";
 
 const PAYMENT_LABEL_TO_DB: Record<string, string> = {
   Efectivo: "cash",
@@ -44,8 +50,12 @@ export default function AddBookingPage() {
     waiting: number;
     returnLeg: number;
     schedulingSurcharge: number;
+    airportSurcharge: number;
+    airportName: string | null;
     convenience: number;
     minApplied: boolean;
+    totalConductor: number;   // ROUNDUP centena, lo que recibe el conductor
+    valorCliente: number;     // total_conductor × 1.25 ROUNDUP, lo que paga el cliente
   } | null>(null);
   const [observationsEnabled, setObservationsEnabled] = useState(false);
   const [observations, setObservations] = useState("");
@@ -144,37 +154,68 @@ export default function AddBookingPage() {
 
     const basePrice = isInter ? cat.base_price_inter : cat.base_price;
     const perKm = isInter ? cat.price_per_km_inter : cat.price_per_km;
-    const perHour = isInter ? cat.rate_per_hour_inter : cat.rate_per_hour;
     const minFare = isInter ? cat.min_fare_inter : cat.min_fare;
 
-    // El valor de tiempo se cobra POR SEGUNDO. El campo `rate_per_hour` está
-    // guardado como valor por minuto, así que la tarifa por segundo = /60.
-    const ratePerSecond = perHour / 60;
+    // Alineado con Agente/backendRemoto y sistema_calculo: el precio por minuto
+    // se deriva de `valor_hora / 60`, NO del campo legacy `rate_per_hour` que
+    // en BD puede estar desincronizado. Si es intermunicipal, se aplica el
+    // factor inter (/0.5 = ×2) sobre el valor por minuto.
+    const valorHora = Number(cat.valor_hora) || 0;
+    const ratePerMinuteUrban = valorHora / 60;
+    const ratePerMinute = isInter ? ratePerMinuteUrban / 0.5 : ratePerMinuteUrban;
 
     const baseComponent = basePrice;
     const distComponent = perKm * distKm;
-    const timeComponent = ratePerSecond * durationSec;
+    const timeComponent = ratePerMinute * (durationSec / 60);
 
     let oneWay = baseComponent + distComponent + timeComponent;
 
     const returnLeg = tripType === "Ida y regreso" ? oneWay * 0.8 : 0;
     const waiting = tripType === "Ida y regreso" ? cat.valor_hora * hours : 0;
-    const schedulingSurcharge = isScheduled ? cat.delta_aeropuerto_prog : 0;
 
-    let subtotal = oneWay + returnLeg + waiting + schedulingSurcharge;
+    // Detección automática de aeropuerto por coordenadas (Haversine, radio 1 km).
+    // Portado de Agente/backendRemoto. Cero UI: si origen o destino cae en la
+    // zona de un aeropuerto conocido, se aplica el delta.
+    const originAirport =
+      originLoc && isNearAirport(originLoc.latitude, originLoc.longitude);
+    const destAirport =
+      destLoc && isNearAirport(destLoc.latitude, destLoc.longitude);
+    const airportName = originAirport || destAirport || null;
+    const isAirport = airportName !== null;
 
-    const minApplied = subtotal < minFare;
-    if (minApplied) subtotal = minFare;
+    // Conceptos independientes. Se SUMAN naturalmente cuando ambos aplican.
+    // Sin lógica condicional aero+prog (que en BD vive pre-sumado bajo
+    // `delta_aeropuerto_prog` y obliga a ramas confusas). Constantes oficiales
+    // alineadas con Excel `Tabla Tarifas` y Agente/backendRemoto.
+    const airportSurcharge = isAirport ? DELTA_AEROPUERTO : 0;      // 12 000
+    const schedulingSurcharge = isScheduled ? DELTA_PROGRAMADO : 0; //  4 800
 
+    const sumaComponentes =
+      oneWay + returnLeg + waiting + airportSurcharge + schedulingSurcharge;
+
+    // ROUNDUP centena (alineado con backendRemoto / Excel J25)
+    let totalConductor = Math.ceil(sumaComponentes / 100) * 100;
+
+    // Aplicar piso min_fare DESPUÉS de roundup, como hace backendRemoto
+    const minApplied = totalConductor < minFare;
+    if (minApplied) totalConductor = minFare;
+
+    // Margen Erixon (Tapa!F13-F14 del Excel oficial) sobre total_conductor
+    const valorCliente =
+      Math.ceil((totalConductor * (1 + MARGEN_CLIENTE)) / 100) * 100;
+
+    // Convenience fee (porcentaje o flat). Se aplica sobre el valor cliente
+    // como cobro adicional, NO sustituye el margen.
     let convenience = 0;
     if (cat.convenience_fee > 0) {
       convenience =
         cat.convenience_fee_type === "percentage"
-          ? subtotal * (cat.convenience_fee / 100)
+          ? valorCliente * (cat.convenience_fee / 100)
           : cat.convenience_fee;
     }
 
-    const total = Math.round(subtotal + convenience);
+    // Lo que paga el cliente = valor_cliente + convenience
+    const total = Math.round(valorCliente + convenience);
 
     setFare(total);
     setFareBreakdown({
@@ -185,8 +226,12 @@ export default function AddBookingPage() {
       waiting: Math.round(waiting),
       returnLeg: Math.round(returnLeg),
       schedulingSurcharge: Math.round(schedulingSurcharge),
+      airportSurcharge: Math.round(airportSurcharge),
+      airportName,
       convenience: Math.round(convenience),
       minApplied,
+      totalConductor,
+      valorCliente,
     });
   };
 
@@ -224,12 +269,17 @@ export default function AddBookingPage() {
       ? new Date(dateTime).toISOString()
       : new Date().toISOString();
 
-    const driverSharePct = 0.8;
+    // Cobro inicial = mínimo del rango (totalConductor). El máximo (valorCliente)
+    // queda como estimación superior; puede ajustarse al finalizar el servicio
+    // real según distancia/tiempo efectivos.
+    const minCharge = fareBreakdown?.totalConductor ?? fare;
+    const maxCharge = fareBreakdown?.valorCliente ?? fare;
+
     const conveniencePct =
       cat.convenience_fee_type === "percentage" ? cat.convenience_fee : 0;
     const convenience_fees =
       cat.convenience_fee_type === "percentage"
-        ? Math.round(fare * (conveniencePct / 100))
+        ? Math.round(minCharge * (conveniencePct / 100))
         : cat.convenience_fee;
 
     setSubmitting(true);
@@ -257,9 +307,9 @@ export default function AddBookingPage() {
         booking_type: isScheduled ? "reservation" : "immediate",
         booking_date: bookingDate,
         payment_mode: PAYMENT_LABEL_TO_DB[paymentMethod] || "cash",
-        estimate: fare,
-        total_cost: fare,
-        driver_share: Math.round(fare * driverSharePct),
+        estimate: maxCharge,        // estimación superior (referencia)
+        total_cost: minCharge,      // cobro inicial = mínimo del rango
+        driver_share: minCharge,    // conductor recibe el valor conductor íntegro
         convenience_fees,
         discount: 0,
         observations: observationsEnabled ? observations : null,
@@ -506,7 +556,7 @@ export default function AddBookingPage() {
                 Desglose ({fareBreakdown.isInter ? "Intermunicipal" : "Urbano"})
               </span>
               <span className="text-xs text-slate-500">
-                {routeInfo?.distanceKm} km · {routeInfo?.durationMin} min
+                {routeInfo?.distanceKm} km · {routeInfo?.durationMin?.toFixed(1)} min
               </span>
             </div>
             <ul className="text-sm text-slate-600 space-y-1">
@@ -519,6 +569,14 @@ export default function AddBookingPage() {
               {fareBreakdown.waiting > 0 && (
                 <li className="flex justify-between"><span>Espera ({hours}h)</span><span>${fareBreakdown.waiting.toLocaleString("es-CO")}</span></li>
               )}
+              {fareBreakdown.airportSurcharge > 0 && (
+                <li className="flex justify-between">
+                  <span title={fareBreakdown.airportName ?? ""}>
+                    Aeropuerto{fareBreakdown.airportName ? ` (${fareBreakdown.airportName})` : ""}
+                  </span>
+                  <span>${fareBreakdown.airportSurcharge.toLocaleString("es-CO")}</span>
+                </li>
+              )}
               {fareBreakdown.schedulingSurcharge > 0 && (
                 <li className="flex justify-between"><span>Recargo programado</span><span>${fareBreakdown.schedulingSurcharge.toLocaleString("es-CO")}</span></li>
               )}
@@ -529,15 +587,28 @@ export default function AddBookingPage() {
                 <li className="flex justify-between"><span>Conveniencia</span><span>${fareBreakdown.convenience.toLocaleString("es-CO")}</span></li>
               )}
             </ul>
-            <div className="mt-3 pt-3 border-t border-slate-200 flex justify-between text-lg font-semibold text-primary">
-              <span>Total</span>
-              <span>${fare.toLocaleString("es-CO")}</span>
+            <div className="mt-3 pt-3 border-t border-slate-200 space-y-1 text-sm text-slate-600">
+              <div className="flex justify-between">
+                <span>Valor Conductor</span>
+                <span>${fareBreakdown.totalConductor.toLocaleString("es-CO")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Valor Cliente (+25%)</span>
+                <span>${fareBreakdown.valorCliente.toLocaleString("es-CO")}</span>
+              </div>
             </div>
+            <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between text-lg font-semibold text-primary">
+              <span>Total a cobrar</span>
+              <span>${fareBreakdown.totalConductor.toLocaleString("es-CO")}</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500 italic">
+              Cobro inicial estimado. Puede ajustarse al finalizar el servicio según la ruta real.
+            </p>
             <div className="mt-2 flex justify-between text-sm text-slate-600">
-              <span>Rango estimado (±10%)</span>
+              <span>Rango estimado</span>
               <span>
-                ${Math.round(fare * 0.9).toLocaleString("es-CO")} – $
-                {Math.round(fare * 1.1).toLocaleString("es-CO")}
+                ${fareBreakdown.totalConductor.toLocaleString("es-CO")} – $
+                {fare.toLocaleString("es-CO")}
               </span>
             </div>
           </motion.div>
