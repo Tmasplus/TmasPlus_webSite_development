@@ -1,5 +1,6 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { carTypeLabelForServiceType } from '@/utils/vehicleCategory';
+import { chunk } from '@/utils/chunk';
 
 export interface SecondaryUser {
   id: string;
@@ -400,21 +401,26 @@ export class UsersSecondaryService {
     const ids = Array.from(new Set(driverIds.filter(Boolean)));
     if (ids.length === 0) return {};
     await syncSession();
-    const { data, error } = await sb
-      .from('cars')
-      .select('driver_id, service_type, is_active, updated_at')
-      .in('driver_id', ids)
-      .order('is_active', { ascending: false })
-      .order('updated_at', { ascending: false });
-    if (error) {
-      console.warn('[categoriesByDriver] No se pudo leer cars:', error.message);
-      return {};
-    }
+    // Con muchos conductores, un solo `.in()` con cientos de UUIDs genera una
+    // URL que supera el límite del gateway (~25KB) y responde 400 Bad Request.
+    // Se parte en bloques y se combinan los resultados.
     const map: Record<string, string> = {};
-    for (const row of (data || []) as Array<{ driver_id: string; service_type: string | null }>) {
-      // El primer registro por driver_id (gracias al order) es el preferido.
-      if (row.driver_id && row.service_type && !map[row.driver_id]) {
-        map[row.driver_id] = row.service_type;
+    for (const idsChunk of chunk(ids)) {
+      const { data, error } = await sb
+        .from('cars')
+        .select('driver_id, service_type, is_active, updated_at')
+        .in('driver_id', idsChunk)
+        .order('is_active', { ascending: false })
+        .order('updated_at', { ascending: false });
+      if (error) {
+        console.warn('[categoriesByDriver] No se pudo leer cars:', error.message);
+        continue;
+      }
+      for (const row of (data || []) as Array<{ driver_id: string; service_type: string | null }>) {
+        // El primer registro por driver_id (gracias al order) es el preferido.
+        if (row.driver_id && row.service_type && !map[row.driver_id]) {
+          map[row.driver_id] = row.service_type;
+        }
       }
     }
     return map;

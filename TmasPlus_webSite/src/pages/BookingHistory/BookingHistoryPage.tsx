@@ -384,13 +384,14 @@ export default function BookingHistoryPage() {
               <th className="p-3">Tipo</th>
               <th className="p-3">Costo</th>
               <th className="p-3">Estado</th>
+              <th className="p-3 text-center">OTP</th>
               <th className="p-3 text-center">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="text-center py-6 text-slate-400">
+                <td colSpan={11} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
@@ -433,6 +434,15 @@ export default function BookingHistoryPage() {
                         {b.status}
                       </span>
                     </td>
+                    <td className="p-3 text-center">
+                      {b.otp ? (
+                        <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800 font-mono font-bold text-sm tracking-widest border border-emerald-300">
+                          {b.otp}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                     <td className="p-3">
                       <div className="flex justify-center gap-2 flex-wrap">
                         <Button
@@ -465,7 +475,7 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={10} className="text-center py-6 text-slate-400">
+                <td colSpan={11} className="text-center py-6 text-slate-400">
                   No hay reservas registradas.
                 </td>
               </tr>

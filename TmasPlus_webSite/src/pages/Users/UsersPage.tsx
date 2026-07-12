@@ -10,6 +10,7 @@ import { useDebounced } from "@/hooks/useDebounced";
 import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
 import { exportToCsv } from "@/utils/exportCsv";
+import { chunk } from "@/utils/chunk";
 import { vehicleCategoryLabel } from "@/utils/vehicleCategory";
 import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
@@ -148,19 +149,23 @@ export const UsersPage: React.FC = () => {
       const missingDriverIds = missingCat.flatMap(({ id, authId }) =>
         [id, authId].filter(Boolean) as string[]
       );
-      const { data: primaryCars } = await supabase
-        .from("cars")
-        .select("driver_id, service_type, is_active, updated_at")
-        .in("driver_id", missingDriverIds)
-        .order("is_active", { ascending: false })
-        .order("updated_at", { ascending: false });
+      // Un solo `.in()` con cientos de UUIDs genera una URL que supera el
+      // límite del gateway (~25KB) y responde 400 Bad Request; se parte en bloques.
       const primaryByDriver: Record<string, string> = {};
-      for (const row of (primaryCars || []) as Array<{
-        driver_id: string;
-        service_type: string | null;
-      }>) {
-        if (row.driver_id && row.service_type && !primaryByDriver[row.driver_id]) {
-          primaryByDriver[row.driver_id] = row.service_type;
+      for (const idsChunk of chunk(missingDriverIds)) {
+        const { data: primaryCars } = await supabase
+          .from("cars")
+          .select("driver_id, service_type, is_active, updated_at")
+          .in("driver_id", idsChunk)
+          .order("is_active", { ascending: false })
+          .order("updated_at", { ascending: false });
+        for (const row of (primaryCars || []) as Array<{
+          driver_id: string;
+          service_type: string | null;
+        }>) {
+          if (row.driver_id && row.service_type && !primaryByDriver[row.driver_id]) {
+            primaryByDriver[row.driver_id] = row.service_type;
+          }
         }
       }
       for (const { id, authId } of missingCat) {
@@ -177,16 +182,18 @@ export const UsersPage: React.FC = () => {
       .filter((u) => !u.document_number)
       .map((u) => u.id);
     if (missingCedulaIds.length > 0) {
-      const { data: primaryUsers } = await supabase
-        .from("users")
-        .select("id, license_number")
-        .in("id", missingCedulaIds);
       const cedulaByUser: Record<string, string> = {};
-      for (const row of (primaryUsers || []) as Array<{
-        id: string;
-        license_number: string | null;
-      }>) {
-        if (row.license_number) cedulaByUser[row.id] = row.license_number;
+      for (const idsChunk of chunk(missingCedulaIds)) {
+        const { data: primaryUsers } = await supabase
+          .from("users")
+          .select("id, license_number")
+          .in("id", idsChunk);
+        for (const row of (primaryUsers || []) as Array<{
+          id: string;
+          license_number: string | null;
+        }>) {
+          if (row.license_number) cedulaByUser[row.id] = row.license_number;
+        }
       }
       setCedulaFallbackMap(cedulaByUser);
     } else {
@@ -195,16 +202,19 @@ export const UsersPage: React.FC = () => {
 
     // 4) Cuántos ha referido cada usuario: referral_codes.total_referrals (BD
     // primaria), buscando por driver_id (users.id o auth_id en filas heredadas).
-    const { data: refCodes } = await supabase
-      .from("referral_codes")
-      .select("driver_id, total_referrals")
-      .in("driver_id", allDriverIds);
+    // Igual que arriba: se parte en bloques para no superar el límite de URL.
     const refByDriver: Record<string, number> = {};
-    for (const row of (refCodes || []) as Array<{
-      driver_id: string;
-      total_referrals: number | null;
-    }>) {
-      if (row.driver_id) refByDriver[row.driver_id] = row.total_referrals ?? 0;
+    for (const idsChunk of chunk(allDriverIds)) {
+      const { data: refCodes } = await supabase
+        .from("referral_codes")
+        .select("driver_id, total_referrals")
+        .in("driver_id", idsChunk);
+      for (const row of (refCodes || []) as Array<{
+        driver_id: string;
+        total_referrals: number | null;
+      }>) {
+        if (row.driver_id) refByDriver[row.driver_id] = row.total_referrals ?? 0;
+      }
     }
     const refByUser: Record<string, number> = {};
     for (const { id, authId } of idPairs) {
