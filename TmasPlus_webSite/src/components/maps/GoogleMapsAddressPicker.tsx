@@ -12,6 +12,14 @@ import GooglePlacesSearchInput from "./GooglePlacesSearchInput";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
 
+// Referencia estable — un array literal inline en el JSX se recrea en cada
+// render de BookingMapView y APIProvider recarga/reinicializa el script de
+// Google Maps cada vez que `libraries` cambia de identidad. Eso volvía
+// pesado CADA re-render del formulario padre (ej. cada tecla escrita en
+// cualquier input de AddBookingPage), causando lag/pérdida de foco en el
+// campo de observaciones y similares.
+const GOOGLE_MAPS_LIBRARIES: ("places" | "routes" | "geocoding")[] = ["places", "routes", "geocoding"];
+
 // Colombia bounding box — restricts the map view to Colombia
 const COLOMBIA_BOUNDS = {
   north: 13.5,
@@ -50,7 +58,7 @@ export default function BookingMapView(props: BookingMapViewProps) {
     return <MissingKeyNotice />;
   }
   return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={["places", "routes", "geocoding"]} language="es" region="CO">
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={GOOGLE_MAPS_LIBRARIES} language="es" region="CO">
       <BookingMapInner {...props} />
     </APIProvider>
   );
@@ -368,7 +376,7 @@ function BookingMapInner({
               </div>
               <div>
                 <p className="text-xs text-slate-400">Tiempo estimado</p>
-                <p className="text-sm font-bold text-slate-800">~{routeInfo.durationMin} min</p>
+                <p className="text-sm font-bold text-slate-800">~{routeInfo.durationMin.toFixed(2)} min</p>
               </div>
             </div>
           </div>

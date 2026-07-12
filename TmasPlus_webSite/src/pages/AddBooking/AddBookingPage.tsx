@@ -556,7 +556,7 @@ export default function AddBookingPage() {
                 Desglose ({fareBreakdown.isInter ? "Intermunicipal" : "Urbano"})
               </span>
               <span className="text-xs text-slate-500">
-                {routeInfo?.distanceKm} km · {routeInfo?.durationMin} min
+                {routeInfo?.distanceKm} km · {routeInfo?.durationMin?.toFixed(1)} min
               </span>
             </div>
             <ul className="text-sm text-slate-600 space-y-1">
