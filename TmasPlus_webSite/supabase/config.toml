@@ -469,6 +469,15 @@ verify_jwt = false
 import_map = "./functions/upload-driver-document/deno.json"
 entrypoint = "./functions/upload-driver-document/index.ts"
 
+[functions.sign-document-url]
+enabled = true
+# Misma razón que upload-driver-document: la función valida el JWT contra el
+# proyecto primario. El gateway del proyecto secundario NO debe verificar el
+# JWT (verify_jwt=true devuelve 401 porque el token es del proyecto primario).
+verify_jwt = false
+import_map = "./functions/sign-document-url/deno.json"
+entrypoint = "./functions/sign-document-url/index.ts"
+
 [functions.create-booking]
 enabled = true
 # Misma razón que update-user/set-user-blocked: la función valida el JWT contra
