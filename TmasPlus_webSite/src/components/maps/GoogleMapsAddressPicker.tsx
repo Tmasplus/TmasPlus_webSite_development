@@ -28,6 +28,12 @@ const COLOMBIA_BOUNDS = {
   east: -66.8,
 };
 
+// Misma razón que GOOGLE_MAPS_LIBRARIES arriba: `restriction` en <Map> recibía
+// un objeto literal inline (`{ latLngBounds: COLOMBIA_BOUNDS, strictBounds: false }`),
+// nueva referencia en cada render → el mapa reaplicaba la restricción en cada
+// tecla escrita en el formulario. Hoisted a constante estable.
+const MAP_RESTRICTION = { latLngBounds: COLOMBIA_BOUNDS, strictBounds: false };
+
 // Initial camera (Bogotá). The map camera is left UNCONTROLLED after this —
 // programmatic moves go through map.panTo()/setZoom() to avoid a feedback loop.
 const DEFAULT_CENTER = { lat: 4.6097, lng: -74.0817 };
@@ -271,7 +277,7 @@ function BookingMapInner({
           gestureHandling="greedy"
           disableDefaultUI={false}
           clickableIcons={false}
-          restriction={{ latLngBounds: COLOMBIA_BOUNDS, strictBounds: false }}
+          restriction={MAP_RESTRICTION}
           minZoom={5}
           style={{ width: "100%", height: "100%", cursor: "crosshair" }}
         >
