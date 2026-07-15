@@ -6,6 +6,7 @@ import { BookingModal } from "./BookingModal";
 import {
   BookingsService,
   serviceTotal,
+  type AssignableDriver,
   type BookingRecord,
 } from "@/services/bookings.service";
 import { supabaseSecondary } from "@/config/supabase";
@@ -63,6 +64,12 @@ export default function BookingHistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [assignBooking, setAssignBooking] = useState<BookingRecord | null>(null);
+  const [assignDrivers, setAssignDrivers] = useState<AssignableDriver[]>([]);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assigningDriverId, setAssigningDriverId] = useState<string | null>(null);
   const [cancelBlocked, setCancelBlocked] = useState<BookingRecord | null>(
     null
   );
@@ -295,6 +302,65 @@ export default function BookingHistoryPage() {
     }
   };
 
+  const loadAssignableDrivers = async (query = "") => {
+    setAssignLoading(true);
+    setAssignError(null);
+    try {
+      const data = await BookingsService.listAssignableDrivers(query);
+      setAssignDrivers(data);
+    } catch (e: any) {
+      setAssignError(e?.message || "Error al cargar conductores");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const openAssignModal = (booking: BookingRecord) => {
+    const status = (booking.status || "").trim().toUpperCase();
+    if (status.startsWith("COMPLET") || status.startsWith("CANCEL")) return;
+    setAssignBooking(booking);
+    setAssignQuery("");
+    setAssignDrivers([]);
+    loadAssignableDrivers();
+  };
+
+  const closeAssignModal = () => {
+    if (assigningDriverId) return;
+    setAssignBooking(null);
+    setAssignDrivers([]);
+    setAssignError(null);
+  };
+
+  const handleAssignDriver = async (driver: AssignableDriver) => {
+    if (!assignBooking) return;
+    const hadDriver = !!assignBooking.driver_id;
+    const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ") || driver.email || "conductor";
+    if (
+      hadDriver &&
+      !confirm(`¿Reasignar la reserva ${assignBooking.reference || assignBooking.id} a ${driverName}?`)
+    ) {
+      return;
+    }
+
+    setAssigningDriverId(driver.id);
+    setActionLoadingId(assignBooking.id);
+    try {
+      const updated = await BookingsService.assignDriver(assignBooking.id, driver.id);
+      setBookings((prev) =>
+        prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))
+      );
+      if (selectedBooking?.id === updated.id) {
+        setSelectedBooking({ ...selectedBooking, ...updated });
+      }
+      setAssignBooking(null);
+    } catch (e: any) {
+      setAssignError(e?.message || "Error al asignar conductor");
+    } finally {
+      setAssigningDriverId(null);
+      setActionLoadingId(null);
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -397,7 +463,8 @@ export default function BookingHistoryPage() {
             ) : filteredBookings.length > 0 ? (
               filteredBookings.map((b) => {
                 const statusUpper = (b.status || "").toUpperCase();
-                const isCancelled = statusUpper === "CANCELLED";
+                const isCancelled = statusUpper.startsWith("CANCEL");
+                const isCompleted = statusUpper.startsWith("COMPLET");
                 const busy = actionLoadingId === b.id;
                 return (
                   <motion.tr
@@ -444,9 +511,17 @@ export default function BookingHistoryPage() {
                         </Button>
                         <Button
                           variant="secondary"
+                          onClick={() => openAssignModal(b)}
+                          disabled={busy || isCancelled || isCompleted}
+                          className="!px-3 !py-1.5 !text-xs !text-sky-700 !border-sky-300 disabled:!bg-slate-200 disabled:!text-slate-400 disabled:!border-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:active:scale-100"
+                        >
+                          {b.driver_id ? "Reasignar" : "Asignar"}
+                        </Button>
+                        <Button
+                          variant="secondary"
                           onClick={() => handleCancel(b)}
                           disabled={busy || isCancelled}
-                          className="!px-3 !py-1.5 !text-xs !text-amber-700 !border-amber-300"
+                          className="!px-3 !py-1.5 !text-xs !text-amber-700 !border-amber-300 disabled:!bg-slate-200 disabled:!text-slate-400 disabled:!border-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:active:scale-100"
                         >
                           {busy ? "..." : "Cancelar"}
                         </Button>
@@ -485,6 +560,136 @@ export default function BookingHistoryPage() {
           selectedBooking ? actionLoadingId === selectedBooking.id : false
         }
       />
+
+      {assignBooking && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/50 p-4">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden"
+          >
+            <div className="px-6 py-4 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">
+                    {assignBooking.driver_id ? "Reasignar conductor" : "Asignar conductor"}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Reserva {assignBooking.reference || assignBooking.id.slice(0, 8)}
+                    {assignBooking.driver_name ? ` · Actual: ${assignBooking.driver_name}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={closeAssignModal}
+                  disabled={!!assigningDriverId}
+                  className="rounded-lg p-2 hover:bg-slate-100 text-slate-500 disabled:opacity-50"
+                  aria-label="Cerrar asignación"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="flex gap-2 mb-4">
+                <input
+                  value={assignQuery}
+                  onChange={(e) => setAssignQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") loadAssignableDrivers(assignQuery);
+                  }}
+                  placeholder="Buscar por nombre, correo o teléfono..."
+                  className="p-2 border border-slate-300 rounded-lg flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => loadAssignableDrivers(assignQuery)}
+                  disabled={assignLoading}
+                >
+                  {assignLoading ? "Buscando..." : "Buscar"}
+                </Button>
+              </div>
+
+              {assignError && (
+                <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+                  {assignError}
+                </div>
+              )}
+
+              <div className="max-h-[52vh] overflow-auto rounded-xl border border-slate-200">
+                {assignLoading ? (
+                  <div className="p-6 text-center text-slate-500 text-sm">
+                    Cargando conductores...
+                  </div>
+                ) : assignDrivers.length === 0 ? (
+                  <div className="p-6 text-center text-slate-500 text-sm">
+                    No hay conductores disponibles con esos filtros.
+                  </div>
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Conductor</th>
+                        <th className="px-3 py-2 font-medium">Contacto</th>
+                        <th className="px-3 py-2 font-medium">Vehículo</th>
+                        <th className="px-3 py-2 font-medium text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignDrivers.map((driver) => {
+                        const name =
+                          [driver.first_name, driver.last_name].filter(Boolean).join(" ") ||
+                          driver.email ||
+                          "Conductor";
+                        const vehicle = driver.vehicle;
+                        const sameDriver = assignBooking.driver_id === driver.id;
+                        return (
+                          <tr key={driver.id} className="border-t border-slate-100">
+                            <td className="px-3 py-3">
+                              <div className="font-medium text-slate-800">{name}</div>
+                              <div className="text-xs text-slate-400 font-mono">{driver.id.slice(0, 8)}</div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div>{driver.mobile || "—"}</div>
+                              <div className="text-xs text-slate-500">{driver.email || ""}</div>
+                            </td>
+                            <td className="px-3 py-3">
+                              {vehicle ? (
+                                <div>
+                                  <div>{[vehicle.make, vehicle.model].filter(Boolean).join(" ") || "Vehículo"}</div>
+                                  <div className="text-xs text-slate-500">{vehicle.plate || "Sin placa"}</div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-xs">Sin vehículo</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <Button
+                                onClick={() => handleAssignDriver(driver)}
+                                disabled={!!assigningDriverId || sameDriver}
+                                className="!px-3 !py-1.5 !text-xs"
+                              >
+                                {assigningDriverId === driver.id
+                                  ? "Asignando..."
+                                  : sameDriver
+                                  ? "Asignado"
+                                  : assignBooking.driver_id
+                                  ? "Reasignar"
+                                  : "Asignar"}
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Aviso: no se puede cancelar una reserva completada */}
       {cancelBlocked && (

@@ -1,30 +1,18 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Topbar } from "@/components/layout/Topbar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import defaultProfileImage from "@/assets/perfil.png";
 import { useAuth } from "@/hooks/useAuth";
 
-// 👇 Simulación: trae tu usuario real desde contexto o API
-const mockUser = {
-  usertype: "admin", // "company" | "driver" | ...
-  profile_image: undefined,
-  subusers: [{ InTurn: true, Name: "Administrador" }],
-};
-
-function getDisplayName(_u: any) {
-  return "Alejandro"; // ajusta a tu lógica real
-}
-
 export default function DashboardLayout() {
-  const { logout } = useAuth();
+  const { logout, profile } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  // Ejemplo: regla para company (ajusta a tu cálculo real)
-  const isAnySubuserInTurn = useMemo(
-    () => !!mockUser?.subusers?.some((s: any) => s.InTurn),
-    []
-  );
+  const sidebarUser = profile ? {
+    usertype: profile.user_type,
+    profile_image: profile.profile_image,
+    subusers: [{ InTurn: true, Name: "Administrador" }],
+  } : null;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -34,9 +22,9 @@ export default function DashboardLayout() {
           open={sidebarOpen}
           onToggle={() => setSidebarOpen((s) => !s)}
           onClose={() => setSidebarOpen(false)}
-          user={mockUser as any}
-          isAnySubuserInTurn={isAnySubuserInTurn}
-          getDisplayName={getDisplayName as any}
+          user={sidebarUser}
+          isAnySubuserInTurn={true}
+          getDisplayName={() => [profile?.first_name, profile?.last_name].filter(Boolean).join(" ")}
           defaultProfileImage={defaultProfileImage}
           handleLogout={async () => {
             await logout();

@@ -78,6 +78,25 @@ export interface CustomerLite {
   mobile: string | null;
 }
 
+export interface AssignableDriver {
+  id: string;
+  auth_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  mobile: string | null;
+  approved: boolean | null;
+  blocked: boolean | null;
+  driver_active_status: boolean | null;
+  vehicle?: {
+    id: string;
+    make: string | null;
+    model: string | null;
+    plate: string | null;
+    service_type: string | null;
+  } | null;
+}
+
 export interface CreateBookingInput {
   customer_id: string;
   customer_name?: string | null;
@@ -279,6 +298,39 @@ export class BookingsService {
       throw new Error('No se pudo crear la reserva');
     }
     return data.booking as BookingRecord;
+  }
+
+  static async listAssignableDrivers(query = ''): Promise<AssignableDriver[]> {
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      drivers?: AssignableDriver[];
+      error?: string;
+    }>('assign-booking-driver', { action: 'list-drivers', query });
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener conductores');
+    }
+    return data.drivers || [];
+  }
+
+  static async assignDriver(
+    bookingId: string,
+    driverId: string
+  ): Promise<BookingRecord> {
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      booking?: BookingRecord;
+      error?: string;
+    }>('assign-booking-driver', {
+      action: 'assign',
+      bookingId,
+      driverId,
+    });
+
+    if (!data?.success || !data?.booking) {
+      throw new Error(data?.error || 'No se pudo asignar el conductor');
+    }
+    return data.booking;
   }
 
   static async cancel(id: string, reason?: string): Promise<BookingRecord> {

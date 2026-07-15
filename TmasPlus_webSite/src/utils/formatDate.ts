@@ -1,7 +1,7 @@
 export function formatDate(iso: string) {
   try {
     const d = new Date(iso);
-    return d.toLocaleDateString();
+    return isNaN(+d) ? iso : d.toLocaleString();
   } catch {
     return iso;
   }

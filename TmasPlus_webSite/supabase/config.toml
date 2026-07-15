@@ -478,6 +478,13 @@ verify_jwt = false
 import_map = "./functions/create-booking/deno.json"
 entrypoint = "./functions/create-booking/index.ts"
 
+[functions.assign-booking-driver]
+enabled = true
+# Valida internamente el JWT del proyecto primario y escribe en el secundario.
+verify_jwt = false
+import_map = "./functions/assign-booking-driver/deno.json"
+entrypoint = "./functions/assign-booking-driver/index.ts"
+
 [functions.cancel-booking]
 enabled = true
 # Igual que create-booking: valida el JWT del primario y escribe con service role.
