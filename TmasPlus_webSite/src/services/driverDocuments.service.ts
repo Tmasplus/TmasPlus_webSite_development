@@ -115,10 +115,20 @@ export class DriverDocumentsService {
 
     if (!bucket || !objectPath) return ref;
 
-    // Clientes a probar, sin duplicados: el del host primero, luego el secundario
-    // (donde suelen vivir los documentos de la App) y por último el primario.
+    // El storage del cliente secundario nunca tiene sesión propia (el panel
+    // solo inicia sesión contra el proyecto primario), así que firmar ahí
+    // directo siempre da "Object not found" en buckets privados. Se resuelve
+    // vía la función edge `sign-document-url`, que firma con el service role
+    // del proyecto secundario tras validar que quien pide es un admin primario.
+    if (hostClient === supabaseSecondary || (!hostClient && supabaseSecondary)) {
+      const signed = await this.signSecondaryUrl(bucket, objectPath);
+      if (signed) return signed;
+    }
+
+    // Clientes a probar, sin duplicados: el del host primero y por último el
+    // primario (cuyo storage sí hereda la sesión del admin logueado).
     const clients: SupabaseClient[] = [];
-    for (const c of [hostClient, supabaseSecondary, supabase]) {
+    for (const c of [hostClient, supabase]) {
       if (c && !clients.includes(c)) clients.push(c);
     }
 
@@ -128,7 +138,30 @@ export class DriverDocumentsService {
         if (!error && data?.signedUrl) return data.signedUrl;
       } catch { /* probar el siguiente cliente */ }
     }
+
+    // Último recurso: el documento puede vivir en el secundario aunque el host
+    // de la URL no haya hecho match (dobles pipelines históricos).
+    const signed = await this.signSecondaryUrl(bucket, objectPath);
+    if (signed) return signed;
+
     return ref;
+  }
+
+  /** Firma un objeto del storage secundario vía la función edge `sign-document-url`. */
+  private static async signSecondaryUrl(bucket: string, path: string): Promise<string | null> {
+    if (!supabaseSecondary) return null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return null;
+      const { data, error } = await (supabaseSecondary as any).functions.invoke('sign-document-url', {
+        body: { bucket, path, expiresIn: 3600 },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (error || !data?.signedUrl) return null;
+      return data.signedUrl as string;
+    } catch {
+      return null;
+    }
   }
 
   /**

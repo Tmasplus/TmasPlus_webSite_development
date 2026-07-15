@@ -263,6 +263,10 @@ export class BookingsService {
       price: input.total_cost,
       estimate: input.estimate,
       total_cost: input.total_cost,
+      // trip_cost = subtotal sin fee. Trigger calculate_total_cost suma fees al guardar:
+      //   NEW.total_cost = trip_cost + convenience_fees - discount
+      // Sin esta línea, trip_cost queda NULL→0 y el trigger pisa total_cost=fees solamente.
+      trip_cost: Math.max(0, (input.total_cost ?? 0) - (input.convenience_fees ?? 0) + (input.discount ?? 0)),
       driver_share: input.driver_share ?? 0,
       convenience_fees: input.convenience_fees ?? 0,
       discount: input.discount ?? 0,

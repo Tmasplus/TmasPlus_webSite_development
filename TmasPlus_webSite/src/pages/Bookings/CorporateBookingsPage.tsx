@@ -97,8 +97,8 @@ export const CorporateBookingsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadBookings = async () => {
-    setLoading(true);
+  const loadBookings = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await BookingsService.list();
@@ -106,12 +106,16 @@ export const CorporateBookingsPage: React.FC = () => {
     } catch (e: any) {
       setError(e?.message || "Error al cargar las reservas corporativas");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadBookings();
+    // Refresco en vivo: el OTP se genera al crear la reserva (trigger en la DB)
+    // y debe aparecer solo, sin pulsar "Actualizar".
+    const pollId = window.setInterval(() => loadBookings(true), 5000);
+    return () => window.clearInterval(pollId);
   }, []);
 
   const filtered = useMemo(() => {
@@ -152,6 +156,18 @@ export const CorporateBookingsPage: React.FC = () => {
       header: "Estado",
       accessor: (r) => <span className={statusBadgeClass(r.status)}>{r.status || "—"}</span>,
       width: "w-40",
+    },
+    {
+      header: "OTP",
+      accessor: (r) =>
+        r.otp ? (
+          <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800 font-mono font-bold text-sm tracking-widest border border-emerald-300">
+            {r.otp}
+          </span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        ),
+      width: "w-32",
     },
   ];
 
