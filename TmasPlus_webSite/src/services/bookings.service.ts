@@ -53,6 +53,22 @@ export interface BookingRecord {
   [key: string]: any;
 }
 
+export interface ServiceSnapshot {
+  id: string;
+  booking_id: string;
+  stage: string;
+  status: string;
+  captured_at: string;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  calculated_price: number | null;
+  distance: number | null;
+  duration: number | null;
+  data: Record<string, unknown>;
+  raw: Record<string, unknown>;
+}
+
 /**
  * Total real del servicio. En la base de datos `total_cost` suele venir en 0,
  * mientras que el valor cobrado está en `price` (o `estimate`). Devolvemos el
@@ -166,6 +182,18 @@ async function invokeBookingFunction<T>(
 }
 
 export class BookingsService {
+  static async getServiceSnapshots(bookingIds: string | string[]): Promise<ServiceSnapshot[]> {
+    const ids = (Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean);
+    if (!ids.length) return [];
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      snapshots?: ServiceSnapshot[];
+      error?: string;
+    }>('get-service-snapshot', { booking_ids: ids });
+    if (!data?.success) throw new Error(data?.error || 'Error al obtener snapshots del servicio');
+    return data.snapshots || [];
+  }
+
   static async list(): Promise<BookingRecord[]> {
     const data = await invokeBookingFunction<{
       success?: boolean;

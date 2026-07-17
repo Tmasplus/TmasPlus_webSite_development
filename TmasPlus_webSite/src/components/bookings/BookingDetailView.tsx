@@ -8,8 +8,11 @@ import {
   Route,
   Star,
   UserRound,
+  ChevronDown,
+  MapPin,
 } from "lucide-react";
-import { serviceTotal, type BookingRecord } from "@/services/bookings.service";
+import { useEffect, useState } from "react";
+import { BookingsService, serviceTotal, type BookingRecord, type ServiceSnapshot } from "@/services/bookings.service";
 
 const styles = {
   header: "flex items-center justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5",
@@ -182,6 +185,8 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
 
         <MapPreview booking={booking} />
 
+        <ServiceTimeline booking={booking} />
+
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <SectionCard title="Cliente" icon={<UserRound size={19} />}>
             <InfoRow label="Nombre" value={booking.customer_name} />
@@ -260,6 +265,61 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
       </div>
     </main>
   );
+}
+
+const stageNames: Record<string, string> = {
+  PENDING: "Servicio solicitado", ACCEPTED: "Conductor asignado", CONFIRMED: "Confirmado",
+  STARTED: "Conductor en camino", ARRIVED: "Conductor en el punto", PICKED_UP: "Viaje iniciado",
+  COMPLETED: "Servicio completado", COMPLETE: "Servicio completado", CANCELLED: "Servicio cancelado",
+};
+
+function ServiceTimeline({ booking }: { booking: BookingRecord }) {
+  const [snapshots, setSnapshots] = useState<ServiceSnapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError(null);
+    BookingsService.getServiceSnapshots(booking.id)
+      .then((items) => { if (active) setSnapshots(items); })
+      .catch((e) => { if (active) setError(e?.message || "No fue posible cargar la línea de tiempo"); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [booking.id, booking.updated_at]);
+
+  return (
+    <SectionCard title="Línea de tiempo del servicio" icon={<Clock3 size={19} />}>
+      {loading ? <p className="py-5 text-center text-sm text-slate-500">Cargando etapas...</p> :
+       error ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{error}</p> :
+       snapshots.length === 0 ? <p className="py-5 text-center text-sm text-slate-400">Este servicio todavía no tiene snapshots registrados.</p> :
+       <ol className="relative ml-3 border-l-2 border-blue-100">
+         {snapshots.map((snapshot, index) => <SnapshotItem key={snapshot.id} snapshot={snapshot} last={index === snapshots.length - 1} />)}
+       </ol>}
+    </SectionCard>
+  );
+}
+
+function SnapshotItem({ snapshot, last }: { snapshot: ServiceSnapshot; last: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const stage = (snapshot.stage || snapshot.status || "UNKNOWN").toUpperCase();
+  const location = snapshot.address || (snapshot.latitude != null && snapshot.longitude != null
+    ? `${snapshot.latitude.toFixed(6)}, ${snapshot.longitude.toFixed(6)}` : "—");
+  const captured = Object.keys(snapshot.data || {}).length ? snapshot.data : snapshot.raw;
+  return <li className={`relative ml-7 ${last ? "pb-1" : "pb-6"}`}>
+    <span className="absolute -left-[37px] top-1 grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-blue-600 shadow" />
+    <button type="button" onClick={() => setExpanded(!expanded)} className="w-full rounded-xl border border-slate-100 bg-slate-50/70 p-4 text-left hover:border-blue-200" aria-expanded={expanded}>
+      <div className="flex items-start justify-between gap-3">
+        <div><p className="font-bold text-slate-800">{stageNames[stage] || stage}</p><p className="mt-1 text-xs text-slate-500">{formatDate(snapshot.captured_at)}</p></div>
+        <ChevronDown size={18} className={`shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </div>
+      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+        <span className="flex items-center gap-1 text-slate-600"><MapPin size={14} />{location}</span>
+        <span><b>Precio:</b> {formatMoney(snapshot.calculated_price)}</span>
+        <span><b>Distancia:</b> {snapshot.distance != null ? `${snapshot.distance} km` : "—"}</span>
+      </div>
+    </button>
+    {expanded && <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200 bg-slate-950 p-4 text-xs text-slate-100"><pre className="whitespace-pre-wrap break-words">{JSON.stringify(captured, null, 2)}</pre></div>}
+  </li>;
 }
 
 function SectionCard({

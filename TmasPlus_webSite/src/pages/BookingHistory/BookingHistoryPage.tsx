@@ -57,6 +57,11 @@ export default function BookingHistoryPage() {
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("TODOS");
+  const [driverFilter, setDriverFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [openModal, setOpenModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingRecord | null>(
     null
@@ -171,7 +176,13 @@ export default function BookingHistoryPage() {
       const matchesStatus =
         statusFilter === "TODOS" ||
         (b.status || "").toUpperCase() === statusFilter;
-      if (!term) return matchesStatus;
+      const matchesDriver = !driverFilter || b.driver_id === driverFilter;
+      const matchesCategory = !categoryFilter || b.car_type === categoryFilter;
+      const dateValue = new Date(b.booking_date || b.created_at).getTime();
+      const matchesFrom = !dateFrom || dateValue >= new Date(`${dateFrom}T00:00:00`).getTime();
+      const matchesTo = !dateTo || dateValue <= new Date(`${dateTo}T23:59:59.999`).getTime();
+      const matchesFilters = matchesStatus && matchesDriver && matchesCategory && matchesFrom && matchesTo;
+      if (!term) return matchesFilters;
       const matchesTerm = [
         b.id,
         b.reference,
@@ -187,16 +198,24 @@ export default function BookingHistoryPage() {
       ]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(term));
-      return matchesStatus && matchesTerm;
+      return matchesFilters && matchesTerm;
     });
-  }, [bookings, searchTerm, statusFilter]);
+  }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo]);
 
-  const exportToCSV = () => {
+  const driverOptions = useMemo(() => Array.from(new Map(bookings.filter(b => b.driver_id).map(b => [b.driver_id!, b.driver_name || b.driver_id!])).entries()), [bookings]);
+  const categoryOptions = useMemo(() => [...new Set(bookings.map(b => b.car_type).filter(Boolean) as string[])].sort(), [bookings]);
+
+  const exportToCSV = async () => {
     if (filteredBookings.length === 0) {
       alert("No hay datos para exportar");
       return;
     }
 
+    setExporting(true);
+    try {
+    const snapshots = await BookingsService.getServiceSnapshots(filteredBookings.map((b) => b.id));
+    const byBooking = new Map<string, typeof snapshots>();
+    snapshots.forEach((snapshot) => byBooking.set(snapshot.booking_id, [...(byBooking.get(snapshot.booking_id) || []), snapshot]));
     const headers = [
       "Referencia",
       "Fecha creación",
@@ -208,9 +227,10 @@ export default function BookingHistoryPage() {
       "Tipo",
       "Origen",
       "Destino",
-      "Costo total",
+      "Precio estimado", "Precio final", "Duración real (min)", "Distancia real (km)",
       "Estado",
       "OTP",
+      "Snapshots",
     ];
 
     const rows = filteredBookings.map((b) => [
@@ -224,9 +244,10 @@ export default function BookingHistoryPage() {
       b.car_type || "",
       b.pickup_address || "",
       b.drop_address || "",
-      serviceTotal(b) ?? "",
+      b.estimate ?? "", serviceTotal(b) ?? "", b.duration ?? "", b.distance ?? "",
       b.status || "",
       b.otp || "",
+      JSON.stringify(byBooking.get(b.id) || []),
     ]);
 
     const csvContent = [headers, ...rows]
@@ -248,6 +269,9 @@ export default function BookingHistoryPage() {
     a.download = "historial_reservas.csv";
     a.click();
     URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e?.message || "No fue posible exportar los snapshots");
+    } finally { setExporting(false); }
   };
 
   const openBookingModal = (booking: BookingRecord) => {
@@ -404,7 +428,7 @@ export default function BookingHistoryPage() {
           <Button variant="secondary" onClick={() => loadBookings()}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
-          <Button onClick={exportToCSV}>Exportar CSV</Button>
+          <Button onClick={exportToCSV} disabled={exporting}>{exporting ? "Exportando..." : "Exportar CSV"}</Button>
         </div>
       </div>
 
@@ -428,6 +452,16 @@ export default function BookingHistoryPage() {
             </option>
           ))}
         </select>
+        <input type="date" aria-label="Fecha desde" title="Fecha desde" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <input type="date" aria-label="Fecha hasta" title="Fecha hasta" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
+          <option value="">Todos los conductores</option>
+          {driverOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
+          <option value="">Todas las categorías</option>
+          {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
       </div>
 
       {error && (
@@ -448,7 +482,10 @@ export default function BookingHistoryPage() {
               <th className="p-3">Conductor</th>
               <th className="p-3">Placa</th>
               <th className="p-3">Tipo</th>
-              <th className="p-3">Costo</th>
+              <th className="p-3">Estimado</th>
+              <th className="p-3">Final</th>
+              <th className="p-3">Duración real</th>
+              <th className="p-3">Distancia real</th>
               <th className="p-3">Estado</th>
               <th className="p-3 text-center">OTP</th>
               <th className="p-3 text-center">Acciones</th>
@@ -457,7 +494,7 @@ export default function BookingHistoryPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
@@ -489,9 +526,10 @@ export default function BookingHistoryPage() {
                     <td className="p-3">{b.driver_name || "—"}</td>
                     <td className="p-3">{b.plate_number || "—"}</td>
                     <td className="p-3">{b.car_type || "—"}</td>
-                    <td className="p-3">
-                      {formatMoney(serviceTotal(b))}
-                    </td>
+                    <td className="p-3">{formatMoney(b.estimate)}</td>
+                    <td className="p-3">{formatMoney(serviceTotal(b))}</td>
+                    <td className="p-3">{b.duration != null ? `${b.duration} min` : "—"}</td>
+                    <td className="p-3">{b.distance != null ? `${b.distance} km` : "—"}</td>
                     <td className="p-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass(
@@ -550,7 +588,7 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={11} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   No hay reservas registradas.
                 </td>
               </tr>
