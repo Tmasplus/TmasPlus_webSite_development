@@ -515,6 +515,13 @@ verify_jwt = false
 import_map = "./functions/list-bookings/deno.json"
 entrypoint = "./functions/list-bookings/index.ts"
 
+[functions.get-service-timeline]
+enabled = true
+# Valida internamente el JWT del proyecto primario y lee snapshots con service role.
+verify_jwt = false
+import_map = "./functions/get-service-timeline/deno.json"
+entrypoint = "./functions/get-service-timeline/index.ts"
+
 [functions.reconcile-referrals]
 enabled = true
 # Misma razón que upload-driver-document/sign-document-url: la función valida

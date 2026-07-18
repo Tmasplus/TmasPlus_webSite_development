@@ -268,9 +268,13 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
 }
 
 const stageNames: Record<string, string> = {
-  PENDING: "Servicio solicitado", ACCEPTED: "Conductor asignado", CONFIRMED: "Confirmado",
-  STARTED: "Conductor en camino", ARRIVED: "Conductor en el punto", PICKED_UP: "Viaje iniciado",
-  COMPLETED: "Servicio completado", COMPLETE: "Servicio completado", CANCELLED: "Servicio cancelado",
+  created: "Servicio creado",
+  arrival_pickup: "Conductor en punto de recogida",
+  started: "Viaje iniciado",
+  arrival_destination: "Llegada al destino",
+  completed: "Servicio completado",
+  paid: "Pago registrado",
+  cancelled: "Servicio cancelado",
 };
 
 function ServiceTimeline({ booking }: { booking: BookingRecord }) {
@@ -299,12 +303,59 @@ function ServiceTimeline({ booking }: { booking: BookingRecord }) {
   );
 }
 
+const snapshotFieldNames: Record<string, string> = {
+  address: "Dirección",
+  category: "Categoría del servicio",
+  backfilled: "Registro histórico recuperado",
+  estimated_price: "Precio estimado",
+  final_price: "Precio final",
+  reason: "Motivo de cancelación",
+  status_from: "Estado anterior",
+  status_to: "Estado nuevo",
+  cancelled_by: "Cancelado por",
+  otp_verified: "OTP verificado",
+  payment_mode: "Método de pago",
+  trip_start_time: "Inicio del viaje",
+  trip_end_time: "Fin del viaje",
+  driver_arrived_time: "Llegada del conductor",
+};
+
+const snapshotMoneyFields = new Set(["estimated_price", "final_price", "price"]);
+const snapshotDateFields = new Set(["trip_start_time", "trip_end_time", "driver_arrived_time"]);
+
+function snapshotFieldName(key: string) {
+  if (snapshotFieldNames[key]) return snapshotFieldNames[key];
+  const text = key.replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function formatSnapshotValue(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (snapshotMoneyFields.has(key)) return formatMoney(value as string | number);
+  if (snapshotDateFields.has(key) && (typeof value === "string" || typeof value === "number")) {
+    return formatDate(value);
+  }
+  if (key === "status_from" || key === "status_to") return statusLabel(String(value).toUpperCase());
+  if (key === "payment_mode") {
+    const modes: Record<string, string> = { cash: "Efectivo", card: "Tarjeta" };
+    return modes[String(value).toLowerCase()] || String(value);
+  }
+  if (Array.isArray(value)) return value.map((item) => formatSnapshotValue(key, item)).join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([nestedKey, nestedValue]) => `${snapshotFieldName(nestedKey)}: ${formatSnapshotValue(nestedKey, nestedValue)}`)
+      .join(" · ");
+  }
+  return String(value);
+}
+
 function SnapshotItem({ snapshot, last }: { snapshot: ServiceSnapshot; last: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const stage = (snapshot.stage || snapshot.status || "UNKNOWN").toUpperCase();
+  const stage = String(snapshot.stage || "unknown");
   const location = snapshot.address || (snapshot.latitude != null && snapshot.longitude != null
     ? `${snapshot.latitude.toFixed(6)}, ${snapshot.longitude.toFixed(6)}` : "—");
-  const captured = Object.keys(snapshot.data || {}).length ? snapshot.data : snapshot.raw;
+  const details = Object.entries(snapshot.data || {});
   return <li className={`relative ml-7 ${last ? "pb-1" : "pb-6"}`}>
     <span className="absolute -left-[37px] top-1 grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-blue-600 shadow" />
     <button type="button" onClick={() => setExpanded(!expanded)} className="w-full rounded-xl border border-slate-100 bg-slate-50/70 p-4 text-left hover:border-blue-200" aria-expanded={expanded}>
@@ -318,7 +369,25 @@ function SnapshotItem({ snapshot, last }: { snapshot: ServiceSnapshot; last: boo
         <span><b>Distancia:</b> {snapshot.distance != null ? `${snapshot.distance} km` : "—"}</span>
       </div>
     </button>
-    {expanded && <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200 bg-slate-950 p-4 text-xs text-slate-100"><pre className="whitespace-pre-wrap break-words">{JSON.stringify(captured, null, 2)}</pre></div>}
+    {expanded && (
+      <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4">
+        <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Detalles registrados</p>
+        {details.length > 0 ? (
+          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+            {details.map(([key, value]) => (
+              <div key={key} className="min-w-0 border-b border-slate-100 pb-3 last:border-0">
+                <dt className="text-xs font-medium text-slate-500">{snapshotFieldName(key)}</dt>
+                <dd className="mt-1 break-words text-sm font-semibold text-slate-800">
+                  {formatSnapshotValue(key, value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="text-sm text-slate-500">No hay detalles adicionales para esta etapa.</p>
+        )}
+      </div>
+    )}
   </li>;
 }
 

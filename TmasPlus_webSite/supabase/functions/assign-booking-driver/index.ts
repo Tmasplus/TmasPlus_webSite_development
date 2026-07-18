@@ -31,10 +31,27 @@ type DriverRow = {
   last_name: string | null;
   email: string | null;
   mobile: string | null;
+  document_number: string | null;
   approved: boolean | null;
   blocked: boolean | null;
   driver_active_status: boolean | null;
 };
+
+type MembershipRow = {
+  conductor: string;
+  status: string;
+  fecha_inicio: string;
+  fecha_terminada: string;
+  created_at: string;
+};
+
+function isMembershipActive(membership: MembershipRow | undefined) {
+  if (!membership || membership.status.toUpperCase() !== "ACTIVA") return false;
+  const now = Date.now();
+  const startsAt = new Date(membership.fecha_inicio).getTime();
+  const endsAt = new Date(membership.fecha_terminada).getTime();
+  return Number.isFinite(startsAt) && Number.isFinite(endsAt) && startsAt <= now && endsAt >= now;
+}
 
 async function validatePrimaryToken(req: Request) {
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -75,32 +92,70 @@ serve(async (req: Request) => {
   });
 
   if (body.action === "list-drivers") {
-    const q = body.query?.trim();
-    let request = admin
-      .from("users")
-      .select("id, auth_id, first_name, last_name, email, mobile, approved, blocked, driver_active_status")
-      .eq("user_type", "driver")
-      .eq("approved", true)
-      .eq("blocked", false)
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (q) {
-      const term = `%${q}%`;
-      request = request.or(
-        `first_name.ilike.${term},last_name.ilike.${term},email.ilike.${term},mobile.ilike.${term}`,
-      );
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: membershipData, error: membershipsError } = await admin
+      .from("memberships")
+      .select("conductor, status, fecha_inicio, fecha_terminada, created_at")
+      .eq("status", "ACTIVA")
+      .lte("fecha_inicio", today)
+      .gte("fecha_terminada", today)
+      .order("created_at", { ascending: false });
+    if (membershipsError) {
+      return json({ error: `Error al obtener membresias activas: ${membershipsError.message}` }, 500);
     }
 
-    const { data: drivers, error } = await request;
-    if (error) return json({ error: `Error al obtener conductores: ${error.message}` }, 500);
+    const memberships = (membershipData ?? []) as MembershipRow[];
+    const conductorIds = Array.from(new Set(memberships.map((membership) => membership.conductor)));
+    if (conductorIds.length === 0) {
+      return json({ success: true, drivers: [], eligibilityDiagnostic: "No hay membresías activas y vigentes." });
+    }
 
-    const rows = (drivers ?? []) as DriverRow[];
+    const userFields = "id, auth_id, first_name, last_name, email, mobile, document_number, approved, blocked, driver_active_status";
+    const [usersByIdResult, usersByAuthResult] = await Promise.all([
+      admin.from("users").select(userFields).in("id", conductorIds).eq("blocked", false),
+      admin.from("users").select(userFields).in("auth_id", conductorIds).eq("blocked", false),
+    ]);
+    if (usersByIdResult.error) {
+      return json({ error: `Error al resolver conductores por id: ${usersByIdResult.error.message}` }, 500);
+    }
+    if (usersByAuthResult.error) {
+      return json({ error: `Error al resolver conductores por auth_id: ${usersByAuthResult.error.message}` }, 500);
+    }
+
+    const uniqueUsers = new Map<string, DriverRow>();
+    for (const driver of [...(usersByIdResult.data ?? []), ...(usersByAuthResult.data ?? [])] as DriverRow[]) {
+      uniqueUsers.set(driver.id, driver);
+    }
+    const query = body.query?.trim().toLowerCase();
+    const rows = [...uniqueUsers.values()].filter((driver) => {
+      if (!query) return true;
+      return [driver.first_name, driver.last_name, driver.email, driver.mobile]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+    const documentNumbers = Array.from(
+      new Set(rows.map((driver) => driver.document_number).filter(Boolean) as string[]),
+    );
+    let approvedDocuments = new Set<string>();
+    if (documentNumbers.length > 0) {
+      const { data: approvedIdentityRows, error: approvedIdentityErr } = await admin
+        .from("users")
+        .select("document_number")
+        .in("document_number", documentNumbers)
+        .eq("approved", true)
+        .eq("blocked", false);
+      if (approvedIdentityErr) {
+        return json({ error: `Error al validar conductores aprobados: ${approvedIdentityErr.message}` }, 500);
+      }
+      approvedDocuments = new Set(
+        (approvedIdentityRows ?? []).map((row) => row.document_number).filter(Boolean) as string[],
+      );
+    }
     const driverIds = Array.from(
       new Set(rows.flatMap((d) => [d.id, d.auth_id].filter(Boolean) as string[])),
     );
 
-    let carsByDriver: Record<string, unknown> = {};
+    const carsByDriver: Record<string, unknown> = {};
     if (driverIds.length > 0) {
       const { data: cars, error: carErr } = await admin
         .from("cars")
@@ -116,12 +171,38 @@ serve(async (req: Request) => {
       }
     }
 
-    const enriched = rows.map((driver) => ({
-      ...driver,
-      vehicle: carsByDriver[driver.id] || (driver.auth_id ? carsByDriver[driver.auth_id] : null) || null,
-    }));
+    const excluded: string[] = [];
+    const enriched = rows.flatMap((driver) => {
+      const identityApproved = driver.approved === true ||
+        (!!driver.document_number && approvedDocuments.has(driver.document_number));
+      const vehicle = carsByDriver[driver.id] || (driver.auth_id ? carsByDriver[driver.auth_id] : null) || null;
+      const validIds = new Set([driver.id, driver.auth_id].filter(Boolean));
+      const latestMembership = memberships.find((membership) => validIds.has(membership.conductor));
+      const activeMembership = isMembershipActive(latestMembership);
+      if (!identityApproved || !vehicle || !activeMembership) {
+        const name = [driver.first_name, driver.last_name].filter(Boolean).join(" ") || driver.email || driver.id;
+        const reasons = [
+          !identityApproved ? "sin aprobación" : "",
+          !vehicle ? "sin vehículo" : "",
+          !activeMembership
+            ? latestMembership
+              ? `membresía ${latestMembership.status} (${latestMembership.fecha_inicio} a ${latestMembership.fecha_terminada})`
+              : "sin membresía"
+            : "",
+        ].filter(Boolean);
+        excluded.push(`${name}: ${reasons.join(", ")}`);
+        return [];
+      }
+      return [{ ...driver, vehicle }];
+    });
 
-    return json({ success: true, drivers: enriched });
+    return json({
+      success: true,
+      drivers: enriched,
+      eligibilityDiagnostic: enriched.length === 0
+        ? `Se revisaron ${rows.length} registros. ${excluded.slice(0, 8).join(" | ")}`
+        : undefined,
+    });
   }
 
   if (body.action === "assign") {
@@ -131,17 +212,31 @@ serve(async (req: Request) => {
 
     const { data: driver, error: driverErr } = await admin
       .from("users")
-      .select("id, auth_id, first_name, last_name, email, mobile, user_type, approved, blocked")
+      .select("id, auth_id, first_name, last_name, email, mobile, document_number, user_type, approved, blocked")
       .eq("id", body.driverId)
       .maybeSingle();
     if (driverErr) return json({ error: `Error al buscar conductor: ${driverErr.message}` }, 500);
-    if (!driver || driver.user_type !== "driver") {
+    if (!driver) {
       return json({ error: "El conductor seleccionado no existe" }, 404);
     }
     if (driver.blocked) {
       return json({ error: "El conductor seleccionado esta bloqueado" }, 409);
     }
-    if (!driver.approved) {
+    let identityApproved = driver.approved === true;
+    if (!identityApproved && driver.document_number) {
+      const { data: approvedIdentity, error: identityErr } = await admin
+        .from("users")
+        .select("id")
+        .eq("document_number", driver.document_number)
+        .eq("approved", true)
+        .eq("blocked", false)
+        .limit(1);
+      if (identityErr) {
+        return json({ error: `Error al validar la identidad aprobada: ${identityErr.message}` }, 500);
+      }
+      identityApproved = !!approvedIdentity?.length;
+    }
+    if (!identityApproved) {
       return json({ error: "El conductor seleccionado no esta aprobado" }, 409);
     }
 
@@ -156,6 +251,23 @@ serve(async (req: Request) => {
     if (carErr) return json({ error: `Error al buscar vehiculo: ${carErr.message}` }, 500);
 
     const car = cars?.[0] ?? null;
+    if (!car) {
+      return json({ error: "El conductor no tiene un vehiculo registrado" }, 409);
+    }
+
+    const { data: membershipRows, error: membershipErr } = await admin
+      .from("memberships")
+      .select("conductor, status, fecha_inicio, fecha_terminada, created_at")
+      .in("conductor", driverIds)
+      .order("created_at", { ascending: false });
+    if (membershipErr) {
+      return json({ error: `Error al validar membresia: ${membershipErr.message}` }, 500);
+    }
+    const latestMembership = (membershipRows as MembershipRow[] | null)?.[0];
+    if (!isMembershipActive(latestMembership)) {
+      return json({ error: "El conductor no tiene una membresia activa y vigente" }, 409);
+    }
+
     const fullName = [driver.first_name, driver.last_name].filter(Boolean).join(" ").trim();
     const now = new Date().toISOString();
     const updates = {

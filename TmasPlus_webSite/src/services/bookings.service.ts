@@ -75,38 +75,23 @@ function snapshotNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function snapshotValue(row: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = row[key];
-    if (value !== null && value !== undefined && value !== '') return value;
-  }
-  return null;
-}
-
 function normalizeSnapshot(row: Record<string, unknown>, bookingId: string, index: number): ServiceSnapshot {
-  const payloadCandidate = snapshotValue(row, ['data', 'snapshot', 'payload', 'metadata']);
-  const payload = payloadCandidate && typeof payloadCandidate === 'object' && !Array.isArray(payloadCandidate)
-    ? payloadCandidate as Record<string, unknown>
+  const rawData = row.raw_data && typeof row.raw_data === 'object' && !Array.isArray(row.raw_data)
+    ? row.raw_data as Record<string, unknown>
     : {};
-  const merged = { ...payload, ...row };
-  const locationCandidate = snapshotValue(merged, ['location', 'position', 'coordinates']);
-  const location = locationCandidate && typeof locationCandidate === 'object' && !Array.isArray(locationCandidate)
-    ? locationCandidate as Record<string, unknown>
-    : {};
-  const stage = String(snapshotValue(merged, ['stage', 'status', 'event_type', 'event', 'state']) ?? 'UNKNOWN');
   return {
-    id: String(snapshotValue(row, ['id', 'snapshot_id']) ?? `${bookingId}-${index}`),
-    booking_id: String(snapshotValue(row, ['booking_id', 'service_id']) ?? bookingId),
-    stage,
-    status: String(snapshotValue(merged, ['status', 'stage', 'state', 'event_type']) ?? stage),
-    captured_at: String(snapshotValue(merged, ['captured_at', 'occurred_at', 'timestamp', 'created_at', 'updated_at']) ?? ''),
-    latitude: snapshotNumber(snapshotValue(merged, ['latitude', 'lat']) ?? snapshotValue(location, ['latitude', 'lat'])),
-    longitude: snapshotNumber(snapshotValue(merged, ['longitude', 'lng', 'lon']) ?? snapshotValue(location, ['longitude', 'lng', 'lon'])),
-    address: snapshotValue(merged, ['address', 'location_address', 'current_address']) as string | null,
-    calculated_price: snapshotNumber(snapshotValue(merged, ['calculated_price', 'price', 'total_cost', 'fare'])),
-    distance: snapshotNumber(snapshotValue(merged, ['distance', 'distance_km', 'actual_distance'])),
-    duration: snapshotNumber(snapshotValue(merged, ['duration', 'duration_min', 'actual_duration'])),
-    data: payload,
+    id: String(row.id ?? `${bookingId}-${index}`),
+    booking_id: String(row.booking_id ?? bookingId),
+    stage: String(row.stage ?? 'unknown'),
+    status: String(row.stage ?? 'unknown'),
+    captured_at: String(row.captured_at ?? ''),
+    latitude: snapshotNumber(row.location_lat),
+    longitude: snapshotNumber(row.location_lng),
+    address: (rawData.address as string) ?? null,
+    calculated_price: snapshotNumber(row.price_calculated),
+    distance: snapshotNumber(row.distance_km),
+    duration: snapshotNumber(row.duration_seconds),
+    data: rawData,
     raw: row,
   };
 }
@@ -225,29 +210,19 @@ async function invokeBookingFunction<T>(
 
 export class BookingsService {
   static async getServiceSnapshots(bookingIds: string | string[]): Promise<ServiceSnapshot[]> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
     const ids = [...new Set((Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean))];
     if (!ids.length) return [];
-
-    const results: ServiceSnapshot[][] = new Array(ids.length);
-    let nextIndex = 0;
-    const worker = async () => {
-      while (nextIndex < ids.length) {
-        const current = nextIndex++;
-        const bookingId = ids[current];
-        const { data, error } = await sb.rpc('get_service_timeline', { p_booking_id: bookingId });
-        if (error) throw new Error(error.message || 'Error al obtener el histórico del servicio');
-        const response = data && !Array.isArray(data) && typeof data === 'object'
-          ? ((data as Record<string, unknown>).snapshots ?? (data as Record<string, unknown>).timeline ?? data)
-          : data;
-        const rows = Array.isArray(response) ? response : response ? [response] : [];
-        results[current] = rows
-          .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
-          .map((row, index) => normalizeSnapshot(row, bookingId, index));
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(8, ids.length) }, () => worker()));
-    return results.flat();
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      snapshots?: unknown[];
+      error?: string;
+    }>('get-service-timeline', { bookingIds: ids });
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener el histórico del servicio');
+    }
+    return (data.snapshots || [])
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
+      .map((row, index) => normalizeSnapshot(row, String(row.booking_id || ''), index));
   }
 
   static async list(): Promise<BookingRecord[]> {
@@ -392,11 +367,15 @@ export class BookingsService {
     const data = await invokeBookingFunction<{
       success?: boolean;
       drivers?: AssignableDriver[];
+      eligibilityDiagnostic?: string;
       error?: string;
     }>('assign-booking-driver', { action: 'list-drivers', query });
 
     if (!data?.success) {
       throw new Error(data?.error || 'Error al obtener conductores');
+    }
+    if (!data.drivers?.length && data.eligibilityDiagnostic) {
+      throw new Error(data.eligibilityDiagnostic);
     }
     return data.drivers || [];
   }

@@ -13,14 +13,22 @@ import { supabaseSecondary } from "@/config/supabase";
 
 const STATUSES = [
   "TODOS",
+  "NEW",
   "PENDING",
   "ACCEPTED",
-  "STARTED",
   "ARRIVED",
-  "PICKED_UP",
-  "COMPLETED",
+  "STARTED",
+  "REACHED",
+  "COMPLETE",
+  "PAID",
   "CANCELLED",
 ];
+
+const TERMINAL_STATUSES = ["COMPLETE", "PAID", "CANCELLED"];
+
+function getBookingDriverId(booking: BookingRecord): string | null {
+  return booking.driver_id || (booking as any).driver || null;
+}
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -32,7 +40,7 @@ function formatMoney(v: string | number | null | undefined) {
   if (v === null || v === undefined || v === "") return "—";
   const num = typeof v === "string" ? Number(v) : v;
   if (isNaN(num)) return String(v);
-  if (num === 0) return "—";
+  if (num === 0) return "$0";
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -42,13 +50,13 @@ function formatMoney(v: string | number | null | undefined) {
 
 function statusBadgeClass(status: string) {
   const s = (status || "").toUpperCase();
-  if (s === "COMPLETED" || s === "COMPLETADO")
+  if (s === "COMPLETE" || s === "PAID")
     return "bg-green-100 text-green-800";
-  if (s === "CANCELLED" || s === "CANCELADA")
+  if (s === "CANCELLED")
     return "bg-rose-100 text-rose-800";
-  if (s === "PENDING" || s === "PENDIENTE")
+  if (s === "NEW" || s === "PENDING")
     return "bg-yellow-100 text-yellow-800";
-  if (s === "ACCEPTED" || s === "STARTED" || s === "PICKED_UP" || s === "ARRIVED")
+  if (s === "ACCEPTED" || s === "STARTED" || s === "ARRIVED" || s === "REACHED")
     return "bg-sky-100 text-sky-800";
   return "bg-slate-200 text-slate-700";
 }
@@ -83,8 +91,10 @@ export default function BookingHistoryPage() {
   >("connecting");
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const isMountedRef = useRef(true);
+  const realtimeStatusRef = useRef(realtimeStatus);
   const selectedBookingRef = useRef<BookingRecord | null>(null);
 
+  realtimeStatusRef.current = realtimeStatus;
   selectedBookingRef.current = selectedBooking;
 
   const loadBookings = async (silent = false) => {
@@ -158,6 +168,7 @@ export default function BookingHistoryPage() {
     // Polling de respaldo cada 5s (mantiene la tabla viva aunque Realtime falle)
     const pollId = window.setInterval(() => {
       if (!isMountedRef.current) return;
+      if (realtimeStatusRef.current === "live") return;
       loadBookings(true);
     }, 5000);
 
@@ -176,7 +187,7 @@ export default function BookingHistoryPage() {
       const matchesStatus =
         statusFilter === "TODOS" ||
         (b.status || "").toUpperCase() === statusFilter;
-      const matchesDriver = !driverFilter || b.driver_id === driverFilter;
+      const matchesDriver = !driverFilter || getBookingDriverId(b) === driverFilter;
       const matchesCategory = !categoryFilter || b.car_type === categoryFilter;
       const dateValue = new Date(b.booking_date || b.created_at).getTime();
       const matchesFrom = !dateFrom || dateValue >= new Date(`${dateFrom}T00:00:00`).getTime();
@@ -202,7 +213,10 @@ export default function BookingHistoryPage() {
     });
   }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo]);
 
-  const driverOptions = useMemo(() => Array.from(new Map(bookings.filter(b => b.driver_id).map(b => [b.driver_id!, b.driver_name || b.driver_id!])).entries()), [bookings]);
+  const driverOptions = useMemo(() => Array.from(new Map(bookings.flatMap((b) => {
+    const driverId = getBookingDriverId(b);
+    return driverId ? [[driverId, b.driver_name || driverId] as [string, string]] : [];
+  })).entries()), [bookings]);
   const categoryOptions = useMemo(() => [...new Set(bookings.map(b => b.car_type).filter(Boolean) as string[])].sort(), [bookings]);
 
   const exportToCSV = async () => {
@@ -230,25 +244,42 @@ export default function BookingHistoryPage() {
       "Precio estimado", "Precio final", "Duración real (min)", "Distancia real (km)",
       "Estado",
       "OTP",
-      "Snapshots",
+      "Creado en",
+      "Llegada pickup",
+      "Iniciado",
+      "Llegó destino",
+      "Completado",
+      "Cancelado",
     ];
 
-    const rows = filteredBookings.map((b) => [
-      b.reference || b.id,
-      formatDate(b.created_at),
-      formatDate(b.booking_date),
-      b.customer_name || "",
-      b.customer_email || "",
-      b.driver_name || "",
-      b.plate_number || "",
-      b.car_type || "",
-      b.pickup_address || "",
-      b.drop_address || "",
-      b.estimate ?? "", serviceTotal(b) ?? "", b.duration ?? "", b.distance ?? "",
-      b.status || "",
-      b.otp || "",
-      JSON.stringify(byBooking.get(b.id) || []),
-    ]);
+    const rows = filteredBookings.map((b) => {
+      const stages = byBooking.get(b.id) || [];
+      const stageAt = (name: string) => {
+        const snapshot = stages.find((item) => item.stage === name);
+        return snapshot ? formatDate(snapshot.captured_at) : "";
+      };
+      return [
+        b.reference || b.id,
+        formatDate(b.created_at),
+        formatDate(b.booking_date),
+        b.customer_name || "",
+        b.customer_email || "",
+        b.driver_name || "",
+        b.plate_number || "",
+        b.car_type || "",
+        b.pickup_address || "",
+        b.drop_address || "",
+        b.estimate ?? "", serviceTotal(b) ?? "", b.duration ?? "", b.distance ?? "",
+        b.status || "",
+        b.otp || "",
+        stageAt("created"),
+        stageAt("arrival_pickup"),
+        stageAt("started"),
+        stageAt("arrival_destination"),
+        stageAt("completed"),
+        stageAt("cancelled"),
+      ];
+    });
 
     const csvContent = [headers, ...rows]
       .map((row) =>
@@ -286,7 +317,7 @@ export default function BookingHistoryPage() {
 
   const handleCancel = async (b: BookingRecord) => {
     // Una reserva completada no se puede cancelar: avisamos con un modal.
-    if ((b.status || "").toUpperCase().startsWith("COMPLET")) {
+    if (TERMINAL_STATUSES.includes((b.status || "").toUpperCase())) {
       setCancelBlocked(b);
       return;
     }
@@ -341,7 +372,7 @@ export default function BookingHistoryPage() {
 
   const openAssignModal = (booking: BookingRecord) => {
     const status = (booking.status || "").trim().toUpperCase();
-    if (status.startsWith("COMPLET") || status.startsWith("CANCEL")) return;
+    if (TERMINAL_STATUSES.includes(status)) return;
     setAssignBooking(booking);
     setAssignQuery("");
     setAssignDrivers([]);
@@ -501,9 +532,15 @@ export default function BookingHistoryPage() {
             ) : filteredBookings.length > 0 ? (
               filteredBookings.map((b) => {
                 const statusUpper = (b.status || "").toUpperCase();
-                const isCancelled = statusUpper.startsWith("CANCEL");
-                const isCompleted = statusUpper.startsWith("COMPLET");
+                const isCancelled = statusUpper === "CANCELLED";
+                const isCompleted = statusUpper === "COMPLETE" || statusUpper === "PAID";
                 const busy = actionLoadingId === b.id;
+                const finalTotal = serviceTotal(b);
+                const estimateValue = Number(b.estimate);
+                const finalValue = Number(finalTotal);
+                const deltaPct = estimateValue && finalValue
+                  ? Math.round(((finalValue - estimateValue) / estimateValue) * 100)
+                  : null;
                 return (
                   <motion.tr
                     key={b.id}
@@ -527,7 +564,14 @@ export default function BookingHistoryPage() {
                     <td className="p-3">{b.plate_number || "—"}</td>
                     <td className="p-3">{b.car_type || "—"}</td>
                     <td className="p-3">{formatMoney(b.estimate)}</td>
-                    <td className="p-3">{formatMoney(serviceTotal(b))}</td>
+                    <td className="p-3">
+                      {formatMoney(finalTotal)}
+                      {deltaPct !== null && Math.abs(deltaPct) >= 5 && (
+                        <span className={`ml-2 text-xs ${deltaPct > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                          Δ{deltaPct > 0 ? "+" : ""}{deltaPct}%
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3">{b.duration != null ? `${b.duration} min` : "—"}</td>
                     <td className="p-3">{b.distance != null ? `${b.distance} km` : "—"}</td>
                     <td className="p-3">
@@ -672,7 +716,7 @@ export default function BookingHistoryPage() {
                   </div>
                 ) : assignDrivers.length === 0 ? (
                   <div className="p-6 text-center text-slate-500 text-sm">
-                    No hay conductores disponibles con esos filtros.
+                    No hay conductores con vehículo y membresía activa disponibles con esos filtros.
                   </div>
                 ) : (
                   <table className="min-w-full text-left text-sm">
