@@ -129,7 +129,7 @@ export const Sidebar: React.FC<Props> = ({
           />
           <div className="ml-4">
             <span className="block text-slate-500 text-sm">HOLA!</span>
-            {/* <span className="text-slate-800 text-lg">{getDisplayName(user)}</span> */}
+            {user && <span className="block text-slate-800 text-sm font-medium truncate max-w-28">{getDisplayName(user)}</span>}
           </div>
         </div>
         {/* )} */}
@@ -198,11 +198,15 @@ export const Sidebar: React.FC<Props> = ({
           )}
 
           {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
-            <NavItem to="/users" icon={<LuUsersRound />} label="Usuarios" isOpen={open} />
+            <NavItem to="/users" icon={<LuUsersRound />} label="Usuarios App" isOpen={open} />
           )}
 
           {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
-            <NavItem to="/drivers" icon={<LuCar />} label="Conductores" isOpen={open} />
+            <NavItem to="/app-drivers" icon={<LuUsersRound />} label="Conductores App" isOpen={open} />
+          )}
+
+          {(isAdmin || (isCompany && isAnySubuserInTurn)) && (
+            <NavItem to="/drivers" icon={<LuCar />} label="Conductores Web" isOpen={open} />
           )}
 
           {isCompany && isAnySubuserInTurn && hasAdminSubuserInTurn && (

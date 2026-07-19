@@ -69,6 +69,7 @@ export default function AppRoutes() {
         <Route path="/bookingdetails" element={<BookingDetailsPage />} />
         <Route path="/billing" element={<CompanyBillingPage />} />
         <Route path="/users/*" element={<UsersPage />} />
+        <Route path="/app-drivers" element={<UsersPage mode="appDrivers" />} />
         <Route path="/drivers" element={<DriversPage />} />
         <Route path="/officialview" element={<OfficialsViewPage />} />
         <Route path="/complaints" element={<ComplaintsViewPage />} />

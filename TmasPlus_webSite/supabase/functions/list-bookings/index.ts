@@ -78,7 +78,7 @@ serve(async (req: Request) => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q);
     request = isUuid
       ? request.or(`id.eq.${q},reference.eq.${q}`)
-      : request.or(`reference.eq.${q},reference.ilike.%${q}%`);
+      : request.eq("reference", q);
   }
 
   const { data, error } = await request;

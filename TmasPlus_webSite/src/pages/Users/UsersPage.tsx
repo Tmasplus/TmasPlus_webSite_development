@@ -27,17 +27,36 @@ import UserEditModal from "./UserEditModal";
 import AddUserModal from "./AddUserModal";
 import DriverReviewModal, { type EnrichedDriverProfile } from "./DriverReviewModal";
 
-type StatusFilter = "todos" | "activos" | "bloqueados";
+type StatusFilter = "todos" | "pendiente" | "aprobado" | "bloqueado";
+type ReferralFilter = "todos" | "con_referido";
+type AppAccessFilter = "todos" | "con_acceso" | "sin_acceso";
+type SortFilter = "fecha_desc" | "fecha_asc" | "nombre_asc";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return isNaN(+d) ? iso : d.toLocaleDateString();
+  return isNaN(+d) ? iso : d.toLocaleString();
 }
 
 function fullName(u: SecondaryUser) {
   return [u.first_name, u.last_name].filter(Boolean).join(" ") || "—";
 }
+
+function isClientUser(u: SecondaryUser) {
+  const type = (u.user_type || "").trim().toLowerCase();
+  return type !== "driver" && type !== "conductor";
+}
+
+function isDriverUser(u: SecondaryUser) {
+  const type = (u.user_type || "").trim().toLowerCase();
+  return type === "driver" || type === "conductor";
+}
+
+type UsersPageMode = "clients" | "appDrivers";
+
+type UsersPageProps = {
+  mode?: UsersPageMode;
+};
 
 const MEMBERSHIP_STYLES: Record<string, string> = {
   ACTIVA: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -69,7 +88,15 @@ function MembershipBadge({ status }: { status?: MembershipStatus | string }) {
   );
 }
 
-export const UsersPage: React.FC = () => {
+export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
+  const isAppDriversMode = mode === "appDrivers";
+  const pageTitle = isAppDriversMode
+    ? "Conductores App"
+    : "Usuarios App";
+  const cardTitle = isAppDriversMode ? "Conductores registrados en App" : "Clientes";
+  const tabLabel = isAppDriversMode ? "Conductores App" : "Clientes";
+  const addLabel = isAppDriversMode ? "Añadir conductor" : "Añadir cliente";
+  const addType: "cliente" | "conductor" = isAppDriversMode ? "conductor" : "cliente";
   const [users, setUsers] = useState<SecondaryUser[]>([]);
   const [membershipMap, setMembershipMap] = useState<
     Record<string, MembershipStatus | string>
@@ -86,7 +113,9 @@ export const UsersPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("todos");
-  const [typeFilter, setTypeFilter] = useState<string>("todos");
+  const [referralFilter, setReferralFilter] = useState<ReferralFilter>("todos");
+  const [appAccessFilter, setAppAccessFilter] = useState<AppAccessFilter>("todos");
+  const [sortBy, setSortBy] = useState<SortFilter>("fecha_desc");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SecondaryUser | null>(null);
   const [openAdd, setOpenAdd] = useState<null | "cliente" | "conductor">(null);
@@ -104,10 +133,11 @@ export const UsersPage: React.FC = () => {
         UsersSecondaryService.list(),
         MembershipsService.statusByConductor().catch(() => ({})),
       ]);
-      setUsers(data);
+      const visibleRows = data.filter(isAppDriversMode ? isDriverUser : isClientUser);
+      setUsers(visibleRows);
       setMembershipMap(memberships);
       // No bloqueamos la tabla por la cédula/categoría: se enriquece aparte.
-      enrich(data);
+      enrich(visibleRows);
     } catch (e: any) {
       setError(e?.message || "Error al cargar usuarios");
     } finally {
@@ -243,17 +273,11 @@ export const UsersPage: React.FC = () => {
 
   useEffect(() => {
     load();
-  }, []);
-
-  const userTypes = useMemo(() => {
-    const set = new Set<string>();
-    users.forEach((u) => u.user_type && set.add(u.user_type));
-    return Array.from(set).sort();
-  }, [users]);
+  }, [mode]);
 
   const filtered = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
-    return users.filter((u) => {
+    const result = users.filter((u) => {
       const matchesQ = q
         ? [u.id, u.first_name, u.last_name, u.email, u.mobile, u.city, cedulaFor(u)]
             .filter(Boolean)
@@ -262,14 +286,24 @@ export const UsersPage: React.FC = () => {
       const matchesStatus =
         status === "todos"
           ? true
-          : status === "bloqueados"
+          : status === "bloqueado"
           ? !!u.blocked
-          : !u.blocked;
-      const matchesType =
-        typeFilter === "todos" ? true : u.user_type === typeFilter;
-      return matchesQ && matchesStatus && matchesType;
+          : status === "pendiente"
+          ? !u.approved && !u.blocked
+          : !!u.approved && !u.blocked;
+      const matchesReferral =
+        referralFilter === "todos" || !!String(u.referral_id || "").trim();
+      const matchesAccess = appAccessFilter !== "sin_acceso";
+      return matchesQ && matchesStatus && matchesReferral && matchesAccess;
     });
-  }, [users, debouncedQuery, status, typeFilter, cedulaFallbackMap]);
+
+    return result.sort((a, b) => {
+      if (sortBy === "nombre_asc") return fullName(a).localeCompare(fullName(b));
+      const dateA = new Date(a.created_at || 0).getTime();
+      const dateB = new Date(b.created_at || 0).getTime();
+      return sortBy === "fecha_desc" ? dateB - dateA : dateA - dateB;
+    });
+  }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap]);
 
   const handleToggleBlock = async (u: SecondaryUser) => {
     const willBlock = !u.blocked;
@@ -442,7 +476,7 @@ export const UsersPage: React.FC = () => {
       return;
     }
     const dateStamp = new Date().toISOString().slice(0, 10);
-    exportToCsv(`usuarios_${dateStamp}`, filtered, [
+    exportToCsv(`${isAppDriversMode ? "conductores_app" : "usuarios"}_${dateStamp}`, filtered, [
       { header: "ID", value: (u) => u.id },
       { header: "Nombre", value: (u) => u.first_name || "" },
       { header: "Apellido", value: (u) => u.last_name || "" },
@@ -461,7 +495,7 @@ export const UsersPage: React.FC = () => {
 
   return (
     <Page
-      title="Listado de Usuarios"
+      title={pageTitle}
       actions={
         <>
           <Button variant="secondary" onClick={handleExportCsv}>
@@ -470,45 +504,64 @@ export const UsersPage: React.FC = () => {
           <Button variant="secondary" onClick={load}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
-          <Button variant="secondary" onClick={() => setOpenAdd("conductor")}>Añadir conductor</Button>
-          <Button onClick={() => setOpenAdd("cliente")}>Añadir cliente</Button>
+          <Button onClick={() => setOpenAdd(addType)}>{addLabel}</Button>
         </>
       }
     >
       {/* Filtros superiores */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <Tabs
-          tabs={[{ value: "clientes", label: "Clientes" }]}
-          value="clientes"
-          onChange={() => {}}
-        />
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+      <Tabs
+        tabs={[{ value: "actual", label: tabLabel }]}
+        value="actual"
+        onChange={() => {}}
+      />
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mt-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
           <Input
             placeholder="Buscar por nombre, email, teléfono..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Buscar usuarios"
           />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Estado</label>
           <select
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
             value={status}
             onChange={(e) => setStatus(e.target.value as StatusFilter)}
           >
             <option value="todos">Todos</option>
-            <option value="activos">Aprobados</option>
-            <option value="bloqueados">No aprobados</option>
+            <option value="pendiente">Pendientes de Revisión</option>
+            <option value="aprobado">Aprobados</option>
+            <option value="bloqueado">Bloqueados</option>
           </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Origen</label>
           <select
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
+            value={referralFilter}
+            onChange={(e) => setReferralFilter(e.target.value as ReferralFilter)}
           >
-            <option value="todos">Todos los tipos</option>
-            {userTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
+            <option value="todos">Cualquier Origen</option>
+            <option value="con_referido">Vinieron Referidos</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Acceso a la App</label>
+          <select className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white" value={appAccessFilter} onChange={(e) => setAppAccessFilter(e.target.value as AppAccessFilter)}>
+            <option value="todos">Cualquiera</option>
+            <option value="con_acceso">Con acceso</option>
+            <option value="sin_acceso">Sin acceso</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Ordenar Por</label>
+          <select className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortFilter)}>
+            <option value="fecha_desc">Más Recientes Primero</option>
+            <option value="fecha_asc">Más Antiguos Primero</option>
+            <option value="nombre_asc">Alfabético (A-Z)</option>
           </select>
         </div>
       </div>
@@ -520,7 +573,7 @@ export const UsersPage: React.FC = () => {
       )}
 
       <div className="mt-4">
-        <Card title="Clientes">
+        <Card title={cardTitle}>
           {loading ? (
             <div className="p-6 text-center text-slate-500 text-sm">
               Cargando usuarios...
@@ -528,7 +581,11 @@ export const UsersPage: React.FC = () => {
           ) : filtered.length === 0 ? (
             <EmptyState
               title="Sin resultados"
-              subtitle="Ajusta los filtros o espera a que se registren usuarios."
+              subtitle={
+                isAppDriversMode
+                  ? "Ajusta los filtros o espera a que se registren conductores en la App."
+                  : "Ajusta los filtros o espera a que se registren usuarios."
+              }
             />
           ) : (
             <div className="overflow-auto rounded-xl border border-slate-200">
@@ -699,7 +756,7 @@ export const UsersPage: React.FC = () => {
 
       <AddUserModal
         open={openAdd !== null}
-        lockedType={openAdd ?? undefined}
+        lockedType={addType}
         onClose={() => setOpenAdd(null)}
         onSubmit={() => {
           setOpenAdd(null);

@@ -85,6 +85,49 @@ export interface BookingRecord {
   [key: string]: any;
 }
 
+export interface ServiceSnapshot {
+  id: string;
+  booking_id: string;
+  stage: string;
+  status: string;
+  captured_at: string;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  calculated_price: number | null;
+  distance: number | null;
+  duration: number | null;
+  data: Record<string, unknown>;
+  raw: Record<string, unknown>;
+}
+
+function snapshotNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeSnapshot(row: Record<string, unknown>, bookingId: string, index: number): ServiceSnapshot {
+  const rawData = row.raw_data && typeof row.raw_data === 'object' && !Array.isArray(row.raw_data)
+    ? row.raw_data as Record<string, unknown>
+    : {};
+  return {
+    id: String(row.id ?? `${bookingId}-${index}`),
+    booking_id: String(row.booking_id ?? bookingId),
+    stage: String(row.stage ?? 'unknown'),
+    status: String(row.stage ?? 'unknown'),
+    captured_at: String(row.captured_at ?? ''),
+    latitude: snapshotNumber(row.location_lat),
+    longitude: snapshotNumber(row.location_lng),
+    address: (rawData.address as string) ?? null,
+    calculated_price: snapshotNumber(row.price_calculated),
+    distance: snapshotNumber(row.distance_km),
+    duration: snapshotNumber(row.duration_seconds),
+    data: rawData,
+    raw: row,
+  };
+}
+
 /**
  * Total real del servicio. En la base de datos `total_cost` suele venir en 0,
  * mientras que el valor cobrado está en `price` (o `estimate`). Devolvemos el
@@ -108,6 +151,25 @@ export interface CustomerLite {
   last_name: string | null;
   email: string | null;
   mobile: string | null;
+}
+
+export interface AssignableDriver {
+  id: string;
+  auth_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  mobile: string | null;
+  approved: boolean | null;
+  blocked: boolean | null;
+  driver_active_status: boolean | null;
+  vehicle?: {
+    id: string;
+    make: string | null;
+    model: string | null;
+    plate: string | null;
+    service_type: string | null;
+  } | null;
 }
 
 export interface CreateBookingInput {
@@ -179,6 +241,22 @@ async function invokeBookingFunction<T>(
 }
 
 export class BookingsService {
+  static async getServiceSnapshots(bookingIds: string | string[]): Promise<ServiceSnapshot[]> {
+    const ids = [...new Set((Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean))];
+    if (!ids.length) return [];
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      snapshots?: unknown[];
+      error?: string;
+    }>('get-service-timeline', { bookingIds: ids });
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener el histórico del servicio');
+    }
+    return (data.snapshots || [])
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
+      .map((row, index) => normalizeSnapshot(row, String(row.booking_id || ''), index));
+  }
+
   static async list(): Promise<BookingRecord[]> {
     const data = await invokeBookingFunction<{
       success?: boolean;
@@ -315,6 +393,43 @@ export class BookingsService {
       throw new Error('No se pudo crear la reserva');
     }
     return data.booking as BookingRecord;
+  }
+
+  static async listAssignableDrivers(query = ''): Promise<AssignableDriver[]> {
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      drivers?: AssignableDriver[];
+      eligibilityDiagnostic?: string;
+      error?: string;
+    }>('assign-booking-driver', { action: 'list-drivers', query });
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Error al obtener conductores');
+    }
+    if (!data.drivers?.length && data.eligibilityDiagnostic) {
+      throw new Error(data.eligibilityDiagnostic);
+    }
+    return data.drivers || [];
+  }
+
+  static async assignDriver(
+    bookingId: string,
+    driverId: string
+  ): Promise<BookingRecord> {
+    const data = await invokeBookingFunction<{
+      success?: boolean;
+      booking?: BookingRecord;
+      error?: string;
+    }>('assign-booking-driver', {
+      action: 'assign',
+      bookingId,
+      driverId,
+    });
+
+    if (!data?.success || !data?.booking) {
+      throw new Error(data?.error || 'No se pudo asignar el conductor');
+    }
+    return data.booking;
   }
 
   static async cancel(id: string, reason?: string): Promise<BookingRecord> {

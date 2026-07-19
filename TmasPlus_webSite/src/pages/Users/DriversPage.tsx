@@ -521,7 +521,7 @@ export const DriversPage: React.FC = () => {
 
     return (
         <Page
-            title="Gestión de Conductores"
+            title="Conductores Web"
             actions={
                 <div className="flex items-center gap-2">
                     {importedCount > 0 && (

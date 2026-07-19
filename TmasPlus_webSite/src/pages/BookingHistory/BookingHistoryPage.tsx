@@ -6,20 +6,29 @@ import { BookingModal } from "./BookingModal";
 import {
   BookingsService,
   serviceTotal,
+  type AssignableDriver,
   type BookingRecord,
 } from "@/services/bookings.service";
 import { supabaseSecondary } from "@/config/supabase";
 
 const STATUSES = [
   "TODOS",
+  "NEW",
   "PENDING",
   "ACCEPTED",
-  "STARTED",
   "ARRIVED",
-  "PICKED_UP",
-  "COMPLETED",
+  "STARTED",
+  "REACHED",
+  "COMPLETE",
+  "PAID",
   "CANCELLED",
 ];
+
+const TERMINAL_STATUSES = ["COMPLETE", "PAID", "CANCELLED"];
+
+function getBookingDriverId(booking: BookingRecord): string | null {
+  return booking.driver_id || (booking as any).driver || null;
+}
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -31,7 +40,7 @@ function formatMoney(v: string | number | null | undefined) {
   if (v === null || v === undefined || v === "") return "—";
   const num = typeof v === "string" ? Number(v) : v;
   if (isNaN(num)) return String(v);
-  if (num === 0) return "—";
+  if (num === 0) return "$0";
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -41,13 +50,13 @@ function formatMoney(v: string | number | null | undefined) {
 
 function statusBadgeClass(status: string) {
   const s = (status || "").toUpperCase();
-  if (s === "COMPLETED" || s === "COMPLETADO")
+  if (s === "COMPLETE" || s === "PAID")
     return "bg-green-100 text-green-800";
-  if (s === "CANCELLED" || s === "CANCELADA")
+  if (s === "CANCELLED")
     return "bg-rose-100 text-rose-800";
-  if (s === "PENDING" || s === "PENDIENTE")
+  if (s === "NEW" || s === "PENDING")
     return "bg-yellow-100 text-yellow-800";
-  if (s === "ACCEPTED" || s === "STARTED" || s === "PICKED_UP" || s === "ARRIVED")
+  if (s === "ACCEPTED" || s === "STARTED" || s === "ARRIVED" || s === "REACHED")
     return "bg-sky-100 text-sky-800";
   return "bg-slate-200 text-slate-700";
 }
@@ -56,6 +65,11 @@ export default function BookingHistoryPage() {
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("TODOS");
+  const [driverFilter, setDriverFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [openModal, setOpenModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingRecord | null>(
     null
@@ -63,6 +77,12 @@ export default function BookingHistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [assignBooking, setAssignBooking] = useState<BookingRecord | null>(null);
+  const [assignDrivers, setAssignDrivers] = useState<AssignableDriver[]>([]);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assigningDriverId, setAssigningDriverId] = useState<string | null>(null);
   const [cancelBlocked, setCancelBlocked] = useState<BookingRecord | null>(
     null
   );
@@ -71,8 +91,10 @@ export default function BookingHistoryPage() {
   >("connecting");
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const isMountedRef = useRef(true);
+  const realtimeStatusRef = useRef(realtimeStatus);
   const selectedBookingRef = useRef<BookingRecord | null>(null);
 
+  realtimeStatusRef.current = realtimeStatus;
   selectedBookingRef.current = selectedBooking;
 
   const loadBookings = async (silent = false) => {
@@ -146,6 +168,7 @@ export default function BookingHistoryPage() {
     // Polling de respaldo cada 5s (mantiene la tabla viva aunque Realtime falle)
     const pollId = window.setInterval(() => {
       if (!isMountedRef.current) return;
+      if (realtimeStatusRef.current === "live") return;
       loadBookings(true);
     }, 5000);
 
@@ -164,7 +187,13 @@ export default function BookingHistoryPage() {
       const matchesStatus =
         statusFilter === "TODOS" ||
         (b.status || "").toUpperCase() === statusFilter;
-      if (!term) return matchesStatus;
+      const matchesDriver = !driverFilter || getBookingDriverId(b) === driverFilter;
+      const matchesCategory = !categoryFilter || b.car_type === categoryFilter;
+      const dateValue = new Date(b.booking_date || b.created_at).getTime();
+      const matchesFrom = !dateFrom || dateValue >= new Date(`${dateFrom}T00:00:00`).getTime();
+      const matchesTo = !dateTo || dateValue <= new Date(`${dateTo}T23:59:59.999`).getTime();
+      const matchesFilters = matchesStatus && matchesDriver && matchesCategory && matchesFrom && matchesTo;
+      if (!term) return matchesFilters;
       const matchesTerm = [
         b.id,
         b.reference,
@@ -180,16 +209,27 @@ export default function BookingHistoryPage() {
       ]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(term));
-      return matchesStatus && matchesTerm;
+      return matchesFilters && matchesTerm;
     });
-  }, [bookings, searchTerm, statusFilter]);
+  }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo]);
 
-  const exportToCSV = () => {
+  const driverOptions = useMemo(() => Array.from(new Map(bookings.flatMap((b) => {
+    const driverId = getBookingDriverId(b);
+    return driverId ? [[driverId, b.driver_name || driverId] as [string, string]] : [];
+  })).entries()), [bookings]);
+  const categoryOptions = useMemo(() => [...new Set(bookings.map(b => b.car_type).filter(Boolean) as string[])].sort(), [bookings]);
+
+  const exportToCSV = async () => {
     if (filteredBookings.length === 0) {
       alert("No hay datos para exportar");
       return;
     }
 
+    setExporting(true);
+    try {
+    const snapshots = await BookingsService.getServiceSnapshots(filteredBookings.map((b) => b.id));
+    const byBooking = new Map<string, typeof snapshots>();
+    snapshots.forEach((snapshot) => byBooking.set(snapshot.booking_id, [...(byBooking.get(snapshot.booking_id) || []), snapshot]));
     const headers = [
       "Referencia",
       "Fecha creación",
@@ -201,26 +241,45 @@ export default function BookingHistoryPage() {
       "Tipo",
       "Origen",
       "Destino",
-      "Costo total",
+      "Precio estimado", "Precio final", "Duración real (min)", "Distancia real (km)",
       "Estado",
       "OTP",
+      "Creado en",
+      "Llegada pickup",
+      "Iniciado",
+      "Llegó destino",
+      "Completado",
+      "Cancelado",
     ];
 
-    const rows = filteredBookings.map((b) => [
-      b.reference || b.id,
-      formatDate(b.created_at),
-      formatDate(b.booking_date),
-      b.customer_name || "",
-      b.customer_email || "",
-      b.driver_name || "",
-      b.plate_number || "",
-      b.car_type || "",
-      b.pickup_address || "",
-      b.drop_address || "",
-      serviceTotal(b) ?? "",
-      b.status || "",
-      b.otp || "",
-    ]);
+    const rows = filteredBookings.map((b) => {
+      const stages = byBooking.get(b.id) || [];
+      const stageAt = (name: string) => {
+        const snapshot = stages.find((item) => item.stage === name);
+        return snapshot ? formatDate(snapshot.captured_at) : "";
+      };
+      return [
+        b.reference || b.id,
+        formatDate(b.created_at),
+        formatDate(b.booking_date),
+        b.customer_name || "",
+        b.customer_email || "",
+        b.driver_name || "",
+        b.plate_number || "",
+        b.car_type || "",
+        b.pickup_address || "",
+        b.drop_address || "",
+        b.estimate ?? "", serviceTotal(b) ?? "", b.duration ?? "", b.distance ?? "",
+        b.status || "",
+        b.otp || "",
+        stageAt("created"),
+        stageAt("arrival_pickup"),
+        stageAt("started"),
+        stageAt("arrival_destination"),
+        stageAt("completed"),
+        stageAt("cancelled"),
+      ];
+    });
 
     const csvContent = [headers, ...rows]
       .map((row) =>
@@ -241,6 +300,9 @@ export default function BookingHistoryPage() {
     a.download = "historial_reservas.csv";
     a.click();
     URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e?.message || "No fue posible exportar los snapshots");
+    } finally { setExporting(false); }
   };
 
   const openBookingModal = (booking: BookingRecord) => {
@@ -255,7 +317,7 @@ export default function BookingHistoryPage() {
 
   const handleCancel = async (b: BookingRecord) => {
     // Una reserva completada no se puede cancelar: avisamos con un modal.
-    if ((b.status || "").toUpperCase().startsWith("COMPLET")) {
+    if (TERMINAL_STATUSES.includes((b.status || "").toUpperCase())) {
       setCancelBlocked(b);
       return;
     }
@@ -291,6 +353,65 @@ export default function BookingHistoryPage() {
     } catch (e: any) {
       alert(e?.message || "Error al eliminar la reserva");
     } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const loadAssignableDrivers = async (query = "") => {
+    setAssignLoading(true);
+    setAssignError(null);
+    try {
+      const data = await BookingsService.listAssignableDrivers(query);
+      setAssignDrivers(data);
+    } catch (e: any) {
+      setAssignError(e?.message || "Error al cargar conductores");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const openAssignModal = (booking: BookingRecord) => {
+    const status = (booking.status || "").trim().toUpperCase();
+    if (TERMINAL_STATUSES.includes(status)) return;
+    setAssignBooking(booking);
+    setAssignQuery("");
+    setAssignDrivers([]);
+    loadAssignableDrivers();
+  };
+
+  const closeAssignModal = () => {
+    if (assigningDriverId) return;
+    setAssignBooking(null);
+    setAssignDrivers([]);
+    setAssignError(null);
+  };
+
+  const handleAssignDriver = async (driver: AssignableDriver) => {
+    if (!assignBooking) return;
+    const hadDriver = !!assignBooking.driver_id;
+    const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ") || driver.email || "conductor";
+    if (
+      hadDriver &&
+      !confirm(`¿Reasignar la reserva ${assignBooking.reference || assignBooking.id} a ${driverName}?`)
+    ) {
+      return;
+    }
+
+    setAssigningDriverId(driver.id);
+    setActionLoadingId(assignBooking.id);
+    try {
+      const updated = await BookingsService.assignDriver(assignBooking.id, driver.id);
+      setBookings((prev) =>
+        prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))
+      );
+      if (selectedBooking?.id === updated.id) {
+        setSelectedBooking({ ...selectedBooking, ...updated });
+      }
+      setAssignBooking(null);
+    } catch (e: any) {
+      setAssignError(e?.message || "Error al asignar conductor");
+    } finally {
+      setAssigningDriverId(null);
       setActionLoadingId(null);
     }
   };
@@ -338,7 +459,7 @@ export default function BookingHistoryPage() {
           <Button variant="secondary" onClick={() => loadBookings()}>
             {loading ? "Cargando..." : "Refrescar"}
           </Button>
-          <Button onClick={exportToCSV}>Exportar CSV</Button>
+          <Button onClick={exportToCSV} disabled={exporting}>{exporting ? "Exportando..." : "Exportar CSV"}</Button>
         </div>
       </div>
 
@@ -362,6 +483,16 @@ export default function BookingHistoryPage() {
             </option>
           ))}
         </select>
+        <input type="date" aria-label="Fecha desde" title="Fecha desde" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <input type="date" aria-label="Fecha hasta" title="Fecha hasta" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
+          <option value="">Todos los conductores</option>
+          {driverOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
+          <option value="">Todas las categorías</option>
+          {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
       </div>
 
       {error && (
@@ -382,7 +513,10 @@ export default function BookingHistoryPage() {
               <th className="p-3">Conductor</th>
               <th className="p-3">Placa</th>
               <th className="p-3">Tipo</th>
-              <th className="p-3">Costo</th>
+              <th className="p-3">Estimado</th>
+              <th className="p-3">Final</th>
+              <th className="p-3">Duración real</th>
+              <th className="p-3">Distancia real</th>
               <th className="p-3">Estado</th>
               <th className="p-3 text-center">OTP</th>
               <th className="p-3 text-center">Acciones</th>
@@ -391,7 +525,7 @@ export default function BookingHistoryPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
@@ -399,7 +533,14 @@ export default function BookingHistoryPage() {
               filteredBookings.map((b) => {
                 const statusUpper = (b.status || "").toUpperCase();
                 const isCancelled = statusUpper === "CANCELLED";
+                const isCompleted = statusUpper === "COMPLETE" || statusUpper === "PAID";
                 const busy = actionLoadingId === b.id;
+                const finalTotal = serviceTotal(b);
+                const estimateValue = Number(b.estimate);
+                const finalValue = Number(finalTotal);
+                const deltaPct = estimateValue && finalValue
+                  ? Math.round(((finalValue - estimateValue) / estimateValue) * 100)
+                  : null;
                 return (
                   <motion.tr
                     key={b.id}
@@ -422,9 +563,17 @@ export default function BookingHistoryPage() {
                     <td className="p-3">{b.driver_name || "—"}</td>
                     <td className="p-3">{b.plate_number || "—"}</td>
                     <td className="p-3">{b.car_type || "—"}</td>
+                    <td className="p-3">{formatMoney(b.estimate)}</td>
                     <td className="p-3">
-                      {formatMoney(serviceTotal(b))}
+                      {formatMoney(finalTotal)}
+                      {deltaPct !== null && Math.abs(deltaPct) >= 5 && (
+                        <span className={`ml-2 text-xs ${deltaPct > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                          Δ{deltaPct > 0 ? "+" : ""}{deltaPct}%
+                        </span>
+                      )}
                     </td>
+                    <td className="p-3">{b.duration != null ? `${b.duration} min` : "—"}</td>
+                    <td className="p-3">{b.distance != null ? `${b.distance} km` : "—"}</td>
                     <td className="p-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass(
@@ -454,9 +603,17 @@ export default function BookingHistoryPage() {
                         </Button>
                         <Button
                           variant="secondary"
+                          onClick={() => openAssignModal(b)}
+                          disabled={busy || isCancelled || isCompleted}
+                          className="!px-3 !py-1.5 !text-xs !text-sky-700 !border-sky-300 disabled:!bg-slate-200 disabled:!text-slate-400 disabled:!border-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:active:scale-100"
+                        >
+                          {b.driver_id ? "Reasignar" : "Asignar"}
+                        </Button>
+                        <Button
+                          variant="secondary"
                           onClick={() => handleCancel(b)}
                           disabled={busy || isCancelled}
-                          className="!px-3 !py-1.5 !text-xs !text-amber-700 !border-amber-300"
+                          className="!px-3 !py-1.5 !text-xs !text-amber-700 !border-amber-300 disabled:!bg-slate-200 disabled:!text-slate-400 disabled:!border-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:active:scale-100"
                         >
                           {busy ? "..." : "Cancelar"}
                         </Button>
@@ -475,7 +632,7 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={11} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   No hay reservas registradas.
                 </td>
               </tr>
@@ -495,6 +652,136 @@ export default function BookingHistoryPage() {
           selectedBooking ? actionLoadingId === selectedBooking.id : false
         }
       />
+
+      {assignBooking && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/50 p-4">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden"
+          >
+            <div className="px-6 py-4 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">
+                    {assignBooking.driver_id ? "Reasignar conductor" : "Asignar conductor"}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Reserva {assignBooking.reference || assignBooking.id.slice(0, 8)}
+                    {assignBooking.driver_name ? ` · Actual: ${assignBooking.driver_name}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={closeAssignModal}
+                  disabled={!!assigningDriverId}
+                  className="rounded-lg p-2 hover:bg-slate-100 text-slate-500 disabled:opacity-50"
+                  aria-label="Cerrar asignación"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="flex gap-2 mb-4">
+                <input
+                  value={assignQuery}
+                  onChange={(e) => setAssignQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") loadAssignableDrivers(assignQuery);
+                  }}
+                  placeholder="Buscar por nombre, correo o teléfono..."
+                  className="p-2 border border-slate-300 rounded-lg flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => loadAssignableDrivers(assignQuery)}
+                  disabled={assignLoading}
+                >
+                  {assignLoading ? "Buscando..." : "Buscar"}
+                </Button>
+              </div>
+
+              {assignError && (
+                <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+                  {assignError}
+                </div>
+              )}
+
+              <div className="max-h-[52vh] overflow-auto rounded-xl border border-slate-200">
+                {assignLoading ? (
+                  <div className="p-6 text-center text-slate-500 text-sm">
+                    Cargando conductores...
+                  </div>
+                ) : assignDrivers.length === 0 ? (
+                  <div className="p-6 text-center text-slate-500 text-sm">
+                    No hay conductores con vehículo y membresía activa disponibles con esos filtros.
+                  </div>
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Conductor</th>
+                        <th className="px-3 py-2 font-medium">Contacto</th>
+                        <th className="px-3 py-2 font-medium">Vehículo</th>
+                        <th className="px-3 py-2 font-medium text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignDrivers.map((driver) => {
+                        const name =
+                          [driver.first_name, driver.last_name].filter(Boolean).join(" ") ||
+                          driver.email ||
+                          "Conductor";
+                        const vehicle = driver.vehicle;
+                        const sameDriver = assignBooking.driver_id === driver.id;
+                        return (
+                          <tr key={driver.id} className="border-t border-slate-100">
+                            <td className="px-3 py-3">
+                              <div className="font-medium text-slate-800">{name}</div>
+                              <div className="text-xs text-slate-400 font-mono">{driver.id.slice(0, 8)}</div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div>{driver.mobile || "—"}</div>
+                              <div className="text-xs text-slate-500">{driver.email || ""}</div>
+                            </td>
+                            <td className="px-3 py-3">
+                              {vehicle ? (
+                                <div>
+                                  <div>{[vehicle.make, vehicle.model].filter(Boolean).join(" ") || "Vehículo"}</div>
+                                  <div className="text-xs text-slate-500">{vehicle.plate || "Sin placa"}</div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-xs">Sin vehículo</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <Button
+                                onClick={() => handleAssignDriver(driver)}
+                                disabled={!!assigningDriverId || sameDriver}
+                                className="!px-3 !py-1.5 !text-xs"
+                              >
+                                {assigningDriverId === driver.id
+                                  ? "Asignando..."
+                                  : sameDriver
+                                  ? "Asignado"
+                                  : assignBooking.driver_id
+                                  ? "Reasignar"
+                                  : "Asignar"}
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Aviso: no se puede cancelar una reserva completada */}
       {cancelBlocked && (
