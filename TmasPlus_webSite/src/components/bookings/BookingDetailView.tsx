@@ -3,13 +3,18 @@ import {
   CarFront,
   CircleDollarSign,
   Clock3,
+  History,
   MessageSquareText,
   Navigation,
   Route,
   Star,
   UserRound,
 } from "lucide-react";
-import { serviceTotal, type BookingRecord } from "@/services/bookings.service";
+import {
+  serviceTotal,
+  type BookingRecord,
+  type ServiceDataSnapshot,
+} from "@/services/bookings.service";
 
 const styles = {
   header: "flex items-center justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5",
@@ -257,8 +262,169 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
             {booking.observations || "—"}
           </p>
         </SectionCard>
+
+        <ServiceSnapshotsSection snapshots={booking.service_data_snapshots} />
       </div>
     </main>
+  );
+}
+
+const SNAPSHOT_STAGE_ORDER: Record<string, number> = {
+  created: 0,
+  arrival_pickup: 1,
+  started: 2,
+  arrival_destination: 3,
+  completed: 4,
+  paid: 5,
+  cancelled: 6,
+};
+
+const SNAPSHOT_STAGE_LABELS: Record<string, string> = {
+  created: "Creado",
+  arrival_pickup: "Llegada al origen",
+  started: "Viaje iniciado",
+  arrival_destination: "Llegada al destino",
+  completed: "Completado",
+  paid: "Pagado",
+  cancelled: "Cancelado",
+};
+
+const SNAPSHOT_STAGE_DOT: Record<string, string> = {
+  created: "bg-sky-500",
+  arrival_pickup: "bg-indigo-500",
+  started: "bg-blue-600",
+  arrival_destination: "bg-violet-500",
+  completed: "bg-emerald-500",
+  paid: "bg-emerald-600",
+  cancelled: "bg-rose-500",
+};
+
+// Etiquetas legibles para las claves conocidas de raw_data (segun el stage).
+const SNAPSHOT_RAW_LABELS: Record<string, string> = {
+  category: "Categoría",
+  estimated_price: "Precio estimado",
+  final_price: "Precio final",
+  driver_arrived_time: "Hora de llegada del conductor",
+  trip_end_time: "Hora de fin del viaje",
+  otp_verified: "OTP verificado",
+  payment_mode: "Forma de pago",
+  cancelled_by: "Cancelado por",
+  reason: "Motivo",
+  status_from: "Estado anterior",
+  status_to: "Estado nuevo",
+};
+
+function humanizeKey(key: string) {
+  return SNAPSHOT_RAW_LABELS[key] || key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function looksLikeMoneyKey(key: string) {
+  return /price|amount|fare|cost|total|fee/i.test(key);
+}
+
+function looksLikeDateKey(key: string) {
+  return /time|date|_at$/i.test(key);
+}
+
+// Un valor de raw_data se considera "vacío" (y se oculta) cuando es null,
+// undefined o cadena vacía. false y 0 son valores válidos que sí se muestran.
+function isEmptyRawValue(value: unknown) {
+  return value === null || value === undefined || value === "";
+}
+
+function formatRawValue(key: string, value: unknown): React.ReactNode {
+  if (isEmptyRawValue(value)) return "—";
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (typeof value === "object") {
+    return (
+      <span className="font-mono text-xs">{JSON.stringify(value)}</span>
+    );
+  }
+  // status_from / status_to traen estados crudos (ACCEPTED, ARRIVED…); se
+  // muestran con la misma etiqueta en español que el badge de la reserva.
+  if (key === "status_from" || key === "status_to") {
+    return statusLabel(String(value).toUpperCase());
+  }
+  if (typeof value === "number" || /^-?\d+(\.\d+)?$/.test(String(value))) {
+    if (looksLikeMoneyKey(key)) return formatMoney(value as number);
+    if (looksLikeDateKey(key)) return formatDate(value as number);
+  }
+  if (looksLikeDateKey(key) && typeof value === "string") return formatDate(value);
+  return String(value);
+}
+
+function ServiceSnapshotsSection({ snapshots }: { snapshots?: ServiceDataSnapshot[] }) {
+  const list = [...(snapshots || [])].sort((a, b) => {
+    const oa = SNAPSHOT_STAGE_ORDER[a.stage] ?? 99;
+    const ob = SNAPSHOT_STAGE_ORDER[b.stage] ?? 99;
+    if (oa !== ob) return oa - ob;
+    return String(a.captured_at || "").localeCompare(String(b.captured_at || ""));
+  });
+
+  return (
+    <SectionCard title="Historial del servicio" icon={<History size={19} />}>
+      {list.length === 0 ? (
+        <p className="text-sm text-slate-400">Sin registros de snapshots para este viaje.</p>
+      ) : (
+        <ol className="relative space-y-4 border-l border-slate-200 pl-6">
+          {list.map((snap) => (
+            <SnapshotItem key={snap.id} snap={snap} />
+          ))}
+        </ol>
+      )}
+    </SectionCard>
+  );
+}
+
+function SnapshotItem({ snap }: { snap: ServiceDataSnapshot }) {
+  const dot = SNAPSHOT_STAGE_DOT[snap.stage] || "bg-slate-400";
+  const label = SNAPSHOT_STAGE_LABELS[snap.stage] || snap.stage;
+
+  const metrics: Array<{ label: string; value: React.ReactNode }> = [];
+  if (snap.distance_km != null && Number(snap.distance_km) > 0)
+    metrics.push({ label: "Distancia", value: `${snap.distance_km} km` });
+  if (snap.duration_seconds != null && snap.duration_seconds > 0)
+    metrics.push({ label: "Duración", value: `${Math.round(snap.duration_seconds / 60)} min` });
+  if (snap.price_calculated != null && Number(snap.price_calculated) > 0)
+    metrics.push({ label: "Precio calculado", value: formatMoney(snap.price_calculated) });
+  if (snap.location_lat != null && snap.location_lng != null)
+    metrics.push({ label: "Ubicación", value: `${snap.location_lat}, ${snap.location_lng}` });
+
+  // raw_data es acumulativo entre etapas, así que se ocultan las claves sin
+  // valor para no llenar cada evento de campos "—" que no aplican al stage.
+  const rawEntries = snap.raw_data
+    ? Object.entries(snap.raw_data).filter(([, v]) => !isEmptyRawValue(v))
+    : [];
+
+  return (
+    <li className="relative">
+      <span className={`absolute -left-[27px] top-1.5 h-3 w-3 rounded-full ring-4 ring-white ${dot}`} />
+      <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-black uppercase tracking-wide text-[#082f49]">{label}</p>
+          <span className="text-xs font-medium text-slate-500">{formatDate(snap.captured_at)}</span>
+        </div>
+
+        {metrics.length > 0 && (
+          <div className="mt-3 grid gap-x-6 sm:grid-cols-2">
+            {metrics.map((m) => (
+              <InfoRow key={m.label} label={m.label} value={m.value} />
+            ))}
+          </div>
+        )}
+
+        {rawEntries.length > 0 && (
+          <div className="mt-3 border-t border-slate-200/70 pt-3">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Datos del evento</p>
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              {rawEntries.map(([k, v]) => (
+                <InfoRow key={k} label={humanizeKey(k)} value={formatRawValue(k, v)} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </li>
   );
 }
 

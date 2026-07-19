@@ -10,8 +10,40 @@ export type BookingStatus =
   | 'CANCELLED'
   | string;
 
+export type ServiceStage =
+  | 'created'
+  | 'arrival_pickup'
+  | 'started'
+  | 'arrival_destination'
+  | 'completed'
+  | 'paid'
+  | 'cancelled'
+  | string;
+
+/**
+ * Snapshot del ciclo de vida de un servicio. Cada reserva tiene como maximo un
+ * snapshot por `stage` (constraint unique booking_id+stage en la BD secundaria).
+ * `raw_data` es un jsonb cuya forma depende del stage.
+ */
+export interface ServiceDataSnapshot {
+  id: string;
+  booking_id: string;
+  stage: ServiceStage;
+  captured_at: string | null;
+  driver_id: string | null;
+  customer_id: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
+  distance_km: string | number | null;
+  duration_seconds: number | null;
+  price_calculated: string | number | null;
+  raw_data: Record<string, any> | null;
+  created_at: string | null;
+}
+
 export interface BookingRecord {
   id: string;
+  service_data_snapshots?: ServiceDataSnapshot[];
   reference: string | null;
   status: BookingStatus;
   customer_id: string | null;

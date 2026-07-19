@@ -86,5 +86,47 @@ serve(async (req: Request) => {
     return json({ error: `Error al obtener reservas: ${error.message}` }, 500);
   }
 
-  return json({ success: true, bookings: data ?? [] });
+  const bookings = (data ?? []) as Array<Record<string, unknown>>;
+
+  // Adjunta el historial de snapshots del ciclo de vida del servicio
+  // (service_data_snapshots) a cada reserva. La tabla vive en el proyecto
+  // secundario con RLS, asi que solo es legible con service role desde aqui;
+  // el navegador no puede leerla directamente (igual que bookings).
+  const ids = bookings.map((b) => b.id).filter(Boolean) as string[];
+  if (ids.length) {
+    const byBooking = new Map<string, Array<Record<string, unknown>>>();
+    let snapshotsOk = true;
+
+    // Se consulta por lotes: un .in() con ~1000 UUIDs genera una URL enorme que
+    // PostgREST rechaza con 400 (mismo problema visto en categoriesByDriver).
+    const CHUNK = 150;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data: snaps, error: snapErr } = await admin
+        .from("service_data_snapshots")
+        .select(
+          "id, booking_id, stage, captured_at, driver_id, customer_id, location_lat, location_lng, distance_km, duration_seconds, price_calculated, raw_data, created_at"
+        )
+        .in("booking_id", chunk)
+        .order("captured_at", { ascending: true });
+
+      if (snapErr) {
+        snapshotsOk = false;
+        break;
+      }
+      for (const s of (snaps ?? []) as Array<Record<string, unknown>>) {
+        const key = String(s.booking_id);
+        const arr = byBooking.get(key) ?? [];
+        arr.push(s);
+        byBooking.set(key, arr);
+      }
+    }
+
+    // Un fallo leyendo snapshots no debe romper el listado de reservas.
+    for (const b of bookings) {
+      b.service_data_snapshots = snapshotsOk ? byBooking.get(String(b.id)) ?? [] : [];
+    }
+  }
+
+  return json({ success: true, bookings });
 });
