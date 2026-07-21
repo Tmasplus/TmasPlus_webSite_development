@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.releaseunocero",
+      "sha256_cert_fingerprints": [
+        "B8:85:C9:71:BC:1E:95:21:69:63:78:93:D1:16:55:EB:1C:B2:83:48:3A:0D:2A:64:DB:88:67:F5:2D:AB:47:6A",
+        "B5:64:1C:E7:00:FF:DB:4E:C6:E1:0C:4E:4A:13:57:05:31:31:A6:BC:ED:9E:6C:51:9A:23:31:18:AE:6E:37:49"
+      ]
+    }
+  }
+]
