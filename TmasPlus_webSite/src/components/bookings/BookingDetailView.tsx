@@ -15,6 +15,8 @@ import {
   type BookingRecord,
   type ServiceDataSnapshot,
 } from "@/services/bookings.service";
+import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { categoryNameForValue } from "@/utils/carTypeCatalog";
 
 const styles = {
   header: "flex items-center justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5",
@@ -156,6 +158,7 @@ export function BookingDetailHeader({
 }
 
 export function BookingDetailBody({ booking, className = "" }: { booking: BookingRecord; className?: string }) {
+  const { categories: carTypes } = useCarTypeCatalog();
   const cancelled = isBookingCancelled(booking);
 
   return (
@@ -197,7 +200,7 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
           <SectionCard title="Conductor / Vehículo" icon={<CarFront size={19} />}>
             <InfoRow label="Conductor" value={booking.driver_name} />
             <InfoRow label="Contacto" value={booking.driver_contact} />
-            <InfoRow label="Tipo" value={booking.car_type} />
+            <InfoRow label="Tipo" value={categoryNameForValue(carTypes, booking.car_type)} />
             <InfoRow label="Modelo" value={booking.car_model} />
             <InfoRow label="Placa" value={booking.plate_number} uppercase={!!booking.plate_number} />
           </SectionCard>

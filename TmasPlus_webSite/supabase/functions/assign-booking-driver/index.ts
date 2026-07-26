@@ -277,7 +277,6 @@ serve(async (req: Request) => {
       car_id: car?.id ?? null,
       car_model: car ? [car.make, car.model].filter(Boolean).join(" ") : null,
       plate_number: car?.plate ?? null,
-      car_type: car?.service_type ?? null,
       updated_at: now,
     };
 

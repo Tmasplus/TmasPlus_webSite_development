@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import type { DriverRegistrationStep1 } from '@/config/database.types';
+import { CITIES } from '@/config/constants';
 import { referralsService } from '@/services/referrals.service'; 
 import { supabase } from '@/config/supabase';
 
@@ -10,13 +11,6 @@ interface Step1Props {
     onNext: () => void;
     loading?: boolean;
 }
-
-const CITIES = [
-    'Bogotá', 'Medellín', 'Cali', 'Barranquilla', 'Cartagena',
-    'Cúcuta', 'Bucaramanga', 'Pereira', 'Santa Marta', 'Ibagué',
-    'Manizales', 'Pasto', 'Neiva', 'Villavicencio', 'Armenia',
-    'Valledupar', 'Montería', 'Sincelejo', 'Popayán', 'Tunja',
-];
 
 const DISPOSABLE_DOMAINS = [
     'yopmail.com', 'mailinator.com', 'tempmail.com', '10minutemail.com',

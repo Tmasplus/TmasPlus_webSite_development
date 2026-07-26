@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import DocumentUploadForm from "./DocumentUploadForm";
+import type { ProfileType } from "./DocumentUploadForm";
 
 type UploadedDocs = Record<string, File[]>;
 

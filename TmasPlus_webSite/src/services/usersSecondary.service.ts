@@ -1,5 +1,5 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
-import { carTypeLabelForServiceType } from '@/utils/vehicleCategory';
+import { legacyCategoryLabel } from '@/utils/carTypeCatalog';
 import { chunk } from '@/utils/chunk';
 
 export interface SecondaryUser {
@@ -155,6 +155,7 @@ export class UsersSecondaryService {
     email?: string | null;
     authId?: string | null;
     serviceType: string;
+    categoryName?: string | null;
   }): Promise<{ synced: boolean; reason?: string }> {
     if (!sb) return { synced: false, reason: 'sin-cliente-secundario' };
     await syncSession();
@@ -188,7 +189,8 @@ export class UsersSecondaryService {
       .limit(1);
     const car = cars?.[0] ?? null;
 
-    const carType = carTypeLabelForServiceType(input.serviceType);
+    const carType =
+      input.categoryName || legacyCategoryLabel(input.serviceType);
     const userFields: Record<string, any> = {};
     if (carType) userFields.car_type = carType;
 

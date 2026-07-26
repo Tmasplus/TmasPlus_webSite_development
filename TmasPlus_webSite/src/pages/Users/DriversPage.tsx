@@ -10,7 +10,8 @@ import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { exportToCsv } from '@/utils/exportCsv';
-import { vehicleCategoryLabel } from '@/utils/vehicleCategory';
+import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
+import { categoryNameForValue } from '@/utils/carTypeCatalog';
 import { supabase } from '@/config/supabase';
 import { DriversService } from '@/services/drivers.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
@@ -31,6 +32,7 @@ type AppAccessIndex = {
 const EMPTY_ACCESS_INDEX: AppAccessIndex = { ids: new Set(), emailById: {}, idByEmail: {} };
 
 export const DriversPage: React.FC = () => {
+    const { categories: carTypes } = useCarTypeCatalog();
     const [drivers, setDrivers] = useState<EnrichedDriverProfile[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -446,7 +448,7 @@ export const DriversPage: React.FC = () => {
             accessor: (r) => {
                 const cat = categoryFor(r);
                 return cat
-                    ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">{vehicleCategoryLabel(cat)}</span>
+                    ? <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">{categoryNameForValue(carTypes, cat)}</span>
                     : <span className="text-slate-400 text-xs italic">Sin vehículo</span>;
             }
         },
@@ -508,7 +510,7 @@ export const DriversPage: React.FC = () => {
             { header: 'Nombre', value: (d) => d.first_name },
             { header: 'Apellido', value: (d) => d.last_name },
             { header: 'Cédula', value: (d) => cedulaFor(d) },
-            { header: 'Categoría', value: (d) => { const c = categoryFor(d); return c ? vehicleCategoryLabel(c) : ''; } },
+            { header: 'Categoría', value: (d) => categoryNameForValue(carTypes, categoryFor(d)) },
             { header: 'Correo', value: (d) => emailFor(d) },
             { header: 'Teléfono', value: (d) => d.mobile },
             { header: 'Estado', value: statusLabel },

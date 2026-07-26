@@ -10,6 +10,8 @@ import {
   type BookingRecord,
 } from "@/services/bookings.service";
 import { supabaseSecondary } from "@/config/supabase";
+import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { categoryForValue, categoryNameForValue } from "@/utils/carTypeCatalog";
 
 const STATUSES = [
   "TODOS",
@@ -62,6 +64,7 @@ function statusBadgeClass(status: string) {
 }
 
 export default function BookingHistoryPage() {
+  const { categories: carTypes, activeCategories } = useCarTypeCatalog();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("TODOS");
@@ -188,7 +191,9 @@ export default function BookingHistoryPage() {
         statusFilter === "TODOS" ||
         (b.status || "").toUpperCase() === statusFilter;
       const matchesDriver = !driverFilter || getBookingDriverId(b) === driverFilter;
-      const matchesCategory = !categoryFilter || b.car_type === categoryFilter;
+      const matchesCategory =
+        !categoryFilter ||
+        categoryForValue(carTypes, b.car_type)?.id === categoryFilter;
       const dateValue = new Date(b.booking_date || b.created_at).getTime();
       const matchesFrom = !dateFrom || dateValue >= new Date(`${dateFrom}T00:00:00`).getTime();
       const matchesTo = !dateTo || dateValue <= new Date(`${dateTo}T23:59:59.999`).getTime();
@@ -211,13 +216,13 @@ export default function BookingHistoryPage() {
         .some((v) => String(v).toLowerCase().includes(term));
       return matchesFilters && matchesTerm;
     });
-  }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo]);
+  }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo, carTypes]);
 
   const driverOptions = useMemo(() => Array.from(new Map(bookings.flatMap((b) => {
     const driverId = getBookingDriverId(b);
     return driverId ? [[driverId, b.driver_name || driverId] as [string, string]] : [];
   })).entries()), [bookings]);
-  const categoryOptions = useMemo(() => [...new Set(bookings.map(b => b.car_type).filter(Boolean) as string[])].sort(), [bookings]);
+  const categoryOptions = activeCategories;
 
   const exportToCSV = async () => {
     if (filteredBookings.length === 0) {
@@ -266,7 +271,7 @@ export default function BookingHistoryPage() {
         b.customer_email || "",
         b.driver_name || "",
         b.plate_number || "",
-        b.car_type || "",
+        categoryNameForValue(carTypes, b.car_type),
         b.pickup_address || "",
         b.drop_address || "",
         b.estimate ?? "", serviceTotal(b) ?? "", b.duration ?? "", b.distance ?? "",
@@ -491,7 +496,7 @@ export default function BookingHistoryPage() {
         </select>
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
           <option value="">Todas las categorías</option>
-          {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+          {categoryOptions.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
         </select>
       </div>
 
@@ -562,7 +567,7 @@ export default function BookingHistoryPage() {
                     </td>
                     <td className="p-3">{b.driver_name || "—"}</td>
                     <td className="p-3">{b.plate_number || "—"}</td>
-                    <td className="p-3">{b.car_type || "—"}</td>
+                    <td className="p-3">{categoryNameForValue(carTypes, b.car_type)}</td>
                     <td className="p-3">{formatMoney(b.estimate)}</td>
                     <td className="p-3">
                       {formatMoney(finalTotal)}

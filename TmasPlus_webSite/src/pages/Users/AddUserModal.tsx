@@ -8,7 +8,9 @@ import { UsersSecondaryService } from "@/services/usersSecondary.service";
 import { supabaseSecondary } from "@/config/supabase";
 import { toast } from "@/utils/toast";
 import DocumentUploadModal from "./DocumentUpload/DocumentUploadModal";
-import { DOCUMENT_TYPE_OPTIONS, DOCUMENT_TYPE_LABELS } from "@/config/constants";
+import { CITIES, DOCUMENT_TYPE_OPTIONS, DOCUMENT_TYPE_LABELS } from "@/config/constants";
+import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { activeCategoryOptions, documentProfileForCategoryValue } from "@/utils/carTypeCatalog";
 
 const SECONDARY_DOC_BUCKET = "driver-documents";
 
@@ -125,14 +127,6 @@ async function uploadAndPersistDriverDocs(
     if (error) throw error;
   }
 }
-
-// Ciudades disponibles para el registro (misma lista que el flujo de registro público)
-const CITIES = [
-  "Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena",
-  "Cúcuta", "Bucaramanga", "Pereira", "Santa Marta", "Ibagué",
-  "Manizales", "Pasto", "Neiva", "Villavicencio", "Armenia",
-  "Valledupar", "Montería", "Sincelejo", "Popayán", "Tunja",
-] as const;
 
 const CITY_OPTIONS = CITIES.map((c) => ({ value: c, label: c }));
 
@@ -262,12 +256,7 @@ const FIELD_DEFS: FieldDef[] = [
     id: "tipoVehiculo",
     label: "Tipo de Vehículo",
     kind: "select",
-    options: [
-      { value: "x_plus", label: "Automóvil" },
-      { value: "taxi_plus", label: "Taxi" },
-      { value: "comfort_plus", label: "Comfort" },
-      { value: "van_plus", label: "Van" }
-    ],
+    options: [],
     showWhen: (t) => t === "conductor",
     required: true
   },
@@ -336,6 +325,8 @@ const USER_TYPE_MAP: Record<UserType, 'customer' | 'driver' | 'company'> = {
 type UploadedDocs = Record<string, File[]>;
 
 export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedType }) => {
+  const { categories: carTypes } = useCarTypeCatalog();
+  const carTypeOptions = useMemo(() => activeCategoryOptions(carTypes), [carTypes]);
   const [type, setType] = useState<UserType>(lockedType ?? "cliente");
   const [form, setForm] = useState<FormState>(initialForm);
   const [acceptTerms, setAcceptTerms] = useState(false);
@@ -358,8 +349,14 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
 
   // Filtrar los campos a mostrar según el tipo seleccionado
   const visibleFields = useMemo(
-    () => FIELD_DEFS.filter((f) => (f.showWhen ? f.showWhen(type, form) : true)),
-    [type, form]
+    () => FIELD_DEFS
+      .filter((f) => (f.showWhen ? f.showWhen(type, form) : true))
+      .map((field) =>
+        field.id === "tipoVehiculo"
+          ? { ...field, options: carTypeOptions }
+          : field
+      ),
+    [type, form, carTypeOptions]
   );
 
   function update<K extends keyof FormState>(k: K, v: FormState[K]) { setForm((s) => ({ ...s, [k]: v })); }
@@ -682,7 +679,11 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
       </form>
       <DocumentUploadModal
         open={showDocsModal}
-        profile={type === "cliente" ? "cliente" : form.tipoVehiculo}
+        profile={
+          type === "cliente"
+            ? "cliente"
+            : documentProfileForCategoryValue(carTypes, form.tipoVehiculo)
+        }
         documentLabel={DOCUMENT_TYPE_LABELS[form.tipoDocumento]}
         // requiredCount={3}
         onClose={() => setShowDocsModal(false)}

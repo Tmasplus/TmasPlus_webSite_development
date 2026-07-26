@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 
-type ProfileType =
+export type ProfileType =
   | "cliente"
   | "x_plus"
   | "taxi_plus"

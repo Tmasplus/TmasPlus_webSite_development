@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
+import { CITIES } from "@/config/constants";
 import type {
   SecondaryUser,
   UpdateUserInput,
@@ -128,11 +129,18 @@ export default function UserEditModal({ open, user, onClose, onSave }: Props) {
           </label>
           <label className="text-sm">
             <span className="text-slate-600">Ciudad</span>
-            <input
-              className="mt-1 w-full p-2 border border-slate-300 rounded-lg"
+            <select
+              className="mt-1 w-full p-2 border border-slate-300 rounded-lg bg-white"
               value={form.city || ""}
               onChange={handleChange("city")}
-            />
+            >
+              <option value="">Seleccionar ciudad...</option>
+              {CITIES.map((city) => (
+                <option key={city} value={city}>
+                  {city}
+                </option>
+              ))}
+            </select>
           </label>
 
           {error && (

@@ -3,7 +3,9 @@ import { Modal } from "@/components/ui/Modal";
 import { FloatingInput, FloatingSelect, Checkbox } from "@/components/ui/FloatingField";
 import { Button } from "@/components/ui/Button";
 import { classNames } from "@/utils/classNames";
-import { FaCarSide, FaShuttleVan, FaMotorcycle } from "react-icons/fa";
+import { FaCarSide, FaShuttleVan } from "react-icons/fa";
+import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { serviceTypeForCategory } from "@/utils/carTypeCatalog";
 
 type Props = {
   open: boolean;
@@ -13,9 +15,10 @@ type Props = {
 
 type ReservaTipo = "inmediato" | "programado";
 type RecorridoTipo = "solo_ida" | "ida_y_regreso" | "solo_ida_checkout";
-type VehiculoTipo = "auto" | "moto" | "van";
+type VehiculoTipo = string;
 
 export const AddBookingModal: React.FC<Props> = ({ open, onClose, onSubmit }) => {
+  const { activeCategories } = useCarTypeCatalog();
   const [form, setForm] = useState({
     usuarioId: "",
     vehiculo: "" as VehiculoTipo | "",
@@ -40,12 +43,12 @@ export const AddBookingModal: React.FC<Props> = ({ open, onClose, onSubmit }) =>
   }
 
   const vehiculos = useMemo(
-    () => ([
-      { id: "auto", icon: <FaCarSide />,  label: "Auto" },
-      { id: "moto", icon: <FaMotorcycle />, label: "Moto" },
-      { id: "van",  icon: <FaShuttleVan />, label: "Van" },
-    ] as const),
-    []
+    () => activeCategories.map((category) => ({
+      id: serviceTypeForCategory(category),
+      icon: category.name.toLowerCase().includes("van") ? <FaShuttleVan /> : <FaCarSide />,
+      label: category.name,
+    })),
+    [activeCategories]
   );
 
   return (

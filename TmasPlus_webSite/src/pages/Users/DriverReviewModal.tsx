@@ -7,12 +7,9 @@ import { toast } from '@/utils/toast';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
-import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
-import {
-    vehicleCategoryLabel,
-    VEHICLE_CATEGORY_OPTIONS,
-    carTypeLabelForServiceType,
-} from '@/utils/vehicleCategory';
+import { CITIES, DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
+import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
+import { activeCategoryOptions, categoryForValue, categoryNameForValue, legacyCategoryLabel } from '@/utils/carTypeCatalog';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
@@ -36,6 +33,8 @@ const SignedLink: React.FC<{ url?: string | null; label?: string; missingText?: 
     label = 'Ver Documento ↗',
     missingText = 'Falta',
 }) => {
+    const { categories: carTypes } = useCarTypeCatalog();
+    const categoryOptions = activeCategoryOptions(carTypes);
     const [secureUrl, setSecureUrl] = useState<string | null>(null);
 
     useEffect(() => {
@@ -311,7 +310,9 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 // así que mantenemos ambos en sincronía con la nueva categoría del
                 // vehículo. (La BD primaria no tiene car_type.)
                 if (carPayload?.service_type) {
-                    const catLabel = carTypeLabelForServiceType(carPayload.service_type);
+                    const catLabel =
+                        categoryForValue(carTypes, carPayload.service_type)?.name ||
+                        legacyCategoryLabel(carPayload.service_type);
                     if (catLabel) {
                         userPayload.car_type = catLabel;
                         (carPayload as any).features_car_type = catLabel;
@@ -342,6 +343,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                             email: driver.email,
                             authId: (driver as any).auth_id ?? null,
                             serviceType: carPayload.service_type,
+                            categoryName: categoryForValue(carTypes, carPayload.service_type)?.name,
                         });
                         if (!res.synced) {
                             toast.warning('Guardado en el panel. El conductor no está en la App: la categoría no se sincronizó allí.');
@@ -428,7 +430,18 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 
                                 <div>
                                     <span className="font-semibold text-slate-500 block">Ciudad:</span>
-                                    {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.city || ''} onChange={e => setEditForm({ ...editForm, city: e.target.value })} /> : <p>{d.city}</p>}
+                                    {isEditing ? (
+                                        <select
+                                            className="border p-1 rounded w-full mt-1 bg-white"
+                                            value={editForm.city || ''}
+                                            onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                                        >
+                                            <option value="">Seleccionar ciudad...</option>
+                                            {CITIES.map(city => (
+                                                <option key={city} value={city}>{city}</option>
+                                            ))}
+                                        </select>
+                                    ) : <p>{d.city}</p>}
                                 </div>
 
                                 {isCustomer && (
@@ -496,13 +509,13 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                                 onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, service_type: e.target.value } : { service_type: e.target.value } as any })}
                                             >
                                                 <option value="">Seleccionar</option>
-                                                {VEHICLE_CATEGORY_OPTIONS.map((opt) => (
+                                                {categoryOptions.map((opt) => (
                                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                                                 ))}
                                             </select>
                                         ) : (
                                             <span className="inline-flex items-center rounded-full px-2 py-0.5 mt-1 text-xs border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">
-                                                {vehicleCategoryLabel(d.vehicle.service_type)}
+                                                {categoryNameForValue(carTypes, d.vehicle.service_type)}
                                             </span>
                                         )}
                                     </div>

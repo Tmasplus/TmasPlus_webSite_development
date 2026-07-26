@@ -11,7 +11,8 @@ import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
 import { exportToCsv } from "@/utils/exportCsv";
 import { chunk } from "@/utils/chunk";
-import { vehicleCategoryLabel } from "@/utils/vehicleCategory";
+import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { categoryNameForValue } from "@/utils/carTypeCatalog";
 import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
   UsersSecondaryService,
@@ -89,6 +90,7 @@ function MembershipBadge({ status }: { status?: MembershipStatus | string }) {
 }
 
 export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
+  const { categories: carTypes } = useCarTypeCatalog();
   const isAppDriversMode = mode === "appDrivers";
   const pageTitle = isAppDriversMode
     ? "Conductores App"
@@ -485,7 +487,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       { header: "Teléfono", value: (u) => u.mobile || "" },
       { header: "Referidos", value: (u) => String(referralsFor(u)) },
       { header: "Ciudad", value: (u) => u.city || "" },
-      { header: "Categoría", value: (u) => (categoryFor(u) ? vehicleCategoryLabel(categoryFor(u)) : "") },
+      { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
       { header: "Tipo", value: (u) => u.user_type || "" },
       { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
       { header: "Estado", value: (u) => (u.blocked ? "No aprobado" : "Aprobado") },
@@ -661,7 +663,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                         <td className="px-3 py-3">
                           {categoryFor(u) ? (
                             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">
-                              {vehicleCategoryLabel(categoryFor(u))}
+                              {categoryNameForValue(carTypes, categoryFor(u))}
                             </span>
                           ) : (
                             <span className="text-slate-400 text-xs">—</span>

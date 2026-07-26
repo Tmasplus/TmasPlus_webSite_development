@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import { FileUpload } from '@/components/ui/FileUpload';
-import type { DriverRegistrationStep3, DriverServiceType, FuelType, TransmissionType } from '@/config/database.types';
+import type { DriverRegistrationStep3, FuelType, TransmissionType } from '@/config/database.types';
+import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
+import { activeCategoryOptions } from '@/utils/carTypeCatalog';
 
 interface Step3Props {
     data: Partial<DriverRegistrationStep3>;
@@ -13,6 +15,8 @@ interface Step3Props {
 
 export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onBack, loading = false }) => {
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const { categories: carTypes, loading: loadingCarTypes, error: carTypesError } = useCarTypeCatalog();
+    const categoryOptions = activeCategoryOptions(carTypes);
 
     const update = (key: keyof DriverRegistrationStep3, value: unknown) => {
         onChange({ ...data, [key]: value });
@@ -60,17 +64,13 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
             {/* Tipo de servicio */}
             <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Tipo de servicio <span className="text-red-500">*</span></label>
-                <div className="grid grid-cols-3 gap-2">
-                    {([
-                        { value: 'particular', label: '🚗 Particular' },
-                        { value: 'servicio_especial', label: '🏢 Servicio Especial' },
-                        { value: 'taxi_plus', label: '🚕 Taxi Plus' },
-                    ] as { value: DriverServiceType; label: string }[]).map((opt) => (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {categoryOptions.map((opt) => (
                         <button
                             key={opt.value}
                             type="button"
                             onClick={() => update('serviceType', opt.value)}
-                            disabled={loading}
+                            disabled={loading || loadingCarTypes}
                             className={`py-2.5 px-2 rounded-xl border text-xs font-medium transition-all ${data.serviceType === opt.value
                                 ? 'bg-[#002f45] text-white border-[#002f45]'
                                 : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
@@ -80,6 +80,7 @@ export const Step3Vehicle: React.FC<Step3Props> = ({ data, onChange, onNext, onB
                         </button>
                     ))}
                 </div>
+                {carTypesError && <p className="mt-1 text-xs text-red-500">No se pudo cargar el catálogo de categorías.</p>}
                 {errors.serviceType && <p className="mt-1 text-xs text-red-500">{errors.serviceType}</p>}
             </div>
 

@@ -55,6 +55,14 @@ export const APP_CONFIG = {
     DOCUMENT_TYPE_OPTIONS.map((o) => [o.value, o.label])
   );
 
+  // Fuente única para los selectores de ciudad de registro, creación y edición.
+  export const CITIES = [
+    'Bogotá', 'Medellín', 'Cali', 'Barranquilla', 'Cartagena',
+    'Cúcuta', 'Bucaramanga', 'Pereira', 'Santa Marta', 'Ibagué',
+    'Manizales', 'Pasto', 'Neiva', 'Villavicencio', 'Armenia',
+    'Valledupar', 'Montería', 'Sincelejo', 'Popayán', 'Tunja',
+  ] as const;
+
   /** Devuelve la etiqueta legible de un tipo de documento (p. ej. "ced" → "Cédula"). */
   export const getDocumentTypeLabel = (value?: string | null): string =>
     (value ? DOCUMENT_TYPE_LABELS[value] ?? value : '') as string;
@@ -77,4 +85,3 @@ export const APP_CONFIG = {
     DEFAULT_PAGE_SIZE: 20,
     MAX_PAGE_SIZE: 100,
   } as const;
-  
