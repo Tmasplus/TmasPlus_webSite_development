@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
 import {
   APIProvider,
   Map,
@@ -59,7 +59,7 @@ interface BookingMapViewProps {
   onRouteInfo?: (info: RouteInfo | null) => void;
 }
 
-export default function BookingMapView(props: BookingMapViewProps) {
+function BookingMapView(props: BookingMapViewProps) {
   if (!GOOGLE_MAPS_API_KEY) {
     return <MissingKeyNotice />;
   }
@@ -69,6 +69,13 @@ export default function BookingMapView(props: BookingMapViewProps) {
     </APIProvider>
   );
 }
+
+// Los campos controlados de AddBookingPage (especialmente observaciones)
+// renderizan de nuevo la página en cada tecla. Si ya hay un origen/destino, el
+// árbol de Google Maps contiene marcadores/InfoWindow y puede recuperar el foco
+// durante ese render. Las props del mapa solo cambian cuando cambia la ruta, así
+// que lo aislamos de actualizaciones ajenas al mapa.
+export default memo(BookingMapView);
 
 function BookingMapInner({
   origin,
