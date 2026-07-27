@@ -173,6 +173,8 @@ const DocumentManager: React.FC<{
 export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh
 }) => {
+    const { categories: carTypes } = useCarTypeCatalog();
+    const categoryOptions = activeCategoryOptions(carTypes);
     const dbClient: any = source === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
