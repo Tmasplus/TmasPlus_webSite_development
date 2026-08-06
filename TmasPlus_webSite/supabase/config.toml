@@ -531,3 +531,21 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/reconcile-referrals/deno.json"
 entrypoint = "./functions/reconcile-referrals/index.ts"
+
+[functions.sendPush]
+enabled = true
+# Solo se invoca internamente por otras Edge Functions (dispatcher, campañas)
+# con service_role. Nunca directo desde el móvil o el dashboard. verify_jwt=true
+# obliga a que el caller mande un JWT válido — la lógica interna comprueba
+# además que ese JWT sea exactamente el service_role.
+verify_jwt = true
+import_map = "./functions/sendPush/deno.json"
+entrypoint = "./functions/sendPush/index.ts"
+
+[functions.bookingWebhookDispatcher]
+enabled = true
+# Disparado por Database Webhook de la tabla bookings. El webhook manda
+# service_role en el header Authorization (configurado en el Panel Supabase).
+verify_jwt = true
+import_map = "./functions/bookingWebhookDispatcher/deno.json"
+entrypoint = "./functions/bookingWebhookDispatcher/index.ts"
