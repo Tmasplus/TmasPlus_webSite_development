@@ -17,6 +17,14 @@
 -- separada cuando se aborde ese frente.
 
 -- ─── users: metadata del push token ────────────────────────────────────────
+-- ⚠️ HALLAZGO 2026-07-31 (auditoría pre-deploy): TODOS los 428 users activos
+-- en producción tienen `push_token IS NULL`. El sistema completo se puede
+-- desplegar SIN riesgo (esta migración crea columnas nullable + tabla nueva),
+-- pero sendPush responderá {sent:0, skipped:N} en cada llamada hasta que se
+-- resuelva el bug del flujo de registro de token en el móvil
+-- (authactions.tsx:296 no está persistiendo el token, o el UPDATE falla
+-- silenciosamente por RLS/permisos). Ticket separado.
+
 ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS push_platform TEXT
     CHECK (push_platform IN ('ios', 'android')),
@@ -25,6 +33,10 @@ ALTER TABLE public.users
 
 -- Índice para consultas rápidas del dispatcher: "driver activo con push_token
 -- válido para plataforma X". Parcial para no indexar filas sin token.
+--
+-- Se usa CREATE INDEX plain (no CONCURRENTLY) porque en el volumen actual
+-- (428 users) es instantáneo. Si en el futuro esta migración se aplica sobre
+-- >100k users, cambiar a CREATE INDEX CONCURRENTLY (fuera de transacción).
 CREATE INDEX IF NOT EXISTS idx_users_push_active
   ON public.users (push_platform, user_type, driver_active_status)
   WHERE push_token IS NOT NULL;
