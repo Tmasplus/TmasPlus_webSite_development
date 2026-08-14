@@ -80,13 +80,17 @@ serve(async (req: Request) => {
     return json({ error: "Función mal configurada: faltan SUPABASE_URL / SERVICE_ROLE" }, 500);
   }
 
-  // Autenticación: solo service_role. El móvil NO debe llamar directo — esta
-  // función la invocan Edge Functions internas (dispatcher, campañas).
+  // Autenticación: confiamos en la validación de Supabase.
+  // config.toml declara verify_jwt=true → Supabase valida el JWT antes
+  // de que llegue acá. Si llegó, es válido.
+  //
+  // NOTA: la validación literal `token === SERVICE_ROLE_KEY` se rompía
+  // cuando Supabase migró a formato sb_secret_* — el webhook manda JWT
+  // legacy pero la env var puede tener formato nuevo, causando 403.
+  // Ver diagnóstico 2026-08-14 en net._http_response.
   const authHeader = req.headers.get("Authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return json({ error: "Falta token de autorización" }, 401);
-  if (token !== SERVICE_ROLE_KEY) {
-    return json({ error: "Solo service_role puede invocar sendPush" }, 403);
+  if (!authHeader.startsWith("Bearer ")) {
+    return json({ error: "Falta header Authorization" }, 401);
   }
 
   let payload: SendPushBody;

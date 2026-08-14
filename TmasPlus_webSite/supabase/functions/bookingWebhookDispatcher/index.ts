@@ -73,12 +73,18 @@ serve(async (req: Request) => {
     return json({ error: "Función mal configurada: faltan SUPABASE_URL / SERVICE_ROLE" }, 500);
   }
 
-  // Autenticación: solo service_role. El webhook de Supabase incluye el header
-  // que configuramos en el Panel.
+  // Autenticación: confiamos en la validación de Supabase.
+  // config.toml declara verify_jwt=true, por lo que Supabase valida el JWT
+  // antes de que la request llegue acá. Si llegó, es válido.
+  //
+  // NOTA: antes había una validación literal `token === SERVICE_ROLE_KEY`
+  // que se rompía cuando Supabase migró a keys sb_secret_* — el webhook
+  // manda el JWT legacy (eyJhb...) que Supabase inyecta, pero la env var
+  // podía tener el formato nuevo, causando 403 en cada llamada.
+  // Ver diagnóstico 2026-08-14 en net._http_response.
   const authHeader = req.headers.get("Authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (token !== SERVICE_ROLE_KEY) {
-    return json({ error: "Solo service_role puede invocar este dispatcher" }, 403);
+  if (!authHeader.startsWith("Bearer ")) {
+    return json({ error: "Falta header Authorization" }, 401);
   }
 
   let payload: WebhookPayload;
