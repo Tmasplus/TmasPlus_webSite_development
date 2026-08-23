@@ -20,7 +20,8 @@
 //
 //   INSERT booking con driver IS NULL, booking_type = 'reservation', status abierto
 //     → FAN-OUT a conductores elegibles (en línea + vehículo activo del mismo
-//       service_type): push "Nueva reserva programada" (canal driver-new-booking).
+//       service_type): push "Nueva reserva programada" (canal bookings-v2, suena
+//       firstoption.mp3 igual que las demás).
 //       Reemplaza el aviso LOCAL que hacía el polling del cliente (solo foreground).
 //
 //   UPDATE status: * → ACCEPTED       → customer: "Conductor asignado"
@@ -202,8 +203,11 @@ async function decidePayload(evt: WebhookPayload): Promise<PushPayload | null> {
         type: "booking-scheduled",
         bookingId: record.id,
       },
+      // Canal bookings-v2 → suena con firstoption.mp3 (sonido oficial), igual
+      // que el resto de notificaciones de reserva. En Android el sonido lo
+      // determina el canal, no el payload. Ver GetPushToken.ts (canal bookings-v2).
       sound: "default",
-      channelId: "driver-new-booking",
+      channelId: "bookings-v2",
     };
   }
 
