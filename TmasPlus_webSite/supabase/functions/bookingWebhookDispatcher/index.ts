@@ -10,8 +10,7 @@
 //   Method:   POST
 //   Headers:  Authorization: Bearer <SERVICE_ROLE>
 //
-// Eventos manejados (los 5 "simples" del entregable — el evento #3 "servicios
-// cerca del conductor" queda pendiente por complejidad geoespacial):
+// Eventos manejados:
 //
 //   INSERT booking con driver IS NOT NULL, booking_type = 'immediate'
 //     → driver: push "Nueva reserva" (canal new-service-loop, sonido horn)
@@ -19,19 +18,33 @@
 //   INSERT booking con driver IS NOT NULL, booking_type = 'reservation'
 //     → driver: push "Servicio programado" (canal bookings-v2, sonido default)
 //
+//   INSERT booking con driver IS NULL, booking_type = 'reservation', status abierto
+//     → FAN-OUT a conductores elegibles (en línea + vehículo activo del mismo
+//       service_type): push "Nueva reserva programada" (canal driver-new-booking).
+//       Reemplaza el aviso LOCAL que hacía el polling del cliente (solo foreground).
+//
 //   UPDATE status: * → ACCEPTED       → customer: "Conductor asignado"
 //   UPDATE status: * → ARRIVED        → customer: "Tu conductor llegó"
 //   UPDATE status: * → COMPLETE       → customer: "Servicio finalizado"
+//
+// Pendiente por complejidad geoespacial: "servicios inmediatos cerca del
+// conductor" (fan-out filtrado por distancia al pickup).
 //
 // Notas de idempotencia: Supabase puede reintentar webhooks si la respuesta
 // tarda. Si esto se vuelve un problema, agregar cheque contra
 // notification_events (event_type, booking_id) antes de reenviar.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const SEND_PUSH_URL = `${SUPABASE_URL}/functions/v1/sendPush`;
+
+// Cliente admin (service_role) — necesario para el fan-out de reservas nuevas:
+// hay que resolver qué conductores son elegibles (en línea + vehículo activo del
+// mismo service_type) antes de llamar a sendPush.
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -98,7 +111,7 @@ serve(async (req: Request) => {
     return json({ skipped: true, reason: "table not bookings" });
   }
 
-  const pushPayload = decidePayload(payload);
+  const pushPayload = await decidePayload(payload);
 
   if (!pushPayload) {
     return json({ skipped: true, reason: "no matching event" });
@@ -123,7 +136,7 @@ serve(async (req: Request) => {
   }
 });
 
-function decidePayload(evt: WebhookPayload): PushPayload | null {
+async function decidePayload(evt: WebhookPayload): Promise<PushPayload | null> {
   const record = evt.record;
   const oldRecord = evt.old_record ?? null;
 
@@ -158,6 +171,39 @@ function decidePayload(evt: WebhookPayload): PushPayload | null {
       },
       sound: "horn",
       channelId: "new-service-loop",
+    };
+  }
+
+  // ─── INSERT reserva SIN conductor → fan-out a conductores elegibles ─────
+  // Las reservas se crean PENDING y sin `driver` (pool abierto): el conductor
+  // las toma desde la pantalla de reservas. Antes, el aviso lo generaba el
+  // polling del cliente (notificación LOCAL), que solo corre con la app
+  // abierta → no llegaba en segundo plano. Aquí lo emitimos como push real
+  // (FCM) a todos los conductores en línea con vehículo activo del mismo tipo.
+  if (
+    evt.type === "INSERT" &&
+    !record.driver &&
+    record.booking_type === "reservation" &&
+    esEstadoAbierto(record.status)
+  ) {
+    const driverIds = await getEligibleDriverIds(record.car_type ?? null);
+    if (driverIds.length === 0) {
+      console.log(
+        "[bookingWebhookDispatcher] reserva nueva sin conductores elegibles",
+        { bookingId: record.id, car_type: record.car_type },
+      );
+      return null;
+    }
+    return {
+      user_ids: driverIds,
+      title: "📅 Nueva reserva programada",
+      body: buildDriverBody(record, "programado"),
+      data: {
+        type: "booking-scheduled",
+        bookingId: record.id,
+      },
+      sound: "default",
+      channelId: "driver-new-booking",
     };
   }
 
@@ -214,6 +260,57 @@ function decidePayload(evt: WebhookPayload): PushPayload | null {
   }
 
   return null;
+}
+
+// Estados en los que una reserva está "abierta" (aún sin conductor, disponible
+// para el pool). Coincide con el filtro del cliente (status=PENDING).
+function esEstadoAbierto(status: unknown): boolean {
+  const s = String(status ?? "").toUpperCase();
+  return s === "PENDING" || s === "NEW";
+}
+
+// Devuelve los users.id de conductores elegibles para una reserva del car_type
+// dado: en línea (driver_active_status=true) y con un vehículo activo cuyo
+// service_type coincide. NO filtra por push_token — de eso se encarga sendPush
+// (descarta y audita como 'skipped' los que no tengan token Expo válido).
+async function getEligibleDriverIds(carType: string | null): Promise<string[]> {
+  if (!carType || !String(carType).trim()) return [];
+
+  // 1. Vehículos activos del mismo service_type (case-insensitive).
+  const { data: cars, error: carsErr } = await admin
+    .from("cars")
+    .select("driver_id")
+    .eq("is_active", true)
+    .ilike("service_type", String(carType).trim());
+
+  if (carsErr) {
+    console.error("[bookingWebhookDispatcher] cars query failed:", carsErr);
+    return [];
+  }
+
+  const candidateIds = [
+    ...new Set(
+      (cars ?? [])
+        .map((c: { driver_id: string | null }) => c.driver_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (candidateIds.length === 0) return [];
+
+  // 2. De esos, los que sean conductores en línea.
+  const { data: drivers, error: driversErr } = await admin
+    .from("users")
+    .select("id")
+    .in("id", candidateIds)
+    .eq("user_type", "driver")
+    .eq("driver_active_status", true);
+
+  if (driversErr) {
+    console.error("[bookingWebhookDispatcher] drivers query failed:", driversErr);
+    return [];
+  }
+
+  return (drivers ?? []).map((d: { id: string }) => d.id);
 }
 
 function buildDriverBody(record: Record<string, any>, tipo: "inmediato" | "programado"): string {
