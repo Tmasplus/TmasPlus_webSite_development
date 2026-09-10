@@ -144,6 +144,112 @@ export function serviceTotal(
 }
 
 const sb = supabaseSecondary as any;
+const bookingV2 = supabase.schema('booking_v2') as any;
+
+function normalizeV2Booking(
+  booking: Record<string, any>,
+  customer?: Record<string, any>,
+  category?: Record<string, any>,
+  assignment?: Record<string, any>,
+  fare?: Record<string, any>
+): BookingRecord {
+  return {
+    ...booking,
+    customer_name: customer
+      ? [customer.first_name, customer.last_name].filter(Boolean).join(' ')
+      : null,
+    customer_email: customer?.email ?? null,
+    customer_contact: customer?.mobile ?? null,
+    driver_id: assignment?.driver_id ?? null,
+    driver_name: assignment?.driver_name_snapshot ?? null,
+    driver_contact: assignment?.driver_contact_snapshot ?? null,
+    car_id: assignment?.vehicle_id ?? null,
+    car_type_id: booking.requested_car_type_id ?? null,
+    car_type: category?.name ?? assignment?.car_type_name_snapshot ?? null,
+    car_model: assignment
+      ? [assignment.vehicle_make_snapshot, assignment.vehicle_model_snapshot].filter(Boolean).join(' ')
+      : null,
+    plate_number: assignment?.vehicle_plate_snapshot ?? null,
+    pickup_location: {
+      address: booking.pickup_address,
+      lat: booking.pickup_lat,
+      lng: booking.pickup_lng,
+    },
+    destination_location: {
+      address: booking.dropoff_address,
+      lat: booking.dropoff_lat,
+      lng: booking.dropoff_lng,
+    },
+    drop_address: booking.dropoff_address,
+    distance: fare?.estimated_distance_m != null ? Number(fare.estimated_distance_m) / 1000 : null,
+    duration: fare?.estimated_duration_s != null ? Math.round(Number(fare.estimated_duration_s) / 60) : null,
+    price: fare?.estimated_fare ?? null,
+    estimate: fare?.estimated_fare ?? null,
+    total_cost: fare?.final_fare ?? fare?.estimated_fare ?? null,
+    driver_share: fare?.driver_earnings ?? null,
+    convenience_fees: fare?.convenience_fee ?? null,
+    discount: fare?.discount_amount ?? null,
+    booking_date: booking.scheduled_at ?? booking.created_at,
+    cancellation_time: booking.cancelled_at ?? null,
+    cancelled_by: booking.cancelled_by_user_id ?? null,
+    reason: booking.cancellation_reason ?? null,
+    service_data_snapshots: [],
+    otp: null,
+    rating: null,
+    review: null,
+    driver_rating: null,
+    customer_rating: null,
+    customer_review: null,
+  } as BookingRecord;
+}
+
+async function loadV2Bookings(query?: string, limit = 1000): Promise<BookingRecord[]> {
+  let request = bookingV2
+    .from('bookings')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (query) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query);
+    request = isUuid ? request.or(`id.eq.${query},reference.eq.${query}`) : request.eq('reference', query);
+  }
+
+  const { data: rows, error } = await request;
+  if (error) throw new Error(error.message || 'Error al obtener reservas');
+  if (!rows?.length) return [];
+
+  const bookingIds = rows.map((row: any) => row.id);
+  const customerIds = [...new Set(rows.map((row: any) => row.customer_id).filter(Boolean))] as string[];
+  const categoryIds = [...new Set(rows.map((row: any) => row.requested_car_type_id).filter(Boolean))] as string[];
+
+  const [customersResult, categoriesResult, assignmentsResult, faresResult] = await Promise.all([
+    supabase.from('users').select('id, first_name, last_name, email, mobile').in('id', customerIds),
+    supabase.from('car_types').select('id, name').in('id', categoryIds),
+    bookingV2.from('booking_assignments').select('*').in('booking_id', bookingIds).order('assigned_at', { ascending: false }),
+    bookingV2.from('booking_fares').select('*').in('booking_id', bookingIds),
+  ]);
+
+  for (const result of [customersResult, categoriesResult, assignmentsResult, faresResult]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const customers = new Map((customersResult.data ?? []).map((row: any) => [row.id, row]));
+  const categories = new Map((categoriesResult.data ?? []).map((row: any) => [row.id, row]));
+  const assignments = new Map<string, any>();
+  for (const row of assignmentsResult.data ?? []) {
+    if (!assignments.has(row.booking_id)) assignments.set(row.booking_id, row);
+  }
+  const fares = new Map((faresResult.data ?? []).map((row: any) => [row.booking_id, row]));
+
+  return rows.map((row: any) => normalizeV2Booking(
+    row,
+    customers.get(row.customer_id),
+    categories.get(row.requested_car_type_id),
+    assignments.get(row.id),
+    fares.get(row.id)
+  ));
+}
 
 export interface CustomerLite {
   id: string;
@@ -196,17 +302,6 @@ export interface CreateBookingInput {
   reference?: string | null;
 }
 
-function buildReference(): string {
-  const now = new Date();
-  const stamp =
-    now.getFullYear().toString().slice(-2) +
-    String(now.getMonth() + 1).padStart(2, '0') +
-    String(now.getDate()).padStart(2, '0') +
-    '-' +
-    Math.floor(Math.random() * 9000 + 1000);
-  return `TMP-${stamp}`;
-}
-
 async function currentPrimaryAccessToken(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) throw new Error('No hay sesión activa');
@@ -244,46 +339,57 @@ export class BookingsService {
   static async getServiceSnapshots(bookingIds: string | string[]): Promise<ServiceSnapshot[]> {
     const ids = [...new Set((Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean))];
     if (!ids.length) return [];
-    const data = await invokeBookingFunction<{
-      success?: boolean;
-      snapshots?: unknown[];
-      error?: string;
-    }>('get-service-timeline', { bookingIds: ids });
-    if (!data?.success) {
-      throw new Error(data?.error || 'Error al obtener el histórico del servicio');
-    }
-    return (data.snapshots || [])
-      .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
-      .map((row, index) => normalizeSnapshot(row, String(row.booking_id || ''), index));
+    const [eventsResult, milestonesResult] = await Promise.all([
+      bookingV2.from('booking_status_events').select('*').in('booking_id', ids).order('occurred_at'),
+      bookingV2.from('booking_milestones').select('*').in('booking_id', ids).order('occurred_at'),
+    ]);
+    if (eventsResult.error) throw new Error(eventsResult.error.message);
+    if (milestonesResult.error) throw new Error(milestonesResult.error.message);
+
+    const timeline: ServiceSnapshot[] = [
+      ...(eventsResult.data ?? []).map((row: any) => ({
+        id: row.id,
+        booking_id: row.booking_id,
+        stage: row.to_status,
+        status: row.to_status,
+        captured_at: row.occurred_at,
+        latitude: null,
+        longitude: null,
+        address: null,
+        calculated_price: null,
+        distance: null,
+        duration: null,
+        data: { ...(row.metadata ?? {}), reason: row.reason, source: row.source },
+        raw: row,
+      })),
+      ...(milestonesResult.data ?? []).map((row: any) => ({
+        id: row.id,
+        booking_id: row.booking_id,
+        stage: row.milestone_type,
+        status: row.milestone_type,
+        captured_at: row.occurred_at,
+        latitude: snapshotNumber(row.location_lat),
+        longitude: snapshotNumber(row.location_lng),
+        address: null,
+        calculated_price: null,
+        distance: null,
+        duration: null,
+        data: row.metadata ?? {},
+        raw: row,
+      })),
+    ];
+    return timeline.sort((a, b) => a.captured_at.localeCompare(b.captured_at));
   }
 
   static async list(): Promise<BookingRecord[]> {
-    const data = await invokeBookingFunction<{
-      success?: boolean;
-      bookings?: BookingRecord[];
-      error?: string;
-    }>('list-bookings', {});
-
-    if (!data?.success) {
-      throw new Error(data?.error || 'Error al obtener reservas');
-    }
-    return data.bookings || [];
+    return loadV2Bookings();
   }
 
   static async findByReferenceOrId(query: string): Promise<BookingRecord | null> {
     const q = query.trim();
     if (!q) return null;
 
-    const data = await invokeBookingFunction<{
-      success?: boolean;
-      bookings?: BookingRecord[];
-      error?: string;
-    }>('list-bookings', { query: q, limit: 1 });
-
-    if (!data?.success) {
-      throw new Error(data?.error || 'Error al buscar la reserva');
-    }
-    return data.bookings?.[0] || null;
+    return (await loadV2Bookings(q, 1))[0] ?? null;
   }
 
   static async searchCustomers(
@@ -307,92 +413,42 @@ export class BookingsService {
   }
 
   static async create(input: CreateBookingInput): Promise<BookingRecord> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-    // El dashboard se autentica contra el proyecto PRIMARIO; su token no es
-    // válido para escribir en el secundario (se trata como anon y RLS lo
-    // rechaza). Por eso la inserción se hace vía Edge Function `create-booking`
-    // con service role, igual que update-user / set-user-blocked / delete-user.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const pickupLoc = {
-      lat: input.pickup.lat,
-      lng: input.pickup.lng,
-      address: input.pickup.address,
-    };
-    const dropLoc = {
-      lat: input.destination.lat,
-      lng: input.destination.lng,
-      address: input.destination.address,
-    };
-
-    const payload: any = {
-      customer_id: input.customer_id,
-      customer: input.customer_id,
-      customer_name: input.customer_name || null,
-      customer_email: input.customer_email || null,
-      customer_contact: input.customer_contact || '',
-      status: 'PENDING',
-      customer_status: 'SEARCHING',
-      pickup_location: pickupLoc,
-      destination_location: dropLoc,
-      drop_location: dropLoc,
-      pickup_address: input.pickup.address,
-      pickup_lat: input.pickup.lat,
-      pickup_lng: input.pickup.lng,
-      drop_address: input.destination.address,
-      drop_lat: input.destination.lat,
-      drop_lng: input.destination.lng,
-      distance: input.distance_km,
-      duration: input.duration_min,
-      car_type: input.car_type,
-      car_type_id: input.car_type_id || null,
-      trip_type: input.trip_type,
-      booking_type: input.booking_type,
-      booking_date: input.booking_date,
-      payment_mode: input.payment_mode,
-      price: input.total_cost,
-      estimate: input.estimate,
-      total_cost: input.total_cost,
-      // trip_cost = subtotal sin fee. Trigger calculate_total_cost suma fees al guardar:
-      //   NEW.total_cost = trip_cost + convenience_fees - discount
-      // Sin esta línea, trip_cost queda NULL→0 y el trigger pisa total_cost=fees solamente.
-      trip_cost: Math.max(0, (input.total_cost ?? 0) - (input.convenience_fees ?? 0) + (input.discount ?? 0)),
-      driver_share: input.driver_share ?? 0,
-      convenience_fees: input.convenience_fees ?? 0,
-      discount: input.discount ?? 0,
-      observations: input.observations || null,
-      reference: input.reference || buildReference(),
-      prepaid: false,
-      promo_applied: false,
-      customer_token: '',
-      requested_drivers: {},
-      driver_estimates: {},
-      waypoints: [],
-      otp_verified: false,
-      otp_timer_duration: 180,
-    };
-
-    const { data, error } = await sb.functions.invoke('create-booking', {
-      body: { booking: payload },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    if (!input.car_type_id) throw new Error('Selecciona una categoría válida');
+    const scheduled = input.booking_type === 'reservation';
+    const idempotencyKey = input.reference || `web-${crypto.randomUUID()}`;
+    const { data: bookingId, error } = await bookingV2.rpc('create_booking', {
+      p_idempotency_key: idempotencyKey,
+      p_customer_id: input.customer_id,
+      p_requested_car_type_id: input.car_type_id,
+      p_booking_type: scheduled ? 'SCHEDULED' : 'IMMEDIATE',
+      p_scheduled_at: scheduled ? input.booking_date : null,
+      p_request_expires_at: null,
+      p_pickup_address: input.pickup.address,
+      p_pickup_lat: input.pickup.lat,
+      p_pickup_lng: input.pickup.lng,
+      p_dropoff_address: input.destination.address,
+      p_dropoff_lat: input.destination.lat,
+      p_dropoff_lng: input.destination.lng,
+      p_waypoints: [],
+      p_observations: input.observations || null,
+      p_payment_mode: input.payment_mode,
+      p_estimated_distance_m: Math.round(input.distance_km * 1000),
+      p_estimated_duration_s: Math.round(input.duration_min * 60),
+      p_estimated_fare: input.total_cost,
+      p_tariff_snapshot: {
+        category_id: input.car_type_id,
+        category_name: input.car_type,
+        trip_type: input.trip_type,
+        estimate: input.estimate,
+        convenience_fee: input.convenience_fees ?? 0,
+        discount: input.discount ?? 0,
+        driver_share: input.driver_share ?? 0,
+      },
     });
-
-    if (error) {
-      let message = error.message || 'Error al crear reserva';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-    if (!data?.success || !data?.booking) {
-      throw new Error('No se pudo crear la reserva');
-    }
-    return data.booking as BookingRecord;
+    if (error) throw new Error(error.message || 'Error al crear reserva');
+    const created = await loadV2Bookings(String(bookingId), 1);
+    if (!created[0]) throw new Error('La reserva se creó, pero no se pudo recuperar');
+    return created[0];
   }
 
   static async listAssignableDrivers(query = ''): Promise<AssignableDriver[]> {
@@ -416,76 +472,45 @@ export class BookingsService {
     bookingId: string,
     driverId: string
   ): Promise<BookingRecord> {
-    const data = await invokeBookingFunction<{
-      success?: boolean;
-      booking?: BookingRecord;
-      error?: string;
-    }>('assign-booking-driver', {
-      action: 'assign',
-      bookingId,
-      driverId,
+    const drivers = await this.listAssignableDrivers();
+    const selected = drivers.find((driver) => driver.id === driverId);
+    if (!selected?.vehicle?.id) throw new Error('El conductor no tiene un vehículo activo elegible');
+    const { error } = await bookingV2.rpc('assign_booking', {
+      p_booking_id: bookingId,
+      p_driver_id: driverId,
+      p_vehicle_id: selected.vehicle.id,
+      p_assigned_by_user_id: null,
     });
-
-    if (!data?.success || !data?.booking) {
-      throw new Error(data?.error || 'No se pudo asignar el conductor');
-    }
-    return data.booking;
+    if (error) throw new Error(error.message || 'No se pudo asignar el conductor');
+    const booking = await this.findByReferenceOrId(bookingId);
+    if (!booking) throw new Error('La reserva asignada no se pudo recuperar');
+    return booking;
   }
 
   static async cancel(id: string, reason?: string): Promise<BookingRecord> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-    // El token del dashboard (proyecto primario) no es válido para escribir en
-    // el secundario, así que la cancelación va por Edge Function con service role.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('cancel-booking', {
-      body: { id, reason },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    const current = await this.findByReferenceOrId(id);
+    if (!current) throw new Error('Reserva no encontrada');
+    const { error } = await bookingV2.rpc('transition_booking_status', {
+      p_booking_id: id,
+      p_expected_status: current.status,
+      p_new_status: 'CANCELLED',
+      p_changed_by_user_id: null,
+      p_source: 'ADMIN',
+      p_reason: reason || 'Cancelada por administrador',
+      p_metadata: null,
+      p_location_lat: null,
+      p_location_lng: null,
+      p_accuracy_m: null,
+      p_cancellation_category: 'ADMIN_CANCELLED',
     });
-
-    if (error) {
-      let message = error.message || 'Error al cancelar reserva';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-    if (!data?.success || !data?.booking) {
-      throw new Error('No se pudo cancelar la reserva');
-    }
-    return data.booking as BookingRecord;
+    if (error) throw new Error(error.message || 'No se pudo cancelar la reserva');
+    const cancelled = await this.findByReferenceOrId(id);
+    if (!cancelled) throw new Error('La reserva cancelada no se pudo recuperar');
+    return cancelled;
   }
 
   static async delete(id: string): Promise<void> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-    // El token del dashboard (proyecto primario) no es válido para escribir en
-    // el secundario, así que la eliminación va por Edge Function con service role.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('delete-booking', {
-      body: { id },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al eliminar reserva';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-    if (!data?.success) {
-      throw new Error('No se pudo eliminar la reserva');
-    }
+    const { error } = await bookingV2.rpc('delete_booking', { p_booking_id: id });
+    if (error) throw new Error(error.message || 'No se pudo eliminar la reserva');
   }
 }

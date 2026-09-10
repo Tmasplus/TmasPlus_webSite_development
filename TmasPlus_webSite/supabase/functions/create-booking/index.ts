@@ -71,17 +71,12 @@ serve(async (req: Request) => {
     return json({ error: "La reserva debe incluir customer_id" }, 400);
   }
 
-  // 2b. OTP: cada reserva debe tener un código de seguridad desde su creación.
-  // La app del cliente ya genera y envía el OTP; las reservas creadas desde la
-  // web llegan sin él, así que lo generamos aquí (mismo formato de 5 dígitos que
-  // usa la app: 10000-99999, como string). Solo se genera si viene vacío, para
-  // no pisar el que ya mande otro cliente.
-  const otpValue = booking.otp;
-  const hasOtp =
-    otpValue !== undefined && otpValue !== null && String(otpValue).trim() !== "";
-  if (!hasOtp) {
-    booking.otp = String(Math.floor(Math.random() * 90000) + 10000);
-  }
+  // El OTP no pertenece a la creación de la reserva. La App lo genera al
+  // iniciar el servicio; dejarlo ausente evita adelantar el flujo y elimina la
+  // contradicción entre el código de 5 dígitos y la columna heredada varchar(4).
+  delete booking.otp;
+  delete booking.otp_generated_at;
+  delete booking.otp_verified_at;
 
   // 3. Insertar en el proyecto secundario con service role (ignora RLS)
   const admin = createClient(SECONDARY_URL, SECONDARY_SERVICE_ROLE, {

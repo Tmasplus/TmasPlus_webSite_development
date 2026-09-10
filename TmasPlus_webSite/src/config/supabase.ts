@@ -11,6 +11,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+const getSupabaseProjectRef = (url: string, fallback: string): string => {
+  try {
+    return new URL(url).hostname.split('.')[0] || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const primaryProjectRef = getSupabaseProjectRef(supabaseUrl, 'primary');
+
 // ==================== CONFIGURACIÓN DEL CLIENTE PRINCIPAL ====================
 const supabaseConfig = {
   auth: {
@@ -18,7 +28,7 @@ const supabaseConfig = {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storage: window.localStorage,
-    storageKey: 'tmasplus_dashboard_auth',
+    storageKey: `tmasplus_dashboard_auth_${primaryProjectRef}`,
   },
   global: {
     headers: {
@@ -39,6 +49,9 @@ export const supabase: SupabaseClient<Database> = createClient<Database>(
 // ==================== CLIENTE SECUNDARIO (MEMBERSHIPS DB) ====================
 const supabaseSecondaryUrl = import.meta.env.VITE_SUPABASE_SECONDARY_URL;
 const supabaseSecondaryAnonKey = import.meta.env.VITE_SUPABASE_SECONDARY_ANON_KEY;
+const secondaryProjectRef = supabaseSecondaryUrl
+  ? getSupabaseProjectRef(supabaseSecondaryUrl, 'secondary')
+  : 'secondary';
 
 if (!supabaseSecondaryUrl || !supabaseSecondaryAnonKey) {
   console.warn(
@@ -53,7 +66,7 @@ const supabaseSecondaryConfig = {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storage: window.localStorage,
-    storageKey: 'tmasplus_dashboard_auth_secondary',
+    storageKey: `tmasplus_dashboard_auth_secondary_${secondaryProjectRef}`,
   },
   global: {
     headers: {
