@@ -531,3 +531,8 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/reconcile-referrals/deno.json"
 entrypoint = "./functions/reconcile-referrals/index.ts"
+[functions.booking-v2-mass-push]
+enabled = true
+# Auth.getUser plus an approved admin RPC check inside the function; supports rotated signing keys.
+verify_jwt = false
+entrypoint = "./functions/booking-v2-mass-push/index.ts"

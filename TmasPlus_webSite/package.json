@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:v2:sql": "node scripts/prepare-booking-v2-test.mjs",
+    "test:v2:apply": "node scripts/prepare-booking-v2-test.mjs --apply"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.3.1",

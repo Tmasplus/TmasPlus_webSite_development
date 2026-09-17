@@ -292,6 +292,8 @@ export const Sidebar: React.FC<Props> = ({
             />
           )}
 
+          {isAdmin && <NavItem to="/vehicle-map" icon={<LuUserRound />} label="Mapa de vehículos" isOpen={open} />}
+
           {/* Logout */}
           <NavItem
             icon={<MdOutlineLogout />}

@@ -1,4 +1,4 @@
-import { supabase, supabaseSecondary } from '@/config/supabase';
+import { supabase } from '@/config/supabase';
 
 export type BookingStatus =
   | 'PENDING'
@@ -143,7 +143,7 @@ export function serviceTotal(
   return null;
 }
 
-const sb = supabaseSecondary as any;
+const sb = supabase as any;
 const bookingV2 = supabase.schema('booking_v2') as any;
 
 function normalizeV2Booking(
@@ -151,7 +151,8 @@ function normalizeV2Booking(
   customer?: Record<string, any>,
   category?: Record<string, any>,
   assignment?: Record<string, any>,
-  fare?: Record<string, any>
+  fare?: Record<string, any>,
+  details?: Record<string, any>
 ): BookingRecord {
   return {
     ...booking,
@@ -194,12 +195,12 @@ function normalizeV2Booking(
     cancelled_by: booking.cancelled_by_user_id ?? null,
     reason: booking.cancellation_reason ?? null,
     service_data_snapshots: [],
-    otp: null,
-    rating: null,
-    review: null,
-    driver_rating: null,
-    customer_rating: null,
-    customer_review: null,
+    otp: details?.otp ?? null,
+    rating: details?.rating ?? null,
+    review: details?.review ?? null,
+    driver_rating: details?.driver_rating ?? null,
+    customer_rating: details?.customer_rating ?? null,
+    customer_review: details?.customer_review ?? null,
   } as BookingRecord;
 }
 
@@ -223,14 +224,15 @@ async function loadV2Bookings(query?: string, limit = 1000): Promise<BookingReco
   const customerIds = [...new Set(rows.map((row: any) => row.customer_id).filter(Boolean))] as string[];
   const categoryIds = [...new Set(rows.map((row: any) => row.requested_car_type_id).filter(Boolean))] as string[];
 
-  const [customersResult, categoriesResult, assignmentsResult, faresResult] = await Promise.all([
+  const [customersResult, categoriesResult, assignmentsResult, faresResult, detailsResult] = await Promise.all([
     supabase.from('users').select('id, first_name, last_name, email, mobile').in('id', customerIds),
     supabase.from('car_types').select('id, name').in('id', categoryIds),
     bookingV2.from('booking_assignments').select('*').in('booking_id', bookingIds).order('assigned_at', { ascending: false }),
     bookingV2.from('booking_fares').select('*').in('booking_id', bookingIds),
+    sb.from('bookings_v2_mobile').select('id, otp, rating, review, driver_rating, customer_rating, customer_review').in('id', bookingIds),
   ]);
 
-  for (const result of [customersResult, categoriesResult, assignmentsResult, faresResult]) {
+  for (const result of [customersResult, categoriesResult, assignmentsResult, faresResult, detailsResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -241,13 +243,15 @@ async function loadV2Bookings(query?: string, limit = 1000): Promise<BookingReco
     if (!assignments.has(row.booking_id)) assignments.set(row.booking_id, row);
   }
   const fares = new Map((faresResult.data ?? []).map((row: any) => [row.booking_id, row]));
+  const details = new Map<string, any>((detailsResult.data ?? []).map((row: any) => [row.id, row]));
 
   return rows.map((row: any) => normalizeV2Booking(
     row,
     customers.get(row.customer_id),
     categories.get(row.requested_car_type_id),
     assignments.get(row.id),
-    fares.get(row.id)
+    fares.get(row.id),
+    details.get(row.id)
   ));
 }
 
@@ -300,39 +304,6 @@ export interface CreateBookingInput {
   discount?: number;
   observations?: string | null;
   reference?: string | null;
-}
-
-async function currentPrimaryAccessToken(): Promise<string> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('No hay sesión activa');
-  return session.access_token;
-}
-
-async function invokeBookingFunction<T>(
-  name: string,
-  body: Record<string, unknown>
-): Promise<T> {
-  if (!sb) throw new Error('Cliente secundario no configurado');
-
-  const token = await currentPrimaryAccessToken();
-  const { data, error } = await sb.functions.invoke(name, {
-    body,
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (error) {
-    let message = error.message || `Error al ejecutar ${name}`;
-    const ctx: any = (error as any).context;
-    if (ctx && typeof ctx.json === 'function') {
-      try {
-        const errBody = await ctx.json();
-        if (errBody?.error) message = errBody.error;
-      } catch { /* noop */ }
-    }
-    throw new Error(message);
-  }
-
-  return data as T;
 }
 
 export class BookingsService {
@@ -452,20 +423,9 @@ export class BookingsService {
   }
 
   static async listAssignableDrivers(query = ''): Promise<AssignableDriver[]> {
-    const data = await invokeBookingFunction<{
-      success?: boolean;
-      drivers?: AssignableDriver[];
-      eligibilityDiagnostic?: string;
-      error?: string;
-    }>('assign-booking-driver', { action: 'list-drivers', query });
-
-    if (!data?.success) {
-      throw new Error(data?.error || 'Error al obtener conductores');
-    }
-    if (!data.drivers?.length && data.eligibilityDiagnostic) {
-      throw new Error(data.eligibilityDiagnostic);
-    }
-    return data.drivers || [];
+    const { data, error } = await bookingV2.rpc('list_assignable_drivers', { p_query: query });
+    if (error) throw new Error(error.message || 'Error al obtener conductores');
+    return (data ?? []) as AssignableDriver[];
   }
 
   static async assignDriver(

@@ -21,6 +21,11 @@ const getSupabaseProjectRef = (url: string, fallback: string): string => {
 
 const primaryProjectRef = getSupabaseProjectRef(supabaseUrl, 'primary');
 
+// This branch is a test delivery, not a production rollout.
+if (primaryProjectRef !== 'lhqhdnjmewyipuwifzsl') {
+  throw new Error('La rama booking_v2 requiere la base Prueba. Revisa .env.local antes de iniciar.');
+}
+
 // ==================== CONFIGURACIÓN DEL CLIENTE PRINCIPAL ====================
 const supabaseConfig = {
   auth: {
@@ -52,6 +57,10 @@ const supabaseSecondaryAnonKey = import.meta.env.VITE_SUPABASE_SECONDARY_ANON_KE
 const secondaryProjectRef = supabaseSecondaryUrl
   ? getSupabaseProjectRef(supabaseSecondaryUrl, 'secondary')
   : 'secondary';
+
+if (supabaseSecondaryUrl && secondaryProjectRef !== primaryProjectRef) {
+  throw new Error('Las dos conexiones de esta entrega deben apuntar a Prueba.');
+}
 
 if (!supabaseSecondaryUrl || !supabaseSecondaryAnonKey) {
   console.warn(

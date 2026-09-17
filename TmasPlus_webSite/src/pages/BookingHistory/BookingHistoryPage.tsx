@@ -9,24 +9,23 @@ import {
   type AssignableDriver,
   type BookingRecord,
 } from "@/services/bookings.service";
-import { supabaseSecondary } from "@/config/supabase";
+import { supabase } from "@/config/supabase";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
 import { categoryForValue, categoryNameForValue } from "@/utils/carTypeCatalog";
 
 const STATUSES = [
   "TODOS",
-  "NEW",
   "PENDING",
   "ACCEPTED",
-  "ARRIVED",
+  "ARRIVED_PICKUP",
   "STARTED",
-  "REACHED",
-  "COMPLETE",
+  "ARRIVED_DESTINATION",
+  "COMPLETED",
   "PAID",
   "CANCELLED",
 ];
 
-const TERMINAL_STATUSES = ["COMPLETE", "PAID", "CANCELLED"];
+const TERMINAL_STATUSES = ["COMPLETED", "PAID", "CANCELLED"];
 
 function getBookingDriverId(booking: BookingRecord): string | null {
   return booking.driver_id || (booking as any).driver || null;
@@ -52,13 +51,13 @@ function formatMoney(v: string | number | null | undefined) {
 
 function statusBadgeClass(status: string) {
   const s = (status || "").toUpperCase();
-  if (s === "COMPLETE" || s === "PAID")
+  if (s === "COMPLETED" || s === "PAID")
     return "bg-green-100 text-green-800";
   if (s === "CANCELLED")
     return "bg-rose-100 text-rose-800";
   if (s === "NEW" || s === "PENDING")
     return "bg-yellow-100 text-yellow-800";
-  if (s === "ACCEPTED" || s === "STARTED" || s === "ARRIVED" || s === "REACHED")
+  if (s === "ACCEPTED" || s === "STARTED" || s === "ARRIVED_PICKUP" || s === "ARRIVED_DESTINATION")
     return "bg-sky-100 text-sky-800";
   return "bg-slate-200 text-slate-700";
 }
@@ -107,6 +106,12 @@ export default function BookingHistoryPage() {
       const data = await BookingsService.list();
       if (!isMountedRef.current) return;
       setBookings(data);
+      const selectedId = selectedBookingRef.current?.id;
+      if (selectedId) {
+        const refreshed = data.find((booking) => booking.id === selectedId) ?? null;
+        setSelectedBooking(refreshed);
+        if (!refreshed) setOpenModal(false);
+      }
       setLastUpdate(new Date());
     } catch (e: any) {
       if (!isMountedRef.current) return;
@@ -121,39 +126,19 @@ export default function BookingHistoryPage() {
     isMountedRef.current = true;
     loadBookings();
 
-    // Realtime: suscripción a cambios en la tabla bookings
-    let channel: ReturnType<typeof supabaseSecondary.channel> | null = null;
-    if (supabaseSecondary) {
-      channel = supabaseSecondary
+    // Reload the normalized v2 record; realtime carries the mobile projection.
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    if (supabase) {
+      channel = supabase
         .channel("bookings-history-realtime")
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "bookings" },
-          (payload: any) => {
+          { event: "*", schema: "booking_v2", table: "mobile_bookings" },
+          () => {
             if (!isMountedRef.current) return;
-            setLastUpdate(new Date());
-            const { eventType, new: newRow, old: oldRow } = payload;
-            if (eventType === "INSERT" && newRow) {
-              setBookings((prev) => {
-                if (prev.some((b) => b.id === newRow.id)) return prev;
-                return [newRow as BookingRecord, ...prev];
-              });
-            } else if (eventType === "UPDATE" && newRow) {
-              setBookings((prev) =>
-                prev.map((b) => (b.id === newRow.id ? { ...b, ...newRow } : b))
-              );
-              if (selectedBookingRef.current?.id === newRow.id) {
-                setSelectedBooking((prev) =>
-                  prev ? { ...prev, ...newRow } : prev
-                );
-              }
-            } else if (eventType === "DELETE" && oldRow) {
-              setBookings((prev) => prev.filter((b) => b.id !== oldRow.id));
-              if (selectedBookingRef.current?.id === oldRow.id) {
-                setSelectedBooking(null);
-                setOpenModal(false);
-              }
-            }
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(() => void loadBookings(true), 200);
           }
         )
         .subscribe((status: string) => {
@@ -178,8 +163,9 @@ export default function BookingHistoryPage() {
     return () => {
       isMountedRef.current = false;
       window.clearInterval(pollId);
-      if (channel && supabaseSecondary) {
-        supabaseSecondary.removeChannel(channel);
+      clearTimeout(refreshTimer);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
       }
     };
   }, []);
