@@ -1,5 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from './database.types';
+// Tipos generados del esquema CONSOLIDADO (aplicacioncore). Los servicios aún
+// no migrados que importan tipos del viejo database.types.ts mostrarán errores
+// de tipo (no bloquean en dev) hasta que se reescriban.
+import type { Database } from './database.new.types';
 
 // ==================== VALIDACIÓN DE VARIABLES DE ENTORNO ====================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -21,9 +24,12 @@ const getSupabaseProjectRef = (url: string, fallback: string): string => {
 
 const primaryProjectRef = getSupabaseProjectRef(supabaseUrl, 'primary');
 
-// This branch is a test delivery, not a production rollout.
-if (primaryProjectRef !== 'lhqhdnjmewyipuwifzsl') {
-  throw new Error('La rama booking_v2 requiere la base Prueba. Revisa .env.local antes de iniciar.');
+// Rama de prueba de la base consolidada: debe apuntar a aplicacioncore.
+const EXPECTED_PROJECT_REF = 'zvplcamcyldcquxqnftb';
+if (primaryProjectRef !== EXPECTED_PROJECT_REF) {
+  throw new Error(
+    `Esta rama requiere la base consolidada (aplicacioncore). Revisa VITE_SUPABASE_URL en .env.local — se esperaba el proyecto ${EXPECTED_PROJECT_REF}.`
+  );
 }
 
 // ==================== CONFIGURACIÓN DEL CLIENTE PRINCIPAL ====================
@@ -51,48 +57,12 @@ export const supabase: SupabaseClient<Database> = createClient<Database>(
   supabaseConfig
 );
 
-// ==================== CLIENTE SECUNDARIO (MEMBERSHIPS DB) ====================
-const supabaseSecondaryUrl = import.meta.env.VITE_SUPABASE_SECONDARY_URL;
-const supabaseSecondaryAnonKey = import.meta.env.VITE_SUPABASE_SECONDARY_ANON_KEY;
-const secondaryProjectRef = supabaseSecondaryUrl
-  ? getSupabaseProjectRef(supabaseSecondaryUrl, 'secondary')
-  : 'secondary';
-
-if (supabaseSecondaryUrl && secondaryProjectRef !== primaryProjectRef) {
-  throw new Error('Las dos conexiones de esta entrega deben apuntar a Prueba.');
-}
-
-if (!supabaseSecondaryUrl || !supabaseSecondaryAnonKey) {
-  console.warn(
-    '⚠️ WARNING: Supabase secondary credentials not found. Memberships feature will not work.'
-  );
-}
-
-// Separate config for secondary client with unique storage key to avoid conflicts
-const supabaseSecondaryConfig = {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: window.localStorage,
-    storageKey: `tmasplus_dashboard_auth_secondary_${secondaryProjectRef}`,
-  },
-  global: {
-    headers: {
-      'X-Client-Info': `TmasPlus-Dashboard@${import.meta.env.VITE_APP_VERSION || '1.0.0'}`,
-      'X-App-Platform': 'web-dashboard',
-      'X-App-Environment': import.meta.env.VITE_NODE_ENV || 'development',
-    },
-  },
-};
-
-export const supabaseSecondary: SupabaseClient = supabaseSecondaryUrl && supabaseSecondaryAnonKey
-  ? createClient(
-      supabaseSecondaryUrl,
-      supabaseSecondaryAnonKey,
-      supabaseSecondaryConfig
-    )
-  : null as any;
+// ==================== CLIENTE SECUNDARIO (OBSOLETO) ====================
+// Tras la consolidación NO hay base secundaria: memberships, complaints, etc.
+// viven en el mismo proyecto. `supabaseSecondary` queda como ALIAS del cliente
+// único para que los servicios que aún lo importan sigan funcionando; se
+// eliminará cuando esos servicios se migren al esquema nuevo.
+export const supabaseSecondary: SupabaseClient = supabase;
 
 // ==================== FUNCIONES DE UTILIDAD ====================
 
@@ -104,16 +74,15 @@ export const testConnection = async (): Promise<{
   error?: string;
 }> => {
   try {
+    // Esquema consolidado: `users` ya no existe; se valida contra `persona`.
     const { error } = await supabase
-      .from('users')
-      .select('count', { count: 'exact', head: true })
-      .limit(1);
+      .from('persona')
+      .select('*', { count: 'exact', head: true });
 
-    if (error) {
-      return { isConnected: false, error: error.message };
-    }
-
-    return { isConnected: true };
+    // Si llegamos aquí (sin throw), el servidor RESPONDIÓ → hay conexión.
+    // Un `error` aquí (p.ej. 401 por RLS en petición anónima) NO es desconexión;
+    // solo un fallo de red (catch) lo es.
+    return { isConnected: true, error: error?.message };
   } catch (error) {
     return {
       isConnected: false,
@@ -164,17 +133,8 @@ export const STORAGE_BUCKETS = {
   BOOKINGS: import.meta.env.VITE_STORAGE_BUCKET_BOOKINGS || 'booking-media',
 } as const;
 
-// ==================== LOG DE CONEXIÓN (SOLO DESARROLLO) ====================
-if (import.meta.env.DEV) {
-  testConnection().then(({ isConnected, error }) => {
-    console.log('=== SUPABASE CONNECTION STATUS ===');
-    console.log('URL:', supabaseUrl);
-    console.log('Status:', isConnected ? '✅ CONNECTED' : '❌ FAILED');
-    if (error) {
-      console.error('Error:', error);
-    }
-    console.log('===================================');
-  });
-}
+// Nota: la prueba automática de conexión se retiró porque corría como anónima y
+// generaba un 401 (RLS) cosmético en consola. testConnection() sigue disponible
+// para invocarse manualmente si se necesita.
 
 export default supabase;

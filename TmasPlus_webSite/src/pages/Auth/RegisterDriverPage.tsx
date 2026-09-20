@@ -63,17 +63,17 @@ export const RegisterDriverPage: React.FC = () => {
     // LA MAGIA: Interceptar conductores a medias
     useEffect(() => {
         // Si el usuario ya está logueado, es un conductor y NO está aprobado...
-        if (isAuthenticated && profile && profile.user_type === 'driver' && !profile.approved) {
-            
+        if (isAuthenticated && profile && profile.es_conductor && !profile.aprobado) {
+
             // 1. Rellenamos el estado del Paso 1 con los datos que ya tenemos en la BD
             setStep1(prev => ({
                 ...prev,
-                first_name: profile.first_name,
-                last_name: profile.last_name,
-                email: profile.email,
-                mobile: profile.mobile ?? undefined,
-                city: profile.city ?? undefined,
-                referral_code: profile.referral_id ?? undefined
+                first_name: profile.nombre ?? '',
+                last_name: profile.apellido ?? '',
+                email: profile.email ?? '',
+                mobile: profile.telefono ?? undefined,
+                city: profile.ciudad ?? undefined,
+                referral_code: profile.codigo_referido_usado ?? undefined
             }));
 
             // 2. Forzamos el salto automático al Paso 2 (Documentos)
@@ -86,8 +86,8 @@ export const RegisterDriverPage: React.FC = () => {
     // NUEVO: EL DISPARADOR SILENCIOSO DEL SEGUNDO CORREO (INSTRUCCIONES / RESCATE)
     useEffect(() => {
         // Si el usuario acaba de iniciar sesión, es un conductor y aún no está aprobado (Paso 2, 3 o 4)
-        if (isAuthenticated && profile && profile.user_type === 'driver' && !profile.approved) {
-            
+        if (isAuthenticated && profile && profile.es_conductor && !profile.aprobado) {
+
             // Usamos localStorage para asegurar que este correo se envíe UNA SOLA VEZ por dispositivo
             const rescueEmailFlag = `rescue_email_sent_${profile.email}`;
             const hasBeenSent = localStorage.getItem(rescueEmailFlag);
