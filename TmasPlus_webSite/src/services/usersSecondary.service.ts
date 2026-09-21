@@ -90,52 +90,23 @@ export class UsersSecondaryService {
     id: string,
     input: UpdateUserInput
   ): Promise<SecondaryUser> {
-    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
-    // se trata como anon en el proyecto secundario: un UPDATE directo no afecta
-    // filas y PostgREST no devuelve error (antes el cambio "se guardaba" pero no
-    // persistía). Por eso, igual que toggleBlock/setApproved/delete, la
-    // actualización se hace vía Edge Function con service role.
     const { user } = await this.updateViaFunction(id, { ...input });
     if (!user) throw new Error('No se pudo actualizar el usuario');
     return user;
   }
 
-  /**
-   * Actualiza la fila de `users` (y opcionalmente su `cars`) en la BD secundaria
-   * mediante la Edge Function `update-user` (service role). Devuelve las filas
-   * realmente guardadas para reflejarlas en la UI.
-   */
+  /** Updates profile and vehicle atomically in the consolidated test database. */
   static async updateViaFunction(
     id: string,
     userFields: Record<string, any>,
     car?: { id: string } & Record<string, any>,
   ): Promise<{ user: SecondaryUser | null; car: any | null }> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('update-user', {
-      body: { id, user: userFields, car },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    const { data, error } = await sb.schema('booking_v2').rpc('admin_update_profile', {
+      p_id: id, p_user: userFields, p_car: car ?? null,
     });
-
-    if (error) {
-      let message = error.message || 'Error al actualizar usuario';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const body = await ctx.json();
-          if (body?.error) message = body.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.success) {
-      throw new Error('No se pudo actualizar el usuario');
-    }
-    return { user: (data.user as SecondaryUser) ?? null, car: data.car ?? null };
+    if (error) throw new Error(error.message || 'Error al actualizar usuario');
+    if (!data?.user) throw new Error('No se pudo actualizar el usuario');
+    return data;
   }
 
   /**
@@ -213,76 +184,14 @@ export class UsersSecondaryService {
     return { synced: true, reason: car ? undefined : 'sin-vehiculo-en-app' };
   }
 
-  static async toggleBlock(
-    id: string,
-    blocked: boolean
-  ): Promise<SecondaryUser> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
-    // no es válido para escribir en el proyecto secundario (se trata como anon y
-    // el UPDATE no afecta filas -> 406). Por eso el bloqueo se hace vía Edge
-    // Function con service role, igual que delete-user.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('set-user-blocked', {
-      body: { id, blocked },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al cambiar el estado del usuario';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.user) {
-      throw new Error('No se pudo cambiar el estado del usuario');
-    }
-    return data.user as SecondaryUser;
+  static async toggleBlock(id: string, blocked: boolean): Promise<SecondaryUser> {
+    const { user } = await this.updateViaFunction(id, { blocked });
+    return user!;
   }
 
-  static async setApproved(
-    id: string,
-    approved: boolean
-  ): Promise<SecondaryUser> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    // Igual que toggleBlock: el dashboard se autentica contra el proyecto
-    // PRIMARIO, por lo que su token se trata como anon en el proyecto secundario
-    // y el UPDATE directo no afecta filas (406). La aprobación/rechazo se hace
-    // vía Edge Function con service role.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('set-user-approved', {
-      body: { id, approved },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al cambiar el estado de aprobación';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.user) {
-      throw new Error('No se pudo cambiar el estado de aprobación del usuario');
-    }
-    return data.user as SecondaryUser;
+  static async setApproved(id: string, approved: boolean): Promise<SecondaryUser> {
+    const { user } = await this.updateViaFunction(id, { approved, blocked: !approved });
+    return user!;
   }
 
   static async delete(id: string): Promise<void> {
@@ -500,8 +409,8 @@ export class UsersSecondaryService {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    const { data, error } = await sb.functions.invoke('create-driver', {
-      body: input,
+    const { data, error } = await sb.functions.invoke('booking-v2-create-user', {
+      body: { ...input, user_type: 'driver' },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
 
@@ -522,6 +431,8 @@ export class UsersSecondaryService {
   }
 
   static async createCustomerWithAuth(input: {
+    user_type?: 'customer' | 'company';
+    company_name?: string;
     email: string;
     password: string;
     first_name: string;
@@ -537,8 +448,8 @@ export class UsersSecondaryService {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    const { data, error } = await sb.functions.invoke('create-customer', {
-      body: input,
+    const { data, error } = await sb.functions.invoke('booking-v2-create-user', {
+      body: { ...input, user_type: input.user_type ?? 'customer' },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
 

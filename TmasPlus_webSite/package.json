@@ -8,8 +8,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:v2:sql": "node scripts/prepare-booking-v2-test.mjs",
-    "test:v2:apply": "node scripts/prepare-booking-v2-test.mjs --apply"
+    "test:v2:sql": "node scripts/prepare-booking-v2-core-integration.mjs",
+    "test:v2:onboarding": "node --test scripts/test-booking-v2-onboarding.mjs",
+    "test:v2:apply": "node scripts/prepare-booking-v2-core-integration.mjs --apply",
+    "test:v2:legacy:sql": "node scripts/prepare-booking-v2-test.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.3.1",

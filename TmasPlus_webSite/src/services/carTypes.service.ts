@@ -2,12 +2,13 @@ import { supabaseSecondary } from '@/config/supabase';
 import type { CarTypeRow, CarTypeInsert, CarTypeUpdate } from '@/config/database.types';
 
 const sb = supabaseSecondary as any;
-const TABLE = 'car_types' as const;
+const catalog = sb.schema('booking_v2');
+const TABLE = 'core_car_types' as const;
 
 export class CarTypesService {
   /** Obtener todas las categorías activas */
   static async getAll(): Promise<CarTypeRow[]> {
-    const { data, error } = await sb
+    const { data, error } = await catalog
       .from(TABLE)
       .select('*')
       .order('name', { ascending: true });
@@ -18,7 +19,7 @@ export class CarTypesService {
 
   /** Obtener solo las activas (para selects) */
   static async getActive(): Promise<CarTypeRow[]> {
-    const { data, error } = await sb
+    const { data, error } = await catalog
       .from(TABLE)
       .select('*')
       .eq('is_active', true)
@@ -30,7 +31,7 @@ export class CarTypesService {
 
   /** Obtener una categoría por ID */
   static async getById(id: string): Promise<CarTypeRow | null> {
-    const { data, error } = await sb
+    const { data, error } = await catalog
       .from(TABLE)
       .select('*')
       .eq('id', id)
@@ -42,7 +43,7 @@ export class CarTypesService {
 
   /** Crear nueva categoría */
   static async create(payload: CarTypeInsert): Promise<CarTypeRow> {
-    const { data, error } = await sb
+    const { data, error } = await catalog
       .from(TABLE)
       .insert(payload)
       .select()
@@ -54,7 +55,7 @@ export class CarTypesService {
 
   /** Actualizar categoría existente */
   static async update(id: string, payload: CarTypeUpdate): Promise<CarTypeRow> {
-    const { data, error } = await sb
+    const { data, error } = await catalog
       .from(TABLE)
       .update({ ...payload, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -67,7 +68,7 @@ export class CarTypesService {
 
   /** Desactivar (soft-delete) */
   static async deactivate(id: string): Promise<void> {
-    const { error } = await sb
+    const { error } = await catalog
       .from(TABLE)
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', id);
@@ -77,7 +78,7 @@ export class CarTypesService {
 
   /** Eliminar permanentemente */
   static async remove(id: string): Promise<void> {
-    const { error } = await sb
+    const { error } = await catalog
       .from(TABLE)
       .delete()
       .eq('id', id);

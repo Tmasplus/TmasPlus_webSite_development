@@ -225,8 +225,8 @@ async function loadV2Bookings(query?: string, limit = 1000): Promise<BookingReco
   const categoryIds = [...new Set(rows.map((row: any) => row.requested_car_type_id).filter(Boolean))] as string[];
 
   const [customersResult, categoriesResult, assignmentsResult, faresResult, detailsResult] = await Promise.all([
-    supabase.from('users').select('id, first_name, last_name, email, mobile').in('id', customerIds),
-    supabase.from('car_types').select('id, name').in('id', categoryIds),
+    bookingV2.from('core_users').select('id, first_name, last_name, email, mobile').in('id', customerIds),
+    bookingV2.from('core_car_types').select('id, name').in('id', categoryIds),
     bookingV2.from('booking_assignments').select('*').in('booking_id', bookingIds).order('assigned_at', { ascending: false }),
     bookingV2.from('booking_fares').select('*').in('booking_id', bookingIds),
     sb.from('bookings_v2_mobile').select('id, otp, rating, review, driver_rating, customer_rating, customer_review').in('id', bookingIds),
@@ -371,8 +371,8 @@ export class BookingsService {
     const q = query.trim();
     if (!q) return [];
     const term = `%${q}%`;
-    const { data, error } = await sb
-      .from('users')
+    const { data, error } = await bookingV2
+      .from('core_users')
       .select('id, first_name, last_name, email, mobile')
       .or(
         `first_name.ilike.${term},last_name.ilike.${term},email.ilike.${term},mobile.ilike.${term}`

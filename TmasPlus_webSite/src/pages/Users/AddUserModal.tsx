@@ -3,7 +3,6 @@ import { Modal } from "@/components/ui/Modal";
 import { FloatingInput, FloatingSelect, Checkbox } from "@/components/ui/FloatingField";
 import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
-import { RegistrationService } from "@/services/registration.service";
 import { UsersSecondaryService } from "@/services/usersSecondary.service";
 import { supabaseSecondary } from "@/config/supabase";
 import { toast } from "@/utils/toast";
@@ -389,8 +388,10 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
     setSubmitError(null);
     const mappedType = USER_TYPE_MAP[type];
     try {
-      if (mappedType === 'customer') {
+      if (mappedType === 'customer' || mappedType === 'company') {
         const created = await UsersSecondaryService.createCustomerWithAuth({
+          user_type: mappedType,
+          company_name: mappedType === 'company' ? form.razonSocial : undefined,
           email: form.email,
           password: form.password,
           first_name: form.nombre,
@@ -398,7 +399,7 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
           mobile: form.telefono || null,
           city: form.ciudad || null,
           document_type: form.tipoDocumento || null,
-          document_number: form.nroDocumento || null,
+          document_number: (mappedType === 'company' ? form.nit : form.nroDocumento) || null,
           referral_id: form.referralId || null,
         });
 
@@ -412,14 +413,14 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
             );
           } catch (docErr: any) {
             const msg = docErr?.message || "error desconocido";
-            setSubmitError(`Cliente creado, pero falló la subida de documentos: ${msg}`);
-            toast.warning(`Cliente creado. Documentos no se subieron: ${msg}`);
+            toast.warning(`Usuario creado. Complete los documentos desde su edición: ${msg}`);
             onSubmit(created);
+            onClose();
             return;
           }
         }
 
-        toast.success(`Cliente ${form.nombre} ${form.apellido} creado correctamente.`);
+        toast.success(`${mappedType === 'company' ? 'Empresa' : 'Cliente'} ${form.nombre} ${form.apellido} creado correctamente.`);
         onSubmit(created);
         onClose();
         return;
@@ -454,9 +455,9 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
             );
           } catch (docErr: any) {
             const msg = docErr?.message || "error desconocido";
-            setSubmitError(`Conductor creado, pero falló la subida de documentos: ${msg}`);
-            toast.warning(`Conductor creado. Documentos no se subieron: ${msg}`);
+            toast.warning(`Conductor creado. Complete los documentos desde su edición: ${msg}`);
             onSubmit(created);
+            onClose();
             return;
           }
         }
@@ -467,52 +468,6 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
         return;
       }
 
-      const created = await RegistrationService.register({
-        user_type: mappedType,
-        first_name: form.nombre,
-        last_name: form.apellido,
-        email: form.email,
-        city: form.ciudad,
-        document_type: form.tipoDocumento,
-        document_number: form.nroDocumento,
-        referral_id: form.referralId,
-        mobile: form.telefono,
-        bank_number: form.daviplata,
-        vehicle_type: form.tipoVehiculo,
-        vehicle_placa: form.placa,
-        vehicle_model: form.anioVehiculo,
-        password: form.password,
-
-        documents: uploadedDocs,
-      } as any);
-
-      // Replicar en la BD secundaria reutilizando el id del registro principal.
-      try {
-        await UsersSecondaryService.create({
-          id: created.id,
-          auth_id: created.auth_id ?? null,
-          first_name: created.first_name ?? form.nombre,
-          last_name: created.last_name ?? form.apellido,
-          email: created.email ?? form.email,
-          mobile: created.mobile ?? form.telefono,
-          user_type: created.user_type ?? mappedType,
-          city: created.city ?? form.ciudad,
-          referral_id: created.referral_id ?? form.referralId ?? null,
-          document_type: form.tipoDocumento || null,
-          document_number: form.nroDocumento || null,
-        });
-      } catch (secondaryErr: any) {
-        setSubmitError(
-          `Usuario creado en BD principal, pero falló la réplica en BD secundaria: ${
-            secondaryErr?.message || "error desconocido"
-          }`
-        );
-        onSubmit(created);
-        return;
-      }
-
-      onSubmit(created);
-      onClose();
     } catch (err: any) {
       const msg = err?.message || "Error al crear el usuario";
       setSubmitError(msg);

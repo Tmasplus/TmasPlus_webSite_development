@@ -174,28 +174,24 @@ export class DriversService {
     data: DriverRegistrationStep3
   ): Promise<{ carId: string }> {
     try {
-      // Validar placa única
-      const plateExists = await CarsService.plateExists(data.vehicle.plate);
-      if (plateExists) {
-        throw ErrorHandler.createError(
-          AppErrorType.VALIDATION,
-          'La placa ya está registrada',
-          `Plate: ${data.vehicle.plate}`
-        );
-      }
-
-      // Crear vehículo
-      const car = await CarsService.createCar({
+      // Resume a failed document upload without creating another vehicle.
+      const plate = data.vehicle.plate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const ownCars = await CarsService.getCarsByDriver(userId);
+      const existing = ownCars.find(car => car.plate.toUpperCase().replace(/[^A-Z0-9]/g, '') === plate);
+      const fields = {
         driver_id: userId,
         make: data.vehicle.make,
         model: data.vehicle.model,
         color: data.vehicle.color,
-        plate: data.vehicle.plate,
+        plate,
         fuel_type: data.vehicle.fuel_type,
         transmission: data.vehicle.transmission,
         capacity: data.vehicle.capacity,
         service_type: data.serviceType,
-      });
+      };
+      const car = existing
+        ? await CarsService.updateCar(existing.id, fields)
+        : await CarsService.createCar(fields);
 
       // Subir documentos del vehículo en paralelo
       const uploadPromises = [
@@ -226,12 +222,10 @@ export class DriversService {
 
       // Validar uploads
       if (uploadResults.some((result) => !result.success)) {
-        // Rollback: eliminar vehículo creado
-        await CarsService.deleteCar(car.id);
         throw ErrorHandler.createError(
           AppErrorType.STORAGE,
           'Error al subir documentos del vehículo',
-          'Vehicle deleted due to upload failure'
+          'El vehículo quedó pendiente; puede reintentar la carga sin duplicarlo'
         );
       }
 

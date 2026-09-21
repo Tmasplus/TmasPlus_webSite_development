@@ -146,12 +146,15 @@ export const RegisterDriverPage: React.FC = () => {
             }
 
             // 🚨 ARREGLO 406: Buscar al usuario real en la tabla por su auth_id
-            const dbUser = await UsersService.getUserByAuthId(uid);
+            let dbUser = await UsersService.getUserByAuthId(uid);
 
             if (!dbUser) {
-                setPageState('STEP_1');
-                return;
+                const { data, error } = await (supabase as any).schema('booking_v2').rpc('ensure_driver_profile');
+                if (error) throw error;
+                dbUser = data;
             }
+
+            if (!dbUser) throw new Error('No se pudo recuperar el perfil del conductor');
 
             setCurrentUserId(dbUser.id); // Guardamos el UUID real de la tabla users
 
@@ -167,6 +170,7 @@ export const RegisterDriverPage: React.FC = () => {
             }
         } catch (error) {
             console.error('Error checking session:', error);
+            toast.error((error as Error).message || 'No se pudo recuperar el registro');
             setPageState('STEP_1');
         }
     };

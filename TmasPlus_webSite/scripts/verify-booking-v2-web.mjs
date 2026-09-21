@@ -4,7 +4,7 @@ const url = process.env.TEST_SUPABASE_URL;
 const key = process.env.TEST_SUPABASE_PUBLISHABLE_KEY;
 const password = process.env.TEST_USER_PASSWORD;
 if (!url || !key || !password) throw new Error('Missing test environment variables.');
-if (!url.includes('lhqhdnjmewyipuwifzsl')) throw new Error('Refusing to test a non-test project.');
+if (new URL(url).origin !== 'https://lhqhdnjmewyipuwifzsl.supabase.co') throw new Error('Refusing to test a non-test project.');
 
 const client = createClient(url, key, { auth: { persistSession: false } });
 const { error: loginError } = await client.auth.signInWithPassword({
@@ -14,8 +14,8 @@ const { error: loginError } = await client.auth.signInWithPassword({
 if (loginError) throw loginError;
 
 const [{ data: customers, error: customerError }, { data: categories, error: categoryError }] = await Promise.all([
-  client.from('users').select('id').eq('email', 'cliente.prueba@tmasplus.test').limit(1),
-  client.from('car_types').select('id').eq('name', 'ConfortPlus').eq('is_active', true).limit(1),
+  client.schema('booking_v2').from('core_users').select('id').eq('email', 'cliente.prueba@tmasplus.test').limit(1),
+  client.schema('booking_v2').from('core_car_types').select('id').eq('name', 'ConfortPlus').eq('is_active', true).limit(1),
 ]);
 if (customerError || categoryError) throw customerError || categoryError;
 const customerId = customers?.[0]?.id;
