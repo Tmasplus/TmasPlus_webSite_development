@@ -48,18 +48,8 @@ class ReferralsService {
       }
 
       const { data: referralCode, error: codeError } = await supabase
-        .from('referral_codes')
-        .select(`
-          *,
-          driver:users!referral_codes_driver_id_fkey(
-            id,
-            first_name,
-            last_name,
-            email,
-            mobile,
-            user_type
-          )
-        `)
+        .from('web_referral_codes')
+        .select('*')
         .eq('driver_id', driverId)
         .eq('is_active', true)
         .single();
@@ -79,7 +69,7 @@ class ReferralsService {
       }
 
       const { data: referrals, error: referralsError } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .select('*')
         .eq('referral_code_id', referralCode.id);
 
@@ -87,7 +77,7 @@ class ReferralsService {
         return { data: null, error: ErrorHandler.handleDatabaseError(referralsError) };
       }
 
-      const successful_referrals = referrals?.filter((r: ReferralRow) => r.status === 'completed').length || 0;
+      const successful_referrals = referrals?.filter((r: ReferralRow) => r.status === 'approved').length || 0;
       const pending_referrals = referrals?.filter((r: ReferralRow) => r.status === 'pending').length || 0;
 
       const result: ReferralCodeWithStats = {
@@ -122,15 +112,10 @@ class ReferralsService {
         };
       }
 
-      const { data, error } = await supabase
-        .from('referral_codes')
-        .select('*')
-        .eq('referral_code', referralCode.toUpperCase().trim())
-        .eq('is_active', true)
-        .single();
+      const { data, error } = await (supabase as any).rpc('web_validate_referral', { p_code: referralCode });
 
-      if (error) {
-        if (error.code === 'PGRST116') {
+      if (error || !data) {
+        if (!data || error?.code === 'PGRST116') {
           return {
             data: null,
             error: ErrorHandler.createError(
@@ -158,7 +143,7 @@ class ReferralsService {
   async isReferralCodeAvailable(code: string): Promise<boolean> {
     try {
       const { data, error } = await supabase
-        .from('referral_codes')
+        .from('web_referral_codes')
         .select('id')
         .eq('referral_code', code.toUpperCase())
         .single();
@@ -181,7 +166,7 @@ class ReferralsService {
       if (!code || code.trim() === '') return false;
       
       const { data, error } = await supabase
-        .from('referral_codes')
+        .from('web_referral_codes')
         .select('id')
         .eq('referral_code', code.trim().toUpperCase())
         .eq('is_active', true)
@@ -228,7 +213,7 @@ class ReferralsService {
       }
 
       const { data: existingReferral } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .select('id')
         .eq('referred_driver_id', referredDriverId)
         .single();
@@ -254,7 +239,7 @@ class ReferralsService {
       };
 
       const { data, error } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .insert(newReferral)
         .select()
         .single();
@@ -263,10 +248,7 @@ class ReferralsService {
         return { data: null, error: ErrorHandler.handleDatabaseError(error) };
       }
 
-      await supabase
-        .from('referral_codes')
-        .update({ total_referrals: codeData.total_referrals + 1 })
-        .eq('id', codeData.id);
+
 
       return { data, error: null };
     } catch (error) {
@@ -302,19 +284,8 @@ class ReferralsService {
       const offset = (page - 1) * limit;
 
       let query = supabase
-        .from('referrals')
-        .select(`
-          *,
-          referred_driver:users!referrals_referred_driver_id_fkey(
-            id,
-            first_name,
-            last_name,
-            email,
-            mobile,
-            user_type,
-            approved
-          )
-        `, { count: 'exact' })
+        .from('web_referrals')
+        .select('*', { count: 'exact' })
         .eq('referrer_id', driverId);
 
       if (filters?.status) {
@@ -375,7 +346,7 @@ class ReferralsService {
       }
 
       const { data: referrals, error } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .select('*')
         .eq('referrer_id', driverId);
 
@@ -384,7 +355,7 @@ class ReferralsService {
       }
 
       const total_referrals = referrals?.length || 0;
-      const completed_referrals = referrals?.filter((r: ReferralRow) => r.status === 'completed').length || 0;
+      const completed_referrals = referrals?.filter((r: ReferralRow) => r.status === 'approved').length || 0;
       const pending_referrals = referrals?.filter((r: ReferralRow) => r.status === 'pending').length || 0;
 
       const stats: DriverReferralStats = {
@@ -409,7 +380,7 @@ class ReferralsService {
    */
   async updateReferralStatus(
     referralId: string,
-    status: 'pending' | 'completed' | 'cancelled'
+    status: 'pending' | 'approved' | 'rejected'
   ): Promise<ServiceResponse<ReferralRow>> {
     try {
       if (!referralId || !status) {
@@ -426,7 +397,7 @@ class ReferralsService {
       const updateData: ReferralUpdate = { status };
 
       const { data, error } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .update(updateData)
         .eq('id', referralId)
         .select()
@@ -462,7 +433,7 @@ class ReferralsService {
       }
 
       const { data: referral, error: checkError } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .select('*')
         .eq('id', referralId)
         .single();
@@ -471,13 +442,13 @@ class ReferralsService {
         return { data: null, error: ErrorHandler.handleDatabaseError(checkError) };
       }
 
-      if (referral.status !== 'completed') {
+      if (referral.status !== 'approved') {
         return {
           data: null,
           error: ErrorHandler.createError(
             AppErrorType.VALIDATION,
             'Solo se pueden reclamar recompensas de referidos completados',
-            `Referral status is ${referral.status}, expected completed`
+            `Referral status is ${referral.status}, expected approved`
           )
         };
       }
@@ -494,7 +465,7 @@ class ReferralsService {
       }
 
       const { data, error } = await supabase
-        .from('referrals')
+        .from('web_referrals')
         .update({ reward_claimed: true })
         .eq('id', referralId)
         .select()
@@ -530,27 +501,8 @@ class ReferralsService {
       }
 
       const { data, error } = await supabase
-        .from('referrals')
-        .select(`
-          *,
-          referred_driver:users!referrals_referred_driver_id_fkey(
-            id,
-            first_name,
-            last_name,
-            email,
-            mobile,
-            user_type,
-            approved
-          ),
-          referrer_driver:users!referrals_referrer_id_fkey(
-            id,
-            first_name,
-            last_name,
-            email,
-            mobile,
-            user_type
-          )
-        `)
+        .from('web_referrals')
+        .select('*')
         .eq('id', referralId)
         .single();
 

@@ -2,8 +2,8 @@ import { supabaseSecondary } from '@/config/supabase';
 import type { CarTypeRow, CarTypeInsert, CarTypeUpdate } from '@/config/database.types';
 
 const sb = supabaseSecondary as any;
-const catalog = sb.schema('booking_v2');
-const TABLE = 'core_car_types' as const;
+const catalog = sb;
+const TABLE = 'web_car_types' as const;
 
 export class CarTypesService {
   /** Obtener todas las categorías activas */
@@ -14,7 +14,7 @@ export class CarTypesService {
       .order('name', { ascending: true });
 
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []).map((row: any) => ({ ...row, id: String(row.id) }));
   }
 
   /** Obtener solo las activas (para selects) */
@@ -26,7 +26,7 @@ export class CarTypesService {
       .order('name', { ascending: true });
 
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []).map((row: any) => ({ ...row, id: String(row.id) }));
   }
 
   /** Obtener una categoría por ID */
@@ -38,7 +38,7 @@ export class CarTypesService {
       .single();
 
     if (error) throw error;
-    return data;
+    return data ? { ...data, id: String(data.id) } : data;
   }
 
   /** Crear nueva categoría */
@@ -50,7 +50,7 @@ export class CarTypesService {
       .single();
 
     if (error) throw error;
-    return data;
+    return data ? { ...data, id: String(data.id) } : data;
   }
 
   /** Actualizar categoría existente */
@@ -63,7 +63,7 @@ export class CarTypesService {
       .single();
 
     if (error) throw error;
-    return data;
+    return data ? { ...data, id: String(data.id) } : data;
   }
 
   /** Desactivar (soft-delete) */

@@ -149,7 +149,7 @@ export const RegisterDriverPage: React.FC = () => {
             let dbUser = await UsersService.getUserByAuthId(uid);
 
             if (!dbUser) {
-                const { data, error } = await (supabase as any).schema('booking_v2').rpc('ensure_driver_profile');
+                const { data, error } = await (supabase as any).rpc('web_ensure_driver_profile');
                 if (error) throw error;
                 dbUser = data;
             }

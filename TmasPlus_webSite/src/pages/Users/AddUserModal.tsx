@@ -48,7 +48,7 @@ async function uploadAndPersistCustomerCedula(
   }
   if (Object.keys(updates).length === 0) return;
   const { error: updateErr } = await supabaseSecondary
-    .from("users")
+    .from("web_users")
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq("id", userId);
   if (updateErr) throw updateErr;
@@ -113,14 +113,14 @@ async function uploadAndPersistDriverDocs(
   const now = new Date().toISOString();
   if (Object.keys(userUpdates).length > 0) {
     const { error } = await supabaseSecondary
-      .from("users")
+      .from("web_users")
       .update({ ...userUpdates, updated_at: now })
       .eq("id", userId);
     if (error) throw error;
   }
   if (Object.keys(carUpdates).length > 0) {
     const { error } = await supabaseSecondary
-      .from("cars")
+      .from("web_cars")
       .update({ ...carUpdates, updated_at: now })
       .eq("id", carId);
     if (error) throw error;

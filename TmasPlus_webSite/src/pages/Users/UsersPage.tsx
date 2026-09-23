@@ -186,7 +186,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const primaryByDriver: Record<string, string> = {};
       for (const idsChunk of chunk(missingDriverIds)) {
         const { data: primaryCars } = await supabase
-          .from("cars")
+          .from("web_cars")
           .select("driver_id, service_type, is_active, updated_at")
           .in("driver_id", idsChunk)
           .order("is_active", { ascending: false })
@@ -217,7 +217,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const cedulaByUser: Record<string, string> = {};
       for (const idsChunk of chunk(missingCedulaIds)) {
         const { data: primaryUsers } = await supabase
-          .from("users")
+          .from("web_users")
           .select("id, license_number")
           .in("id", idsChunk);
         for (const row of (primaryUsers || []) as Array<{
@@ -238,7 +238,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
     const refByDriver: Record<string, number> = {};
     for (const idsChunk of chunk(allDriverIds)) {
       const { data: refCodes } = await supabase
-        .from("referral_codes")
+        .from("web_referral_codes")
         .select("driver_id, total_referrals")
         .in("driver_id", idsChunk);
       for (const row of (refCodes || []) as Array<{
@@ -333,14 +333,14 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const handleDelete = async (u: SecondaryUser) => {
     if (
       !confirm(
-        `¿Eliminar definitivamente a ${fullName(u)}? Esta acción no se puede deshacer.`
+        `¿Deshabilitar a ${fullName(u)}? Se conservará su historial.`
       )
     )
       return;
     setActionLoadingId(u.id);
     try {
       await UsersSecondaryService.delete(u.id);
-      setUsers((prev) => prev.filter((x) => x.id !== u.id));
+      setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, blocked: true } : x));
     } catch (e: any) {
       alert(e?.message || "Error al eliminar usuario");
     } finally {
@@ -392,7 +392,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         if (!secondaryProfile.vehicle) {
           const driverIds = [u.id, u.auth_id].filter(Boolean) as string[];
           const { data: primaryCars } = await supabase
-            .from("cars")
+            .from("web_cars")
             .select("*")
             .in("driver_id", driverIds)
             .limit(1);
@@ -427,14 +427,14 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       let referrerName = "Sin referencia";
       if (profile.referral_id && profile.referral_id.trim() !== "") {
         const { data: refCodes } = await supabase
-          .from("referral_codes")
+          .from("web_referral_codes")
           .select("driver_id")
           .eq("referral_code", profile.referral_id)
           .limit(1);
         const refCode = refCodes?.[0];
         if (refCode?.driver_id) {
           const { data: referrers } = await supabase
-            .from("users")
+            .from("web_users")
             .select("first_name, last_name")
             .eq("id", refCode.driver_id)
             .limit(1);
@@ -725,7 +725,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                               disabled={busy}
                               className="!px-3 !py-1.5 !text-xs !text-rose-700 !border-rose-300"
                             >
-                              {busy ? "..." : "Eliminar"}
+                              {busy ? "..." : "Deshabilitar"}
                             </Button>
                           </div>
                         </td>

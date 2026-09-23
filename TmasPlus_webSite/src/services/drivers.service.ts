@@ -576,7 +576,7 @@ export class DriversService {
 
       // Estadísticas por tipo de servicio
       const { data: serviceTypeData } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('service_type')
         .not('service_type', 'is', null);
 
@@ -597,7 +597,7 @@ export class DriversService {
 
       // Top 5 ciudades
       const { data: cityCountsData } = await supabase
-        .from('users')
+        .from('web_users')
         .select('city')
         .eq('user_type', 'driver')
         .not('city', 'is', null);

@@ -215,7 +215,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         // Tanto conductores como clientes tienen su propio código de referido en
         // la tabla referral_codes (driver_id = users.id). Lo cargamos para ambos.
         setOwnReferral({ code: 'Generando...', total: 0 });
-        dbClient.from('referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).maybeSingle()
+        dbClient.from('web_referral_codes').select('referral_code, total_referrals').eq('driver_id', driver.id).maybeSingle()
             .then(({ data }: { data: { referral_code: string; total_referrals: number } | null }) => {
                 if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
                 else setOwnReferral({ code: 'No asignado (Pendiente)', total: 0 });
@@ -299,64 +299,9 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 }
                 : undefined;
 
-            if (source === 'secondary') {
-                // BD del Dashboard (proyecto secundario): el dashboard se autentica
-                // contra el proyecto PRIMARIO, por lo que un UPDATE directo se trata
-                // como anon y no persiste (antes "guardaba" sin escribir nada). Por
-                // eso la escritura se hace vía Edge Function con service role.
-                // La cédula se guarda en document_number; el tipo solo en clientes.
-                userPayload.document_number = cedula;
-                if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
-                // La App guarda la categoría también denormalizada en users.car_type
-                // y en el JSON cars.features.carType (que es de donde la App la pinta),
-                // así que mantenemos ambos en sincronía con la nueva categoría del
-                // vehículo. (La BD primaria no tiene car_type.)
-                if (carPayload?.service_type) {
-                    const catLabel =
-                        categoryForValue(carTypes, carPayload.service_type)?.name ||
-                        legacyCategoryLabel(carPayload.service_type);
-                    if (catLabel) {
-                        userPayload.car_type = catLabel;
-                        (carPayload as any).features_car_type = catLabel;
-                    }
-                }
-                await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
-            } else {
-                // BD de la App (primaria): el dashboard SÍ está autenticado aquí, así
-                // que el UPDATE directo funciona. La cédula vive en license_number.
-                userPayload.license_number = cedula;
-                const { error: userError } = await dbClient.from('users').update(userPayload).eq('id', driver.id);
-                if (userError) throw userError;
-
-                if (carPayload) {
-                    const { id: carId, ...carFields } = carPayload;
-                    const { error: carError } = await dbClient.from('cars').update(carFields).eq('id', carId);
-                    if (carError) throw carError;
-                }
-
-                // La App móvil lee la categoría de la BD secundaria (utof); el
-                // UPDATE anterior solo tocó el primario. Propagamos la categoría
-                // a la App para que el conductor la vea reflejada. Best-effort:
-                // no aborta el guardado si el conductor no está en la App.
-                if (carPayload?.service_type) {
-                    try {
-                        const res = await UsersSecondaryService.syncCategory({
-                            id: driver.id,
-                            email: driver.email,
-                            authId: (driver as any).auth_id ?? null,
-                            serviceType: carPayload.service_type,
-                            categoryName: categoryForValue(carTypes, carPayload.service_type)?.name,
-                        });
-                        if (!res.synced) {
-                            toast.warning('Guardado en el panel. El conductor no está en la App: la categoría no se sincronizó allí.');
-                        } else if (res.reason === 'sin-vehiculo-en-app') {
-                            toast.warning('Categoría guardada. El conductor no tiene vehículo en la App; se actualizó solo la etiqueta.');
-                        }
-                    } catch (e: any) {
-                        toast.warning('Guardado en el panel, pero no se pudo sincronizar la categoría con la App: ' + (e?.message || 'error'));
-                    }
-                }
-            }
+            userPayload.document_number = cedula;
+            if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
+            await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
 
             // Reflejamos de inmediato lo guardado en la copia local para que el
             // modo lectura muestre los valores nuevos sin reabrir el expediente.

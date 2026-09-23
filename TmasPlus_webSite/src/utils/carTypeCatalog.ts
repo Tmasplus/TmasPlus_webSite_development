@@ -35,7 +35,7 @@ function normalize(value?: string | null): string {
 }
 
 export function serviceTypeForCategory(category: CarTypeRow): string {
-  return LEGACY_CODE_BY_ID[category.id] || normalize(category.name);
+  return String(category.id);
 }
 
 export function categoryForValue(
@@ -90,6 +90,10 @@ export function documentProfileForCategoryValue(
   value?: string | null
 ): DocumentProfile {
   const category = categoryForValue(categories, value);
+  const name = normalize(category?.name);
+  if (name.includes('especial') || name.includes('comfort')) return 'comfort_plus';
+  if (name.includes('taxi')) return 'taxi_plus';
+  if (name.includes('van')) return 'van_plus';
   switch (category?.id) {
     case "2acdb415-df6d-4087-bc54-1c741ea86de6":
       return "comfort_plus";

@@ -10,7 +10,7 @@ enabled = true
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public", "booking_v2"]
+schemas = ["public", "graphql_public"]
 # Extra schemas to add to the search_path of every request.
 extra_search_path = ["public", "extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
@@ -387,158 +387,18 @@ s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
 
-[functions.send-approval-email]
+# Solo funciones de aplicacioncore. Desplegar con --project-ref zvplcamcyldcquxqnftb.
+[functions.core-create-user]
 enabled = true
-verify_jwt = true
-import_map = "./functions/send-approval-email/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/send-approval-email/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/send-approval-email/*.html" ]
-
-[functions.send-trip-summary]
-enabled = true
-# Disparado por database webhook desde bookings cuando status = COMPLETED.
-# El webhook envía service_role key como Authorization, así que verify_jwt=true funciona.
-verify_jwt = true
-import_map = "./functions/send-trip-summary/deno.json"
-entrypoint = "./functions/send-trip-summary/index.ts"
-
-[functions.import-driver]
-enabled = true
-# La función valida internamente el JWT contra el proyecto primario,
-# por lo que el gateway del proyecto secundario NO debe verificarlo
-# (verify_jwt=true bloquea el preflight CORS de OPTIONS desde el browser).
 verify_jwt = false
-import_map = "./functions/import-driver/deno.json"
-entrypoint = "./functions/import-driver/index.ts"
+entrypoint = "./functions/core-create-user/index.ts"
 
-[functions.create-customer]
+[functions.core-invite-user]
 enabled = true
-# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
 verify_jwt = false
-import_map = "./functions/create-customer/deno.json"
-entrypoint = "./functions/create-customer/index.ts"
+entrypoint = "./functions/core-invite-user/index.ts"
 
-[functions.create-driver]
+[functions.core-complaint-response]
 enabled = true
-# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
 verify_jwt = false
-import_map = "./functions/create-driver/deno.json"
-entrypoint = "./functions/create-driver/index.ts"
-
-[functions.delete-user]
-enabled = true
-# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
-verify_jwt = false
-import_map = "./functions/delete-user/deno.json"
-entrypoint = "./functions/delete-user/index.ts"
-
-[functions.set-user-blocked]
-enabled = true
-# Misma razón que delete-user: la función valida el JWT contra el proyecto primario.
-# El gateway del proyecto secundario NO debe verificar el JWT (verify_jwt=true
-# devuelve 401 porque el token es del proyecto primario, no del secundario).
-verify_jwt = false
-import_map = "./functions/set-user-blocked/deno.json"
-entrypoint = "./functions/set-user-blocked/index.ts"
-
-[functions.update-user]
-enabled = true
-# Misma razón que delete-user/set-user-blocked: la función valida el JWT contra
-# el proyecto primario, así que el gateway del secundario NO debe verificarlo.
-verify_jwt = false
-import_map = "./functions/update-user/deno.json"
-entrypoint = "./functions/update-user/index.ts"
-
-[functions.send-complaint-response]
-enabled = true
-# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
-verify_jwt = false
-import_map = "./functions/send-complaint-response/deno.json"
-entrypoint = "./functions/send-complaint-response/index.ts"
-
-[functions.upload-driver-document]
-enabled = true
-# Misma razón que import-driver: la función valida el JWT contra el proyecto primario.
-# El gateway del proyecto secundario NO debe verificar el JWT (verify_jwt=true
-# devuelve 401 porque el token es del proyecto primario, no del secundario).
-verify_jwt = false
-import_map = "./functions/upload-driver-document/deno.json"
-entrypoint = "./functions/upload-driver-document/index.ts"
-
-[functions.sign-document-url]
-enabled = true
-# Misma razón que upload-driver-document: la función valida el JWT contra el
-# proyecto primario. El gateway del proyecto secundario NO debe verificar el
-# JWT (verify_jwt=true devuelve 401 porque el token es del proyecto primario).
-verify_jwt = false
-import_map = "./functions/sign-document-url/deno.json"
-entrypoint = "./functions/sign-document-url/index.ts"
-
-[functions.create-booking]
-enabled = true
-# Misma razón que update-user/set-user-blocked: la función valida el JWT contra
-# el proyecto primario, así que el gateway del secundario NO debe verificarlo
-# (verify_jwt=true devuelve 401 porque el token es del primario, no del secundario).
-verify_jwt = false
-import_map = "./functions/create-booking/deno.json"
-entrypoint = "./functions/create-booking/index.ts"
-
-[functions.assign-booking-driver]
-enabled = true
-# Valida internamente el JWT del proyecto primario y escribe en el secundario.
-verify_jwt = false
-import_map = "./functions/assign-booking-driver/deno.json"
-entrypoint = "./functions/assign-booking-driver/index.ts"
-
-[functions.cancel-booking]
-enabled = true
-# Igual que create-booking: valida el JWT del primario y escribe con service role.
-verify_jwt = false
-import_map = "./functions/cancel-booking/deno.json"
-entrypoint = "./functions/cancel-booking/index.ts"
-
-[functions.delete-booking]
-enabled = true
-# Igual que create-booking: valida el JWT del primario y escribe con service role.
-verify_jwt = false
-import_map = "./functions/delete-booking/deno.json"
-entrypoint = "./functions/delete-booking/index.ts"
-
-[functions.list-bookings]
-enabled = true
-# Igual que create-booking: valida el JWT del primario y lee con service role.
-verify_jwt = false
-import_map = "./functions/list-bookings/deno.json"
-entrypoint = "./functions/list-bookings/index.ts"
-
-[functions.get-service-timeline]
-enabled = true
-# Valida internamente el JWT del proyecto primario y lee snapshots con service role.
-verify_jwt = false
-import_map = "./functions/get-service-timeline/deno.json"
-entrypoint = "./functions/get-service-timeline/index.ts"
-
-[functions.reconcile-referrals]
-enabled = true
-# Misma razón que upload-driver-document/sign-document-url: la función valida
-# el JWT contra el proyecto primario. El gateway del proyecto secundario NO
-# debe verificar el JWT (verify_jwt=true devuelve 401 porque el token es del
-# proyecto primario, no del secundario).
-verify_jwt = false
-import_map = "./functions/reconcile-referrals/deno.json"
-entrypoint = "./functions/reconcile-referrals/index.ts"
-[functions.booking-v2-mass-push]
-enabled = true
-# Auth.getUser plus an approved admin RPC check inside the function; supports rotated signing keys.
-verify_jwt = false
-entrypoint = "./functions/booking-v2-mass-push/index.ts"
-
-[functions.booking-v2-create-user]
-enabled = true
-# Auth.getUser + core admin check; never relies on an unverified JWT payload.
-verify_jwt = false
-entrypoint = "./functions/booking-v2-create-user/index.ts"
+entrypoint = "./functions/core-complaint-response/index.ts"

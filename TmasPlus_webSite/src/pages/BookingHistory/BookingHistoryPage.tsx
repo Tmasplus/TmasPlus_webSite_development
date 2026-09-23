@@ -126,7 +126,7 @@ export default function BookingHistoryPage() {
     isMountedRef.current = true;
     loadBookings();
 
-    // Reload the normalized v2 record; realtime carries the mobile projection.
+    // Reload core reservations; polling also works without Realtime publication.
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     if (supabase) {
@@ -134,7 +134,7 @@ export default function BookingHistoryPage() {
         .channel("bookings-history-realtime")
         .on(
           "postgres_changes",
-          { event: "*", schema: "booking_v2", table: "mobile_bookings" },
+          { event: "*", schema: "public", table: "reserva" },
           () => {
             if (!isMountedRef.current) return;
             clearTimeout(refreshTimer);
@@ -524,7 +524,7 @@ export default function BookingHistoryPage() {
               filteredBookings.map((b) => {
                 const statusUpper = (b.status || "").toUpperCase();
                 const isCancelled = statusUpper === "CANCELLED";
-                const isCompleted = statusUpper === "COMPLETE" || statusUpper === "PAID";
+                const isCompleted = statusUpper === "COMPLETED" || statusUpper === "PAID";
                 const busy = actionLoadingId === b.id;
                 const finalTotal = serviceTotal(b);
                 const estimateValue = Number(b.estimate);
@@ -608,14 +608,6 @@ export default function BookingHistoryPage() {
                         >
                           {busy ? "..." : "Cancelar"}
                         </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleDelete(b)}
-                          disabled={busy}
-                          className="!px-3 !py-1.5 !text-xs !text-rose-700 !border-rose-300"
-                        >
-                          {busy ? "..." : "Eliminar"}
-                        </Button>
                       </div>
                     </td>
                   </motion.tr>
@@ -638,7 +630,6 @@ export default function BookingHistoryPage() {
         onClose={closeBookingModal}
         booking={selectedBooking}
         onCancel={handleCancel}
-        onDelete={handleDelete}
         actionLoading={
           selectedBooking ? actionLoadingId === selectedBooking.id : false
         }

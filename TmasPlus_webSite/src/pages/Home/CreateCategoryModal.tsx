@@ -21,9 +21,8 @@ const INITIAL_FORM = {
   base_price_inter: "",
   price_per_km: "",
   price_per_km_inter: "",
-  price_per_second: "",
-  price_per_second_inter: "",
-  valor_hora: "",
+  price_per_hour: "",
+  price_per_hour_inter: "",
   min_fare: "",
   min_fare_inter: "",
   delta_aeropuerto: "",
@@ -58,10 +57,9 @@ export const CreateCategoryModal: React.FC<Props> = ({
         base_price_inter: String(editData.base_price_inter),
         price_per_km: String(editData.price_per_km),
         price_per_km_inter: String(editData.price_per_km_inter),
-        // `rate_per_hour` se guarda como valor por minuto; lo mostramos por segundo (÷60).
-        price_per_second: String(editData.rate_per_hour / 60),
-        price_per_second_inter: String(editData.rate_per_hour_inter / 60),
-        valor_hora: String(editData.valor_hora),
+        // Core guarda tarifas por hora, sin conversiones al editar.
+        price_per_hour: String(editData.rate_per_hour),
+        price_per_hour_inter: String(editData.rate_per_hour_inter),
         min_fare: String(editData.min_fare),
         min_fare_inter: String(editData.min_fare_inter),
         delta_aeropuerto: String(editData.delta_aeropuerto),
@@ -116,10 +114,9 @@ export const CreateCategoryModal: React.FC<Props> = ({
         base_price_inter: Number(form.base_price_inter) || 0,
         price_per_km: Number(form.price_per_km) || 0,
         price_per_km_inter: Number(form.price_per_km_inter) || 0,
-        // El usuario ingresa precio por segundo; guardamos por minuto (×60).
-        rate_per_hour: (Number(form.price_per_second) || 0) * 60,
-        rate_per_hour_inter: (Number(form.price_per_second_inter) || 0) * 60,
-        valor_hora: Number(form.valor_hora) || 0,
+        // rate_per_hour corresponde a categoria_vehiculo.valor_hora.
+        rate_per_hour: Number(form.price_per_hour) || 0,
+        rate_per_hour_inter: Number(form.price_per_hour_inter) || 0,
         min_fare: Number(form.min_fare) || 0,
         min_fare_inter: Number(form.min_fare_inter) || 0,
         delta_aeropuerto: Number(form.delta_aeropuerto) || 0,
@@ -284,25 +281,18 @@ export const CreateCategoryModal: React.FC<Props> = ({
           <legend className="text-xs font-semibold text-slate-500 uppercase px-2">Tarifas por Tiempo</legend>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FloatingInput
-              id="price_per_second"
-              label="Precio por segundo (Local)"
+              id="price_per_hour"
+              label="Precio por hora (Local)"
               type="number"
-              value={form.price_per_second}
-              onChange={(e) => update("price_per_second", e.target.value)}
+              value={form.price_per_hour}
+              onChange={(e) => update("price_per_hour", e.target.value)}
             />
             <FloatingInput
-              id="price_per_second_inter"
-              label="Precio por segundo (Intermunicipal)"
+              id="price_per_hour_inter"
+              label="Precio por hora (Intermunicipal)"
               type="number"
-              value={form.price_per_second_inter}
-              onChange={(e) => update("price_per_second_inter", e.target.value)}
-            />
-            <FloatingInput
-              id="valor_hora"
-              label="Valor Hora"
-              type="number"
-              value={form.valor_hora}
-              onChange={(e) => update("valor_hora", e.target.value)}
+              value={form.price_per_hour_inter}
+              onChange={(e) => update("price_per_hour_inter", e.target.value)}
             />
           </div>
         </fieldset>

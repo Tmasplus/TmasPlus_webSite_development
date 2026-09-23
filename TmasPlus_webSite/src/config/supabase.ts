@@ -24,12 +24,12 @@ const getSupabaseProjectRef = (url: string, fallback: string): string => {
 
 const primaryProjectRef = getSupabaseProjectRef(supabaseUrl, 'primary');
 
-// The consolidated model is tested alongside booking_v2 in Prueba, never in core's source project.
-const EXPECTED_PROJECT_REF = 'lhqhdnjmewyipuwifzsl';
+// Una sola identidad, base y sesion: aplicacioncore.
+const EXPECTED_PROJECT_REF = 'zvplcamcyldcquxqnftb';
 if (primaryProjectRef !== EXPECTED_PROJECT_REF ||
     new URL(supabaseUrl).origin !== `https://${EXPECTED_PROJECT_REF}.supabase.co`) {
   throw new Error(
-    `Esta rama requiere el proyecto Prueba de booking_v2. Revisa VITE_SUPABASE_URL en .env.local — se esperaba el proyecto ${EXPECTED_PROJECT_REF}.`
+    `Esta version requiere aplicacioncore. Revisa VITE_SUPABASE_URL en .env.local: ${EXPECTED_PROJECT_REF}.`
   );
 }
 

@@ -84,7 +84,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
         setIsValidating(true);
         try {
             // 1. Verificar Email en BD
-            const { data: emailData } = await supabase.rpc('check_user_availability', { p_email: data.email!.trim().toLowerCase() });
+            const { data: emailData } = await supabase.rpc('verificar_disponibilidad', { p_email: data.email!.trim().toLowerCase() });
             if (emailData?.email_exists) {
                 setErrors(e => ({ ...e, email: 'Este correo ya está registrado' }));
                 setIsValidating(false);
@@ -93,7 +93,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
 
             // 2. Verificar Teléfono en BD
             const mobileVal = phonePrefix === '+57' ? data.mobile!.slice(0, 10) : data.mobile!;
-            const { data: phoneData } = await supabase.rpc('check_user_availability', { p_mobile: mobileVal });
+            const { data: phoneData } = await supabase.rpc('verificar_disponibilidad', { p_telefono: mobileVal });
             if (phoneData?.mobile_exists) {
                 setErrors(e => ({ ...e, mobile: 'Este número ya está registrado' }));
                 setIsValidating(false);

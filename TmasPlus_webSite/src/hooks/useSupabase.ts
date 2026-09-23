@@ -26,7 +26,7 @@ interface AsyncState<T> {
  *   useEffect(() => {
  *     execute(async () => {
  *       const { data, error } = await supabase
- *         .from('users')
+ *         .from('web_users')
  *         .select('*')
  *         .eq('user_type', 'driver');
  *       

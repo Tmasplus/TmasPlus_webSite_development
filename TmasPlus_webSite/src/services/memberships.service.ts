@@ -1,6 +1,6 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
 
-export type MembershipStatus = 'ACTIVA' | 'INACTIVA' | 'CANCELADA' | 'VENCIDA';
+export type MembershipStatus = 'ACTIVA' | 'PENDIENTE' | 'CANCELADA' | 'VENCIDA';
 
 export interface Membership {
   uid: string;
@@ -54,13 +54,13 @@ async function syncSession() {
   if (!session?.access_token) throw new Error('No hay sesión activa');
   // Set the token directly on the internal REST client to avoid a 403
   // when validating the JWT against a different Supabase auth server.
-  sb.rest.headers['Authorization'] = `Bearer ${session.access_token}`;
+  // Un solo cliente core; Supabase administra el JWT y su renovacion.
 }
 
 export class MembershipsService {
   static async list(): Promise<MembershipWithUser[]> {
     const { data, error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -79,7 +79,7 @@ export class MembershipsService {
       // memberships.conductor stores users.auth_id (see CreateMembershipModal).
       // Try matching by auth_id first; fall back to id for legacy rows.
       const { data: usersByAuth, error: usersAuthError } = await sb
-        .from('users')
+        .from('web_users')
         .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
         .in('auth_id', conductorIds);
 
@@ -93,7 +93,7 @@ export class MembershipsService {
       let usersById: MembershipUser[] = [];
       if (unmatchedIds.length > 0) {
         const { data, error } = await sb
-          .from('users')
+          .from('web_users')
           .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
           .in('id', unmatchedIds);
         if (error) throw new Error(error.message);
@@ -115,7 +115,7 @@ export class MembershipsService {
       const userIds = allUsers.map((u) => u.id).filter(Boolean);
       if (userIds.length > 0) {
         const { data: cars, error: carsError } = await sb
-          .from('cars')
+          .from('web_cars')
           .select('id, driver_id, plate, make, model')
           .in('driver_id', userIds);
         if (carsError) throw new Error(carsError.message);
@@ -155,7 +155,7 @@ export class MembershipsService {
    */
   static async statusByConductor(): Promise<Record<string, MembershipStatus | string>> {
     const { data, error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .select('conductor, status')
       .order('created_at', { ascending: false });
 
@@ -178,8 +178,9 @@ export class MembershipsService {
 
     const term = `%${q}%`;
     const { data, error } = await sb
-      .from('users')
+      .from('web_users')
       .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
+      .eq('user_type', 'driver')
       .or(
         `first_name.ilike.${term},last_name.ilike.${term},email.ilike.${term},mobile.ilike.${term}`
       )
@@ -200,7 +201,7 @@ export class MembershipsService {
     };
 
     const { data, error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .insert(payload)
       .select()
       .single();
@@ -214,7 +215,7 @@ export class MembershipsService {
     status: MembershipStatus
   ): Promise<Membership> {
     const { data, error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .update({ status })
       .eq('uid', uid)
       .select()
@@ -229,7 +230,6 @@ export class MembershipsService {
     input: Partial<CreateMembershipInput>
   ): Promise<Membership> {
     await syncSession();
-    console.log("MembershipsService.update called with:", { uid, input });
 
     const payload: any = {
       ...(input.conductor !== undefined && { conductor: input.conductor }),
@@ -240,7 +240,6 @@ export class MembershipsService {
       ...(input.periodo !== undefined && { periodo: input.periodo }),
     };
 
-    console.log("Update payload:", payload);
 
     // If payload is empty, throw error
     if (Object.keys(payload).length === 0) {
@@ -249,25 +248,23 @@ export class MembershipsService {
 
     // First, let's check if the record exists
     const { data: existing, error: fetchError } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .select('*')
       .eq('uid', uid)
       .single();
 
-    console.log("Existing record:", existing, "Fetch error:", fetchError);
 
     if (fetchError) {
       throw new Error(`Record not found: ${fetchError.message}`);
     }
 
     const { data, error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .update(payload)
       .eq('uid', uid)
       .select()
       .single();
 
-    console.log("Supabase update response:", { data, error });
 
     if (error) throw new Error(error.message || 'Error al actualizar membresía');
     return data as Membership;
@@ -276,7 +273,7 @@ export class MembershipsService {
   static async delete(uid: string): Promise<void> {
     await syncSession();
     const { error } = await sb
-      .from('memberships')
+      .from('web_memberships')
       .delete()
       .eq('uid', uid);
 
