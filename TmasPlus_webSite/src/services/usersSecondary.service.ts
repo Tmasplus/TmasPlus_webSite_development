@@ -53,12 +53,24 @@ async function syncSession() {
 }
 
 export class UsersSecondaryService {
+  /**
+   * Columnas para el listado (tabla + export CSV de Usuarios/Conductores).
+   * Deliberadamente NO incluye campos sensibles que no se muestran ahí
+   * (cuenta bancaria, fotos de cédula/licencia, push_token, saldo de
+   * billetera): esos solo se cargan bajo demanda para UN usuario a la vez
+   * en `getUserWithVehicle`, cuando el admin abre su expediente.
+   */
+  private static readonly LIST_COLUMNS =
+    'id, auth_id, first_name, last_name, email, mobile, user_type, city, ' +
+    'blocked, approved, profile_image, document_number, referral_id, ' +
+    'created_at, car_type';
+
   static async list(): Promise<SecondaryUser[]> {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();
     const { data, error } = await sb
       .from('web_users')
-      .select('*')
+      .select(this.LIST_COLUMNS)
       .order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message || 'Error al obtener usuarios');
