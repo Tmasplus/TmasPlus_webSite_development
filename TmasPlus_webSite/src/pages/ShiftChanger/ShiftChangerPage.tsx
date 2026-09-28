@@ -13,11 +13,11 @@ export default function ShiftChangerPage() {
   const [creating, setCreating] = useState(false);
 
   const handleStartShift = () => {
-    console.log("Iniciar turno:", selectedEmployee, password);
+    // TODO: conectar con el backend real de turnos. Nunca loguear `password`.
   };
 
   const handleEndShift = () => {
-    console.log("Cerrar turno:", selectedEmployee, password);
+    // TODO: conectar con el backend real de turnos. Nunca loguear `password`.
   };
 
   const handleCreateEmployee = () => {
@@ -92,8 +92,8 @@ export default function ShiftChangerPage() {
                 {/* Si está creando un empleado, mostramos el formulario */}
                 {creating ? (
                 <CreateEmployeeForm
-                    onSave={(data) => {
-                    console.log("Nuevo empleado:", data);
+                    onSave={() => {
+                    // TODO: conectar con el backend real. Nunca loguear `password`.
                     setCreating(false);
                     }}
                     onCancel={() => setCreating(false)}
