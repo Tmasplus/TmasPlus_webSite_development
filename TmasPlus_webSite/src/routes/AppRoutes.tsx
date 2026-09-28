@@ -27,6 +27,7 @@ import ProfilePage from '@/pages/Profile/ProfilePage';
 import SettingsPage from '@/pages/Settings/SettingsPage';
 import TollsPage from '@/pages/Tolls/TollsPage';
 import NotificationsPage from '@/pages/Notifications/NotificationsPage';
+import VehicleMapPage from '@/pages/Vehicles/VehicleMapPage';
 import MembershipsPage from '@/pages/Memberships/MembershipsPage';
 import CarBrandsPage from '@/pages/CarBrands/CarBrandsPage';
 
@@ -79,6 +80,7 @@ export default function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/tolls" element={<TollsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/vehicle-map" element={<VehicleMapPage />} />
         <Route path="/memberships" element={<MembershipsPage />} />
         <Route path="/car-brands" element={<CarBrandsPage />} />
       </Route>
