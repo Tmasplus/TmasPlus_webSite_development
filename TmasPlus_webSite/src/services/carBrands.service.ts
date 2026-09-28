@@ -3,9 +3,7 @@ import { supabaseSecondary } from '@/config/supabase';
 /**
  * Servicio de Marcas de Vehículos (catálogo `car_brands`).
  *
- * Vive en el proyecto Supabase SECUNDARIO (utof / el de la App), por eso usa
- * `supabaseSecondary`. La App lee de esta misma tabla para poblar el selector
- * de marca al registrar un vehículo, y guarda el `name` en `cars.make`.
+ * Catalogo normalizado de core mediante public.web_car_brands.
  */
 
 export interface CarBrandRow {
@@ -27,7 +25,7 @@ export interface CarBrandUpdate {
 }
 
 const sb = supabaseSecondary as any;
-const TABLE = 'car_brands' as const;
+const TABLE = 'web_car_brands' as const;
 
 export class CarBrandsService {
   /** Todas las marcas (activas e inactivas), ordenadas por nombre */
@@ -76,9 +74,8 @@ export class CarBrandsService {
 
   /** Actualizar una marca (renombrar o activar/desactivar) */
   static async update(id: string, payload: CarBrandUpdate): Promise<CarBrandRow> {
-    const patch: CarBrandUpdate & { updated_at: string } = {
+    const patch: CarBrandUpdate = {
       ...payload,
-      updated_at: new Date().toISOString(),
     };
     if (typeof patch.name === 'string') patch.name = patch.name.trim();
 

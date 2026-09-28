@@ -27,7 +27,7 @@ const formatCOP = (value: string | number) => {
 const StatusBadge = ({ status }: { status: string }) => {
   const map: Record<string, string> = {
     ACTIVA: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    INACTIVA: "bg-slate-100 text-slate-700 border-slate-200",
+    PENDIENTE: "bg-slate-100 text-slate-700 border-slate-200",
     CANCELADA: "bg-red-100 text-red-700 border-red-200",
     VENCIDA: "bg-amber-100 text-amber-700 border-amber-200",
   };

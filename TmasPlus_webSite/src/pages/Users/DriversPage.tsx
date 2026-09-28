@@ -82,10 +82,10 @@ export const DriversPage: React.FC = () => {
             let codeToNameMap: Record<string, string> = {};
 
             if (uniqueCodes.length > 0) {
-                const { data: refCodes } = await supabase.from('referral_codes').select('referral_code, driver_id').in('referral_code', uniqueCodes);
+                const { data: refCodes } = await supabase.from('web_referral_codes').select('referral_code, driver_id').in('referral_code', uniqueCodes);
                 if (refCodes && refCodes.length > 0) {
                     const driverIds = refCodes.map((rc: { driver_id: string, referral_code: string }) => rc.driver_id);
-                    const { data: users } = await supabase.from('users').select('id, first_name, last_name').in('id', driverIds);
+                    const { data: users } = await supabase.from('web_users').select('id, first_name, last_name').in('id', driverIds);
 
                     refCodes.forEach((rc: { driver_id: string, referral_code: string }) => {
                         const user = users?.find((u: { id: string, first_name: string, last_name: string }) => u.id === rc.driver_id);
@@ -211,83 +211,21 @@ export const DriversPage: React.FC = () => {
         fetchDrivers();
     };
 
-    const importOne = async (driver: EnrichedDriverProfile): Promise<{ ok: boolean; authCreated: boolean }> => {
-        const email = emailFor(driver);
-        if (!email) {
-            toast.error(`${driver.first_name} ${driver.last_name} no tiene email; no se puede importar.`);
-            return { ok: false, authCreated: false };
-        }
+    const importOne = async (driver: EnrichedDriverProfile): Promise<{ok:boolean;authCreated:boolean}> => {
         try {
-            const res = await UsersSecondaryService.importDriverWithAuth({
-                id: driver.id,
-                email,
-                first_name: driver.first_name,
-                last_name: driver.last_name,
-                mobile: driver.mobile,
-                city: (driver as any).city ?? null,
-                profile_image: (driver as any).profile_image ?? null,
-                // Cédula del conductor → base secundaria. En la App (primaria) la
-                // cédula del conductor está en license_number, así que la tomamos
-                // de ahí para guardarla como document_number en la secundaria.
-                document_type: (driver as any).document_type ?? null,
-                document_number: (driver as any).license_number ?? (driver as any).document_number ?? null,
-                // Código de referido del conductor → base secundaria (users.referral_id)
-                referral_id: driver.referral_id ?? null,
-                // Estado del conductor (pestaña Conductores) → base secundaria
-                approved: !!driver.approved,
-                blocked: !!driver.blocked,
-                // Datos del vehículo → tabla cars de la base secundaria
-                vehicle: driver.vehicle
-                    ? {
-                          make: driver.vehicle.make ?? null,
-                          model: driver.vehicle.model ?? null,
-                          plate: driver.vehicle.plate ?? null,
-                          color: driver.vehicle.color ?? null,
-                          fuel_type: driver.vehicle.fuel_type ?? null,
-                          transmission: driver.vehicle.transmission ?? null,
-                          capacity: driver.vehicle.capacity ?? null,
-                          service_type: driver.vehicle.service_type ?? null,
-                      }
-                    : null,
-            });
-            setAppAccess(prev => {
-                if (prev.ids.has(driver.id)) return prev;
-                return { ...prev, ids: new Set(prev.ids).add(driver.id) };
-            });
-            if (res.authWarning) toast.warning(`${driver.first_name}: ${res.authWarning}`);
-
-            // Replicar los documentos del conductor y del vehículo a la App para
-            // que queden visibles en la pestaña Usuarios. El usuario/vehículo ya
-            // existen en la secundaria tras importDriverWithAuth.
-            const v = driver.vehicle as any;
-            const docs: Record<string, string | null | undefined> = {
-                verify_id_image: (driver as any).verify_id_image,
-                verify_id_image_bk: (driver as any).verify_id_image_bk,
-                license_image: (driver as any).license_image,
-                license_image_back: (driver as any).license_image_back,
-                car_image_1: v?.car_image_1,
-                car_image_2: v?.car_image_2,
-                card_prop_image: v?.card_prop_image,
-                card_prop_image_back: v?.card_prop_image_back,
-                soat_image: v?.soat_image,
-                tecnomecanica_image: v?.tecnomecanica_image,
-            };
-            // La fila en la App puede conservar un id distinto al del primario:
-            // replicar usando el id real devuelto por import-driver.
-            const secondaryId = res.user?.id ?? driver.id;
-            const { warnings } = await DriverDocumentsService.replicateAllToSecondary(secondaryId, docs, email);
-            if (warnings.length) {
-                toast.warning(`${driver.first_name}: documentos sin replicar → ${warnings.join('; ')}`);
-            }
-
-            return { ok: true, authCreated: res.authCreated };
-        } catch (error: any) {
-            toast.error(`Error al importar ${driver.first_name}: ${error?.message || 'desconocido'}`);
-            return { ok: false, authCreated: false };
+            const res = await UsersSecondaryService.importDriverWithAuth({id:driver.id,email:emailFor(driver),
+              first_name:driver.first_name,last_name:driver.last_name});
+            await fetchDrivers();
+            if(res.authWarning) toast.info(res.authWarning);
+            return {ok:true,authCreated:res.authCreated};
+        } catch(error:any) {
+            toast.error(error.message || 'No se pudo crear acceso en core');
+            return {ok:false,authCreated:false};
         }
     };
 
     const handleImportOne = async (driver: EnrichedDriverProfile) => {
+        if (!window.confirm('¿Enviar una invitación de acceso al correo de este conductor en core?')) return;
         setImportingIds(prev => new Set(prev).add(driver.id));
         const res = await importOne(driver);
         setImportingIds(prev => {
@@ -297,7 +235,7 @@ export const DriversPage: React.FC = () => {
         });
         if (res.ok) {
             const name = `${driver.first_name} ${driver.last_name}`;
-            toast.success(`${name} importado a la App.`);
+            toast.success(`${name} con acceso en core.`);
             setPostImportNotice({
                 count: 1,
                 names: [name],
@@ -321,55 +259,13 @@ export const DriversPage: React.FC = () => {
         }
     };
 
-    const handleResyncOne = async (driver: EnrichedDriverProfile) => {
-        setImportingIds(prev => new Set(prev).add(driver.id));
-        const res = await importOne(driver);
-        setImportingIds(prev => {
-            const next = new Set(prev);
-            next.delete(driver.id);
-            return next;
-        });
-        if (res.ok) {
-            toast.success(`${driver.first_name} ${driver.last_name}: estado y vehículo re-sincronizados en la App.`);
-            await reconcileReferrals();
-        }
-    };
-
-    const handleBulkResync = async () => {
-        // Re-sincroniza a los conductores ya importados que estén en la lista filtrada
-        const targets = filteredAndSortedDrivers.filter(d => appAccessIds.has(d.id) && emailFor(d));
-        if (targets.length === 0) {
-            toast.error('No hay conductores importados para re-sincronizar.');
-            return;
-        }
-        if (!window.confirm(
-            `¿Re-sincronizar estado y vehículo de ${targets.length} conductor(es) ya importado(s)?\n\n` +
-            `Nota: a los conductores importados desde el dashboard se les restablece ` +
-            `la contraseña de la App a la genérica; los que se registraron directo ` +
-            `en la App conservan la suya.`
-        )) return;
-
-        setBulkResyncing(true);
-        let success = 0;
-        let failed = 0;
-        for (const d of targets) {
-            const res = await importOne(d);
-            if (res.ok) success++; else failed++;
-            if (targets.length > 1) await new Promise(r => setTimeout(r, 350));
-        }
-        if (success > 0) await reconcileReferrals();
-        setBulkResyncing(false);
-        if (success > 0) toast.success(`${success} conductor(es) re-sincronizado(s).`);
-        if (failed > 0) toast.error(`${failed} re-sincronización(es) fallaron.`);
-    };
-
     const handleBulkImport = async () => {
         const targets = drivers.filter(d => selectedIds.has(d.id) && !appAccessIds.has(d.id));
         if (targets.length === 0) {
             toast.error('No hay conductores válidos para importar en la selección.');
             return;
         }
-        if (!window.confirm(`¿Importar ${targets.length} conductor(es) a la App? Recibirán acceso de inicio de sesión.`)) return;
+        if (!window.confirm(`¿Enviar invitaciones por correo a ${targets.length} conductor(es) de core?`)) return;
 
         setBulkImporting(true);
         let success = 0;
@@ -417,13 +313,12 @@ export const DriversPage: React.FC = () => {
     };
 
     const handleDelete = async (driver: EnrichedDriverProfile) => {
-        if (window.confirm(`⚠️ ¿Estás seguro de que deseas ELIMINAR permanentemente a ${driver.first_name} ${driver.last_name}? Esta acción borrará sus datos y vehículo de la base de datos y no se puede deshacer.`)) {
+        if (window.confirm(`¿Deshabilitar a ${driver.first_name} ${driver.last_name}? Se conservará su historial.`)) {
             try {
                 setLoading(true);
-                const { error } = await supabase.from('users').delete().eq('id', driver.id);
-                if (error) throw error;
+                await UsersSecondaryService.toggleBlock(driver.id, true);
 
-                toast.success('Conductor eliminado de la base de datos exitosamente.');
+                toast.success('Conductor deshabilitado; historial conservado.');
                 fetchDrivers();
             } catch (error: any) {
                 toast.error('Error al eliminar: ' + error.message);
@@ -526,16 +421,7 @@ export const DriversPage: React.FC = () => {
             title="Conductores Web"
             actions={
                 <div className="flex items-center gap-2">
-                    {importedCount > 0 && (
-                        <Button
-                            variant="secondary"
-                            onClick={handleBulkResync}
-                            disabled={bulkResyncing || bulkImporting}
-                            title="Vuelve a enviar estado y vehículo de los conductores ya importados (los visibles según el filtro actual)"
-                        >
-                            {bulkResyncing ? 'Sincronizando...' : `Re-sincronizar importados (${importedCount})`}
-                        </Button>
-                    )}
+
                     <Button variant="secondary" onClick={handleExportCsv}>
                         Exportar CSV
                     </Button>
@@ -595,7 +481,7 @@ export const DriversPage: React.FC = () => {
                             Limpiar selección
                         </Button>
                         <Button onClick={handleBulkImport} disabled={bulkImporting}>
-                            {bulkImporting ? 'Importando...' : `Importar ${pendingImportCount} a la App`}
+                            {bulkImporting ? 'Invitando...' : `Invitar ${pendingImportCount} a core`}
                         </Button>
                     </div>
                 </div>
@@ -620,25 +506,13 @@ export const DriversPage: React.FC = () => {
                         onToggleSelect={toggleSelect}
                         onToggleSelectAll={toggleSelectAllVisible}
                         isRowSelectable={(r) => !appAccessIds.has(r.id)}
-                        rowActions={(r) => appAccessIds.has(r.id)
-                            ? (
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => handleResyncOne(r)}
-                                    disabled={importingIds.has(r.id) || !emailFor(r)}
-                                    className="!px-3 !py-1.5 !text-xs"
-                                    title="Vuelve a enviar estado y datos del vehículo a la App"
-                                >
-                                    {importingIds.has(r.id) ? 'Sincronizando...' : 'Re-sincronizar'}
-                                </Button>
-                            )
-                            : (
+                        rowActions={(r) => appAccessIds.has(r.id) ? null : (
                                 <Button
                                     onClick={() => handleImportOne(r)}
                                     disabled={importingIds.has(r.id) || !emailFor(r)}
                                     className="!px-3 !py-1.5 !text-xs"
                                 >
-                                    {importingIds.has(r.id) ? 'Importando...' : 'Importar a App'}
+                                    {importingIds.has(r.id) ? 'Importando...' : 'Invitar a core'}
                                 </Button>
                             )
                         }
@@ -656,69 +530,11 @@ export const DriversPage: React.FC = () => {
             />
 
             {postImportNotice && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPostImportNotice(null)}>
-                    <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-start gap-3 mb-4">
-                            <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xl shrink-0">!</div>
-                            <div>
-                                <h3 className="text-lg font-semibold text-slate-800">Importación completada — pasos pendientes</h3>
-                                <p className="text-sm text-slate-500 mt-0.5">
-                                    {postImportNotice.count === 1
-                                        ? `${postImportNotice.names[0]} fue importado a la App.`
-                                        : `${postImportNotice.count} conductores fueron importados a la App.`}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900 space-y-2">
-                            <p className="font-medium">⚠ Aún falta darles credenciales reales:</p>
-                            <p>
-                                Se creó una cuenta en la App con una <strong>contraseña temporal aleatoria</strong>, así que
-                                el conductor todavía no puede iniciar sesión con su clave habitual.
-                            </p>
-                            <p>Para que pueda entrar, elige una opción:</p>
-                            <ul className="list-disc pl-5 space-y-1">
-                                <li>
-                                    Pídele que use <strong>"Olvidé mi contraseña"</strong> en la App para establecer la suya
-                                    (recibirá un email con un link de reset).
-                                </li>
-                                <li>
-                                    O configura un <strong>trigger en el proyecto secundario</strong> que envíe una invitación
-                                    automática cuando se cree un usuario importado.
-                                </li>
-                            </ul>
-                        </div>
-
-                        {postImportNotice.authMissing.length > 0 && (
-                            <div className="mt-3 rounded-xl bg-rose-50 border border-rose-200 p-4 text-sm text-rose-900">
-                                <p className="font-medium mb-1">
-                                    🚫 {postImportNotice.authMissing.length} conductor(es) SIN cuenta de auth creada
-                                </p>
-                                <p className="mb-2">
-                                    El registro existe en la BD de la App, pero el signUp falló (probablemente por
-                                    <em> rate limit</em>). Para ellos debes crear el auth manualmente desde el panel
-                                    de Supabase o reintentar más tarde:
-                                </p>
-                                <ul className="list-disc pl-5 space-y-0.5 max-h-32 overflow-auto">
-                                    {postImportNotice.authMissing.map((n, i) => <li key={i}>{n}</li>)}
-                                </ul>
-                            </div>
-                        )}
-
-                        {postImportNotice.count > 1 && postImportNotice.names.length <= 10 && (
-                            <details className="mt-3 text-xs text-slate-500">
-                                <summary className="cursor-pointer hover:text-slate-700">Ver conductores importados</summary>
-                                <ul className="mt-2 list-disc pl-5 space-y-0.5">
-                                    {postImportNotice.names.map((n, i) => <li key={i}>{n}</li>)}
-                                </ul>
-                            </details>
-                        )}
-
-                        <div className="mt-5 flex justify-end">
-                            <Button onClick={() => setPostImportNotice(null)}>Entendido</Button>
-                        </div>
-                    </div>
-                </div>
+              <div role="status" className="mt-4 rounded-xl bg-sky-50 p-4">
+                <p>Acceso verificado en core para {postImportNotice.count} conductor(es).
+                Las cuentas nuevas reciben una invitación por correo para establecer su contraseña.</p>
+                <Button onClick={() => setPostImportNotice(null)}>Entendido</Button>
+              </div>
             )}
         </Page>
     );

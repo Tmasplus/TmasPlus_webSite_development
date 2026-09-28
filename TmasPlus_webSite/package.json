@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "core:sql": "node scripts/build-core-sql.mjs",
+    "test:core:sql": "node scripts/test-core-web.mjs",
+    "test:core:contract": "node scripts/verify-core-contract.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.3.1",
@@ -40,6 +43,7 @@
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
     "postcss": "^8.5.6",
+    "supabase": "^2.110.0",
     "tailwindcss": "^3.4.3",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.45.0",

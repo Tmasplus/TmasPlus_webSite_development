@@ -9,8 +9,8 @@ export default function DashboardLayout() {
   const { logout, profile } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarUser = profile ? {
-    usertype: profile.user_type,
-    profile_image: profile.profile_image,
+    usertype: profile.es_admin ? 'admin' : (profile.es_conductor ? 'driver' : 'customer'),
+    profile_image: profile.imagen_perfil,
     subusers: [{ InTurn: true, Name: "Administrador" }],
   } : null;
 
@@ -24,7 +24,7 @@ export default function DashboardLayout() {
           onClose={() => setSidebarOpen(false)}
           user={sidebarUser}
           isAnySubuserInTurn={true}
-          getDisplayName={() => [profile?.first_name, profile?.last_name].filter(Boolean).join(" ")}
+          getDisplayName={() => [profile?.nombre, profile?.apellido].filter(Boolean).join(" ")}
           defaultProfileImage={defaultProfileImage}
           handleLogout={async () => {
             await logout();

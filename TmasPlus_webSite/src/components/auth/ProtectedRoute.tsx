@@ -31,8 +31,8 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Verificación adicional: debe ser admin
-  if (profile?.user_type !== 'admin' || !profile?.approved || profile?.blocked) {
+  // Verificación adicional: debe ser admin (no bloqueado)
+  if (!profile?.es_admin || profile?.bloqueado) {
     return <Navigate to="/login" replace />;
   }
 

@@ -156,13 +156,9 @@ export default function AddBookingPage() {
     const perKm = isInter ? cat.price_per_km_inter : cat.price_per_km;
     const minFare = isInter ? cat.min_fare_inter : cat.min_fare;
 
-    // Alineado con Agente/backendRemoto y sistema_calculo: el precio por minuto
-    // se deriva de `valor_hora / 60`, NO del campo legacy `rate_per_hour` que
-    // en BD puede estar desincronizado. Si es intermunicipal, se aplica el
-    // factor inter (/0.5 = ×2) sobre el valor por minuto.
-    const valorHora = Number(cat.valor_hora) || 0;
-    const ratePerMinuteUrban = valorHora / 60;
-    const ratePerMinute = isInter ? ratePerMinuteUrban / 0.5 : ratePerMinuteUrban;
+    // Una sola fuente: tarifa horaria urbana o intermunicipal de core.
+    const valorHora = Number(isInter ? cat.rate_per_hour_inter : cat.rate_per_hour) || 0;
+    const ratePerMinute = valorHora / 60;
 
     const baseComponent = basePrice;
     const distComponent = perKm * distKm;
@@ -171,7 +167,7 @@ export default function AddBookingPage() {
     let oneWay = baseComponent + distComponent + timeComponent;
 
     const returnLeg = tripType === "Ida y regreso" ? oneWay * 0.8 : 0;
-    const waiting = tripType === "Ida y regreso" ? cat.valor_hora * hours : 0;
+    const waiting = tripType === "Ida y regreso" ? valorHora * hours : 0;
 
     // Detección automática de aeropuerto por coordenadas (Haversine, radio 1 km).
     // Portado de Agente/backendRemoto. Cero UI: si origen o destino cae en la

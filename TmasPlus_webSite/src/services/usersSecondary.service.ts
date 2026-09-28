@@ -57,7 +57,7 @@ export class UsersSecondaryService {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();
     const { data, error } = await sb
-      .from('users')
+      .from('web_users')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -77,7 +77,7 @@ export class UsersSecondaryService {
     };
 
     const { data, error } = await sb
-      .from('users')
+      .from('web_users')
       .insert(payload)
       .select()
       .single();
@@ -90,52 +90,23 @@ export class UsersSecondaryService {
     id: string,
     input: UpdateUserInput
   ): Promise<SecondaryUser> {
-    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
-    // se trata como anon en el proyecto secundario: un UPDATE directo no afecta
-    // filas y PostgREST no devuelve error (antes el cambio "se guardaba" pero no
-    // persistía). Por eso, igual que toggleBlock/setApproved/delete, la
-    // actualización se hace vía Edge Function con service role.
     const { user } = await this.updateViaFunction(id, { ...input });
     if (!user) throw new Error('No se pudo actualizar el usuario');
     return user;
   }
 
-  /**
-   * Actualiza la fila de `users` (y opcionalmente su `cars`) en la BD secundaria
-   * mediante la Edge Function `update-user` (service role). Devuelve las filas
-   * realmente guardadas para reflejarlas en la UI.
-   */
+  /** Updates profile and vehicle atomically in the consolidated test database. */
   static async updateViaFunction(
     id: string,
     userFields: Record<string, any>,
     car?: { id: string } & Record<string, any>,
   ): Promise<{ user: SecondaryUser | null; car: any | null }> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('update-user', {
-      body: { id, user: userFields, car },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    const { data, error } = await sb.rpc('web_admin_update_profile', {
+      p_id: id, p_user: userFields, p_car: car ?? null,
     });
-
-    if (error) {
-      let message = error.message || 'Error al actualizar usuario';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const body = await ctx.json();
-          if (body?.error) message = body.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.success) {
-      throw new Error('No se pudo actualizar el usuario');
-    }
-    return { user: (data.user as SecondaryUser) ?? null, car: data.car ?? null };
+    if (error) throw new Error(error.message || 'Error al actualizar usuario');
+    if (!data?.user) throw new Error('No se pudo actualizar el usuario');
+    return data;
   }
 
   /**
@@ -162,13 +133,13 @@ export class UsersSecondaryService {
 
     // 1. Resolver la fila users en la App (por id; respaldo por email).
     let { data: user } = await sb
-      .from('users')
+      .from('web_users')
       .select('id, auth_id')
       .eq('id', input.id)
       .maybeSingle();
     if (!user && input.email) {
       const { data: byEmail } = await sb
-        .from('users')
+        .from('web_users')
         .select('id, auth_id')
         .ilike('email', input.email.trim())
         .limit(1);
@@ -181,7 +152,7 @@ export class UsersSecondaryService {
       new Set([user.id, user.auth_id, input.authId].filter(Boolean) as string[])
     );
     const { data: cars } = await sb
-      .from('cars')
+      .from('web_cars')
       .select('id')
       .in('driver_id', driverIds)
       .order('is_active', { ascending: false })
@@ -213,104 +184,18 @@ export class UsersSecondaryService {
     return { synced: true, reason: car ? undefined : 'sin-vehiculo-en-app' };
   }
 
-  static async toggleBlock(
-    id: string,
-    blocked: boolean
-  ): Promise<SecondaryUser> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    // El dashboard se autentica contra el proyecto PRIMARIO, por lo que su token
-    // no es válido para escribir en el proyecto secundario (se trata como anon y
-    // el UPDATE no afecta filas -> 406). Por eso el bloqueo se hace vía Edge
-    // Function con service role, igual que delete-user.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('set-user-blocked', {
-      body: { id, blocked },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al cambiar el estado del usuario';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.user) {
-      throw new Error('No se pudo cambiar el estado del usuario');
-    }
-    return data.user as SecondaryUser;
+  static async toggleBlock(id: string, blocked: boolean): Promise<SecondaryUser> {
+    const { user } = await this.updateViaFunction(id, { blocked });
+    return user!;
   }
 
-  static async setApproved(
-    id: string,
-    approved: boolean
-  ): Promise<SecondaryUser> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    // Igual que toggleBlock: el dashboard se autentica contra el proyecto
-    // PRIMARIO, por lo que su token se trata como anon en el proyecto secundario
-    // y el UPDATE directo no afecta filas (406). La aprobación/rechazo se hace
-    // vía Edge Function con service role.
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('set-user-approved', {
-      body: { id, approved },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al cambiar el estado de aprobación';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const errBody = await ctx.json();
-          if (errBody?.error) message = errBody.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.user) {
-      throw new Error('No se pudo cambiar el estado de aprobación del usuario');
-    }
-    return data.user as SecondaryUser;
+  static async setApproved(id: string, approved: boolean): Promise<SecondaryUser> {
+    const { user } = await this.updateViaFunction(id, { approved, blocked: !approved });
+    return user!;
   }
 
   static async delete(id: string): Promise<void> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('delete-user', {
-      body: { id },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al eliminar usuario';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const body = await ctx.json();
-          if (body?.error) message = body.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (data?.authWarning) {
-      console.warn('[delete-user]', data.authWarning);
-    }
+    await this.toggleBlock(id, true);
   }
 
   /**
@@ -336,8 +221,9 @@ export class UsersSecondaryService {
     // estables aunque haya inserciones entre peticiones.
     for (let from = 0; ; ) {
       const { data, error } = await sb
-        .from('users')
+        .from('web_users')
         .select('id, email')
+        .not('auth_id', 'is', null)
         .order('id', { ascending: true })
         .range(from, from + pageSize - 1);
       // PGRST103: rango fuera del total → fin de la lista, no es un error.
@@ -376,7 +262,7 @@ export class UsersSecondaryService {
     if (unique.length === 0) return {};
     await syncSession();
     const { data, error } = await sb
-      .from('users')
+      .from('web_users')
       .select('id, document_number, document_type')
       .in('id', unique);
     if (error) {
@@ -409,7 +295,7 @@ export class UsersSecondaryService {
     const map: Record<string, string> = {};
     for (const idsChunk of chunk(ids)) {
       const { data, error } = await sb
-        .from('cars')
+        .from('web_cars')
         .select('driver_id, service_type, is_active, updated_at')
         .in('driver_id', idsChunk)
         .order('is_active', { ascending: false })
@@ -444,7 +330,7 @@ export class UsersSecondaryService {
     await syncSession();
 
     const { data: user, error: userErr } = await sb
-      .from('users')
+      .from('web_users')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
@@ -454,7 +340,7 @@ export class UsersSecondaryService {
 
     const driverIds = [userId, authId].filter(Boolean) as string[];
     const { data: cars, error: carErr } = await sb
-      .from('cars')
+      .from('web_cars')
       .select('*')
       .in('driver_id', driverIds)
       // El vehículo activo primero; ante empate, el más reciente.
@@ -471,7 +357,7 @@ export class UsersSecondaryService {
   static async existsById(id: string): Promise<boolean> {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();
-    const { data, error } = await sb.from('users').select('id').eq('id', id).maybeSingle();
+    const { data, error } = await sb.from('web_users').select('id').eq('id', id).maybeSingle();
     if (error && (error as any).code !== 'PGRST116') {
       throw new Error(error.message || 'Error al verificar usuario');
     }
@@ -500,8 +386,8 @@ export class UsersSecondaryService {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    const { data, error } = await sb.functions.invoke('create-driver', {
-      body: input,
+    const { data, error } = await sb.functions.invoke('core-create-user', {
+      body: { ...input, user_type: 'driver' },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
 
@@ -522,6 +408,8 @@ export class UsersSecondaryService {
   }
 
   static async createCustomerWithAuth(input: {
+    user_type?: 'customer' | 'company';
+    company_name?: string;
     email: string;
     password: string;
     first_name: string;
@@ -537,8 +425,8 @@ export class UsersSecondaryService {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    const { data, error } = await sb.functions.invoke('create-customer', {
-      body: input,
+    const { data, error } = await sb.functions.invoke('core-create-user', {
+      body: { ...input, user_type: input.user_type ?? 'customer' },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
 
@@ -582,35 +470,9 @@ export class UsersSecondaryService {
       service_type?: string | null;
     } | null;
   }): Promise<{ user: SecondaryUser; authCreated: boolean; authWarning?: string }> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('import-driver', {
-      body: driver,
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      // functions.invoke envuelve el error HTTP; intentar extraer mensaje del cuerpo
-      let message = error.message || 'Error al importar conductor';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const body = await ctx.json();
-          if (body?.error) message = body.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    if (!data?.user) throw new Error('Respuesta inválida de import-driver');
-    return {
-      user: data.user as SecondaryUser,
-      authCreated: !!data.authCreated,
-      authWarning: data.authWarning,
-    };
+    const { data, error } = await sb.functions.invoke('core-invite-user', {body: {id:driver.id}});
+    if (error || data?.error) throw new Error(data?.error || error?.message || 'No se pudo crear el acceso');
+    return data;
   }
 
   /**
@@ -624,32 +486,8 @@ export class UsersSecondaryService {
     primary: { updated: number };
     secondary: { updated: number };
   }> {
-    if (!sb) throw new Error('Cliente secundario no configurado');
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('No hay sesión activa');
-
-    const { data, error } = await sb.functions.invoke('reconcile-referrals', {
-      body: {},
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-
-    if (error) {
-      let message = error.message || 'Error al reconciliar referidos';
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const b = await ctx.json();
-          if (b?.error) message = b.error;
-        } catch { /* noop */ }
-      }
-      throw new Error(message);
-    }
-
-    return {
-      totalUpdated: data?.totalUpdated ?? 0,
-      primary: { updated: data?.primary?.updated ?? 0 },
-      secondary: { updated: data?.secondary?.updated ?? 0 },
-    };
+    const {data,error} = await sb.rpc('web_reconcile_referrals');
+    if(error) throw new Error(error.message);
+    return {totalUpdated:data,primary:{updated:data},secondary:{updated:0}};
   }
 }

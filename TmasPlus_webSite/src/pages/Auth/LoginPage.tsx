@@ -34,7 +34,7 @@ export const LoginPage: React.FC = () => {
 
     // Driver (BD secundaria o legacy en principal)
     if (mode === 'driver') {
-      if (profile.user_type === 'driver' && !profile.approved && profile.auth_id) {
+      if (profile.es_conductor && !profile.aprobado && profile.auth_id) {
         // Caso legacy: sesión driver-en-registro contra la BD principal.
         // Tratamos de validar docs en principal; si falla seguimos al resumen.
         (async () => {

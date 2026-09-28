@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import type { UserRow } from '@/config/database.types';
+import type { PerfilDashboard } from '@/config/domain.types';
 import { AuthService, type AuthMode, type LoginCredentials, type AuthResponse } from '@/services/auth.service';
 import { ErrorHandler } from '@/utils/errorHandler';
 import { toast } from '@/utils/toast';
@@ -8,7 +8,7 @@ import { toast } from '@/utils/toast';
 interface AuthState {
   user: User | null;
   session: Session | null;
-  profile: UserRow | null;
+  profile: PerfilDashboard | null;
   mode: AuthMode | null;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -57,9 +57,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const hasPrincipal = !!(session && user && profile);
 
       if (hasPrincipal) {
-        const isAdmin = profile!.user_type === 'admin' && profile!.approved && !profile!.blocked;
+        const isAdmin = profile!.es_admin && !profile!.bloqueado;
         const isRegisteringDriver = window.location.pathname.includes('/register-driver');
-        const isUnapprovedDriver = profile!.user_type === 'driver' && profile!.approved !== true;
+        const isUnapprovedDriver = profile!.es_conductor && profile!.aprobado !== true;
 
         if (!isAdmin && (isRegisteringDriver || isUnapprovedDriver)) {
           // Sesión temporal de driver-en-registro contra principal (flujo legacy)
@@ -83,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const driverProfile = await AuthService.getCurrentDriverProfile();
 
       if (driverSession && driverProfile) {
-        if (driverProfile.blocked) {
+        if (driverProfile.bloqueado) {
           updateAuthState({ ...initialState, isLoading: false });
           return false;
         }
@@ -175,7 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const principal = await AuthService.getCurrentProfile();
       if (principal) {
-        updateAuthState({ profile: principal, mode: principal.user_type === 'admin' ? 'admin' : 'driver' });
+        updateAuthState({ profile: principal, mode: principal.es_admin ? 'admin' : 'driver' });
         return;
       }
       const driverProfile = await AuthService.getCurrentDriverProfile();

@@ -441,14 +441,59 @@ function Directions({
       return;
     }
 
-    if (!MAPBOX_ACCESS_TOKEN) {
-      console.error("Falta VITE_MAPBOX_ACCESS_TOKEN — no se puede calcular la ruta.");
-      onRouteInfo(null);
-      return;
-    }
-
     let cancelled = false;
     const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+
+    // Mapbox sigue siendo la fuente preferida para mantener paridad con la app.
+    // En ambientes de prueba puede no estar configurado; en ese caso Google
+    // Directions evita bloquear por completo la creación de la reserva.
+    if (!MAPBOX_ACCESS_TOKEN) {
+      const directions = new google.maps.DirectionsService();
+      directions.route(
+        {
+          origin: { lat: origin.latitude, lng: origin.longitude },
+          destination: { lat: destination.latitude, lng: destination.longitude },
+          travelMode: google.maps.TravelMode.DRIVING,
+        },
+        (result, status) => {
+          if (cancelled) return;
+          const route = result?.routes?.[0];
+          const leg = route?.legs?.[0];
+          if (status !== google.maps.DirectionsStatus.OK || !route || !leg?.distance || !leg.duration) {
+            console.error("Google Directions error:", status);
+            onRouteInfo(null);
+            return;
+          }
+
+          const path = route.overview_path;
+          polylineRef.current?.setMap(null);
+          polylineRef.current = new google.maps.Polyline({
+            path,
+            map,
+            strokeColor: "#00204a",
+            strokeOpacity: 0.85,
+            strokeWeight: 5,
+          });
+
+          onRouteInfo({
+            distanceKm: +(leg.distance.value / 1000).toFixed(1),
+            durationMin: leg.duration.value / 60,
+            geometry: {
+              type: "LineString",
+              coordinates: path.map((point) => [point.lng(), point.lat()]),
+            },
+          });
+
+          const bounds = new google.maps.LatLngBounds();
+          path.forEach((point) => bounds.extend(point));
+          map.fitBounds(bounds, 80);
+        }
+      );
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     fetch(
       `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`

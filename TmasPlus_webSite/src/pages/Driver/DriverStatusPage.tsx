@@ -76,7 +76,7 @@ export const DriverStatusPage: React.FC = () => {
 
     if (isSecondaryDriver) {
       const carsRes = await supabaseSecondary!
-        .from('cars')
+        .from('web_cars')
         .select('*')
         .eq('driver_id', profile.id)
         .limit(1);
@@ -201,7 +201,7 @@ export const DriverStatusPage: React.FC = () => {
       const url = await uploadToSecondaryStorage(path, file);
 
       const { error: updateErr } = await supabaseSecondary
-        .from('users')
+        .from('web_users')
         .update({ [field]: url, updated_at: new Date().toISOString() })
         .eq('id', profile.id);
       if (updateErr) throw updateErr;
@@ -232,7 +232,7 @@ export const DriverStatusPage: React.FC = () => {
       const url = await uploadToSecondaryStorage(path, file);
 
       const { error: updateErr } = await supabaseSecondary
-        .from('cars')
+        .from('web_cars')
         .update({ [field]: url, updated_at: new Date().toISOString() })
         .eq('id', vehicle.id);
       if (updateErr) throw updateErr;
@@ -263,7 +263,7 @@ export const DriverStatusPage: React.FC = () => {
     try {
       // Validar placa única en la base secundaria (App)
       const { data: existing, error: existErr } = await supabaseSecondary
-        .from('cars')
+        .from('web_cars')
         .select('id')
         .eq('plate', plate)
         .limit(1);
@@ -274,7 +274,7 @@ export const DriverStatusPage: React.FC = () => {
       }
 
       const { data: created, error: insertErr } = await supabaseSecondary
-        .from('cars')
+        .from('web_cars')
         .insert({
           driver_id: profile.id,
           plate,

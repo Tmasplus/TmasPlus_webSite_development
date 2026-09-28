@@ -45,7 +45,7 @@ export class CarsService {
       }
 
       const { data: car, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .insert({
           ...data,
           is_active: data.is_active ?? true,
@@ -84,7 +84,7 @@ export class CarsService {
   static async getCarById(carId: string): Promise<CarRow | null> {
     try {
       const { data, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('*')
         .eq('id', carId)
         .single();
@@ -109,7 +109,7 @@ export class CarsService {
   static async getCarsByDriver(driverId: string): Promise<CarRow[]> {
     try {
       const { data, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('*')
         .eq('driver_id', driverId)
         .order('created_at', { ascending: false });
@@ -136,7 +136,7 @@ export class CarsService {
     pagination: PaginationOptions = { page: 1, limit: 20 }
   ): Promise<PaginatedResult<CarRow>> {
     try {
-      let query = supabase.from('cars').select('*', { count: 'exact' });
+      let query = supabase.from('web_cars').select('*', { count: 'exact' });
 
       // Aplicar filtros
       if (filters.driver_id) {
@@ -221,7 +221,7 @@ export class CarsService {
       }
 
       const { data: car, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .update({
           ...data,
           updated_at: new Date().toISOString(),
@@ -258,7 +258,7 @@ export class CarsService {
   static async deleteCar(carId: string): Promise<boolean> {
     try {
       const { error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .update({ is_active: false, updated_at: new Date().toISOString() })
         .eq('id', carId);
 
@@ -281,7 +281,7 @@ export class CarsService {
    */
   static async hardDeleteCar(carId: string): Promise<boolean> {
     try {
-      const { error } = await supabase.from('cars').delete().eq('id', carId);
+      const { error } = await supabase.from('web_cars').delete().eq('id', carId);
 
       if (error) {
         throw ErrorHandler.createError(
@@ -305,7 +305,7 @@ export class CarsService {
   static async plateExists(plate: string): Promise<boolean> {
     try {
       const { data, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('id')
         .eq('plate', plate)
         .maybeSingle();
@@ -330,7 +330,7 @@ export class CarsService {
   static async driverHasCars(driverId: string): Promise<boolean> {
     try {
       const { data, error } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('id')
         .eq('driver_id', driverId)
         .limit(1);
@@ -524,7 +524,7 @@ export class CarsService {
     documentsExpired: number;
   }> {
     try {
-        const { data: allCarsData } = await supabase.from('cars').select('*');
+        const { data: allCarsData } = await supabase.from('web_cars').select('*');
 
         // Tipar explícitamente como CarRow[]
         const allCars: CarRow[] = (allCarsData || []) as CarRow[];
@@ -617,7 +617,7 @@ export class CarsService {
   static async getCarsWithExpiringDocuments(daysThreshold = 30): Promise<CarRow[]> {
     try {
         const { data: allCarsData } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('*')
         .eq('is_active', true);
       
@@ -661,7 +661,7 @@ export class CarsService {
   static async getCarsWithExpiredDocuments(): Promise<CarRow[]> {
     try {
         const { data: allCarsData } = await supabase
-        .from('cars')
+        .from('web_cars')
         .select('*')
         .eq('is_active', true);
       

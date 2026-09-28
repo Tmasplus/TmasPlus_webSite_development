@@ -133,7 +133,7 @@ export default function EditMembershipModal({
       toast.error("Selecciona un conductor o usuario");
       return;
     }
-    if (!selected.auth_id) {
+    if (!selected.id) {
       toast.error("El usuario seleccionado no tiene auth_id válido");
       return;
     }
@@ -152,7 +152,7 @@ export default function EditMembershipModal({
 
     console.log("Updating membership:", {
       uid: membership.uid,
-      conductor: selected.auth_id,
+      conductor: selected.id,
       status,
       costo,
       fecha_inicio: fechaInicio,
@@ -163,7 +163,7 @@ export default function EditMembershipModal({
     setSubmitting(true);
     try {
       await MembershipsService.update(membership.uid, {
-        conductor: selected.auth_id,
+        conductor: selected.id,
         status,
         costo,
         fecha_inicio: fechaInicio,
@@ -349,7 +349,7 @@ export default function EditMembershipModal({
               className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             >
               <option value="ACTIVA">ACTIVA</option>
-              <option value="INACTIVA">INACTIVA</option>
+              <option value="PENDIENTE">PENDIENTE</option>
               <option value="CANCELADA">CANCELADA</option>
               <option value="VENCIDA">VENCIDA</option>
             </select>

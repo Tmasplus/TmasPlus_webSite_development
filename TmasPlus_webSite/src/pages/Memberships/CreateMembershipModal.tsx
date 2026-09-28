@@ -95,7 +95,7 @@ export default function CreateMembershipModal({
       toast.error("Selecciona un conductor o usuario");
       return;
     }
-    if (!selected.auth_id) {
+    if (!selected.id) {
       toast.error("El usuario seleccionado no tiene auth_id válido");
       return;
     }
@@ -115,7 +115,7 @@ export default function CreateMembershipModal({
     setSubmitting(true);
     try {
       await MembershipsService.create({
-        conductor: selected.auth_id,
+        conductor: selected.id,
         status: "ACTIVA",
         costo,
         fecha_inicio: fechaInicio,

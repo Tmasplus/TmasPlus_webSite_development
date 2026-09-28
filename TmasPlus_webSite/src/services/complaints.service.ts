@@ -16,7 +16,6 @@ const sb = supabaseSecondary as any;
 
 async function syncSession() {
   const { data: { session } } = await supabase.auth.getSession();
-  console.log('[complaints] syncSession token:', session?.access_token ? '✅ OK' : '❌ null');
   if (!session?.access_token) throw new Error('No hay sesión activa');
   sb.rest.headers['Authorization'] = `Bearer ${session.access_token}`;
 }
@@ -26,7 +25,7 @@ type UserSnippet = Pick<UserRow, 'id' | 'first_name' | 'last_name' | 'email' | '
 async function fetchUsersById(ids: string[]): Promise<Record<string, UserSnippet>> {
   if (ids.length === 0) return {};
   const { data, error } = await sb
-    .from('users')
+    .from('web_users')
     .select('id, first_name, last_name, email, mobile')
     .in('id', ids);
   if (error) throw new Error(error.message);
@@ -47,7 +46,7 @@ export class ComplaintsService {
       const offset = (page - 1) * limit;
 
       let query = sb
-        .from('complaints')
+        .from('web_complaints')
         .select('*', { count: 'exact' });
 
       if (filters.status && filters.status !== 'all') {
@@ -73,7 +72,6 @@ export class ComplaintsService {
 
       const { data, error, count } = await query;
 
-      console.log('[complaints] raw result:', { count, rows: data?.length, error, firstRow: data?.[0] });
 
       if (error) {
         throw ErrorHandler.createError(
@@ -110,7 +108,7 @@ export class ComplaintsService {
     try {
       await syncSession();
       const { data, error } = await sb
-        .from('complaints')
+        .from('web_complaints')
         .select('*')
         .eq('id', id)
         .single();
@@ -136,8 +134,8 @@ export class ComplaintsService {
     try {
       await syncSession();
       const { data, error } = await sb
-        .from('complaints')
-        .insert(payload)
+        .from('web_complaints')
+        .insert(Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'user_type')))
         .select()
         .single();
 
@@ -162,7 +160,7 @@ export class ComplaintsService {
     try {
       await syncSession();
       const { data, error } = await sb
-        .from('complaints')
+        .from('web_complaints')
         .update({
           ...updates,
           updated_at: new Date().toISOString(),
@@ -193,7 +191,7 @@ export class ComplaintsService {
     const updates: ComplaintUpdate = { status };
     // resolved_by referencia users.id del proyecto secundario; los admins viven en
     // el proyecto primario, así que dejamos siempre null para no romper la FK.
-    updates.resolved_by = null;
+    updates.resolved_by = _adminId ?? null;
     updates.resolved_at = status === 'resolved' ? new Date().toISOString() : null;
     return this.updateComplaint(id, updates);
   }
@@ -207,7 +205,7 @@ export class ComplaintsService {
     const updates: ComplaintUpdate = {
       admin_response: adminResponse,
       status: markResolved ? 'resolved' : 'in_review',
-      resolved_by: null,
+      resolved_by: _adminId,
     };
     if (markResolved) {
       updates.resolved_at = new Date().toISOString();
@@ -230,7 +228,7 @@ export class ComplaintsService {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('No hay sesión activa');
 
-    const { data, error } = await sb.functions.invoke('send-complaint-response', {
+    const { data, error } = await sb.functions.invoke('core-complaint-response', {
       body: { complaintId },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
@@ -271,7 +269,7 @@ export class ComplaintsService {
     try {
       await syncSession();
       const { data, error } = await sb
-        .from('complaints')
+        .from('web_complaints')
         .select('status, priority');
 
       if (error) {

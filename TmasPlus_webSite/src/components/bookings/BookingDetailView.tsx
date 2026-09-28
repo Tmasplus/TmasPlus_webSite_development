@@ -97,6 +97,9 @@ function statusLabel(status: string) {
     ACCEPTED: "ACEPTADA",
     STARTED: "INICIADA",
     ARRIVED: "EN PUNTO",
+    ARRIVED_PICKUP: "EN PUNTO DE RECOGIDA",
+    ARRIVED_DESTINATION: "EN DESTINO",
+    PAID: "PAGADA",
     PICKED_UP: "EN VIAJE",
     CONFIRMED: "CONFIRMADA",
   };
@@ -113,6 +116,9 @@ function statusClassName(status: string) {
     CONFIRMED: "bg-sky-50 text-sky-700 border-sky-200",
     STARTED: "bg-indigo-50 text-indigo-700 border-indigo-200",
     ARRIVED: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    ARRIVED_PICKUP: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    ARRIVED_DESTINATION: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    PAID: "bg-emerald-50 text-emerald-700 border-emerald-200",
     PICKED_UP: "bg-indigo-50 text-indigo-700 border-indigo-200",
   };
   return statusStyles[status] || "bg-slate-50 text-slate-700 border-slate-200";

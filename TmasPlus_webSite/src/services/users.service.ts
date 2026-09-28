@@ -20,7 +20,7 @@ export class UsersService {
   static async getUserById(userId: string): Promise<UserRow | null> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .select('*')
         .eq('id', userId)
         .single();
@@ -45,7 +45,7 @@ export class UsersService {
   static async getUserByEmail(email: string): Promise<UserRow | null> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .select('*')
         .eq('email', email)
         .single();
@@ -71,7 +71,7 @@ export class UsersService {
   static async getUserByAuthId(authId: string): Promise<UserRow | null> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .select('*')
         .eq('auth_id', authId)
         .single();
@@ -96,7 +96,7 @@ export class UsersService {
   static async createUser(userData: UserInsert): Promise<UserRow> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .insert(userData)
         .select()
         .single();
@@ -121,7 +121,7 @@ export class UsersService {
   static async updateUser(userId: string, updates: UserUpdate): Promise<UserRow> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .update({
           ...updates,
           updated_at: new Date().toISOString(),
@@ -150,7 +150,7 @@ export class UsersService {
   static async deleteUser(userId: string): Promise<boolean> {
     try {
       const { error } = await supabase
-        .from('users')
+        .from('web_users')
         .update({
           blocked: true,
           updated_at: new Date().toISOString(),
@@ -190,7 +190,7 @@ export class UsersService {
     approved: boolean
   ): Promise<UserRow> {
     try {
-      return await this.updateUser(userId, { approved });
+      return await this.updateUser(userId, { approved, blocked: !approved });
     } catch (error) {
       throw ErrorHandler.handleWithToast(error, 'UsersService.updateDriverApproval');
     }
@@ -223,7 +223,7 @@ export class UsersService {
 
       // Construir query base
       let query = supabase
-        .from('users')
+        .from('web_users')
         .select('*', { count: 'exact' })
         .eq('user_type', 'driver');
 
@@ -355,7 +355,7 @@ export class UsersService {
   }> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .select('approved, blocked, driver_active_status')
         .eq('user_type', 'driver');
 
@@ -429,7 +429,7 @@ export class UsersService {
    */
   static async emailExists(email: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase.rpc('check_user_availability', { 
+      const { data, error } = await supabase.rpc('verificar_disponibilidad', {
         p_email: email.trim().toLowerCase() 
       });
 
@@ -446,8 +446,8 @@ export class UsersService {
    */
   static async phoneExists(mobile: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase.rpc('check_user_availability', { 
-        p_mobile: mobile.trim() 
+      const { data, error } = await supabase.rpc('verificar_disponibilidad', {
+        p_telefono: mobile.trim()
       });
 
       if (error) throw error;
@@ -464,7 +464,7 @@ export class UsersService {
   static async getDriverCities(): Promise<string[]> {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('web_users')
         .select('city')
         .eq('user_type', 'driver')
         .not('city', 'is', null);
