@@ -9,6 +9,7 @@ import { toast } from "@/utils/toast";
 import DocumentUploadModal from "./DocumentUpload/DocumentUploadModal";
 import { CITIES, DOCUMENT_TYPE_OPTIONS, DOCUMENT_TYPE_LABELS } from "@/config/constants";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
+import { useCarBrands } from "@/hooks/useCarBrands";
 import { activeCategoryOptions, documentProfileForCategoryValue } from "@/utils/carTypeCatalog";
 
 const SECONDARY_DOC_BUCKET = "driver-documents";
@@ -262,7 +263,11 @@ const FIELD_DEFS: FieldDef[] = [
   {
     id: "marcaVehiculo",
     label: "Marca",
-    kind: "input",
+    kind: "select",
+    // El trigger web_cars_write solo acepta una marca que ya exista y esté
+    // activa en marca_vehiculo, por eso es un select alimentado por el
+    // catálogo (ver carBrandOptions más abajo) en vez de texto libre.
+    options: [],
     showWhen: (t) => t === "conductor",
     required: true
   },
@@ -326,6 +331,11 @@ type UploadedDocs = Record<string, File[]>;
 export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedType }) => {
   const { categories: carTypes } = useCarTypeCatalog();
   const carTypeOptions = useMemo(() => activeCategoryOptions(carTypes), [carTypes]);
+  const { brands: carBrands } = useCarBrands();
+  const carBrandOptions = useMemo(
+    () => carBrands.map((b) => ({ value: b.name, label: b.name })),
+    [carBrands]
+  );
   const [type, setType] = useState<UserType>(lockedType ?? "cliente");
   const [form, setForm] = useState<FormState>(initialForm);
   const [acceptTerms, setAcceptTerms] = useState(false);
@@ -353,9 +363,11 @@ export const AddUserModal: React.FC<Props> = ({ open, onClose, onSubmit, lockedT
       .map((field) =>
         field.id === "tipoVehiculo"
           ? { ...field, options: carTypeOptions }
+          : field.id === "marcaVehiculo"
+          ? { ...field, options: carBrandOptions }
           : field
       ),
-    [type, form, carTypeOptions]
+    [type, form, carTypeOptions, carBrandOptions]
   );
 
   function update<K extends keyof FormState>(k: K, v: FormState[K]) { setForm((s) => ({ ...s, [k]: v })); }

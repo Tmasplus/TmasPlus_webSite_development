@@ -9,6 +9,7 @@ import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driver
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import { CITIES, DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
+import { useCarBrands } from '@/hooks/useCarBrands';
 import { activeCategoryOptions, categoryForValue, categoryNameForValue, legacyCategoryLabel } from '@/utils/carTypeCatalog';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
@@ -175,6 +176,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 }) => {
     const { categories: carTypes } = useCarTypeCatalog();
     const categoryOptions = activeCategoryOptions(carTypes);
+    const { brands: carBrands } = useCarBrands();
     const dbClient: any = source === 'secondary' && supabaseSecondary ? supabaseSecondary : supabase;
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -471,8 +473,23 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         <span className="font-semibold text-slate-500 block">Marca / Modelo:</span>
                                         {isEditing ? (
                                             <div className="flex gap-2 mt-1">
-                                                {/* 2. SOLUCIÓN TS: Evitamos el ! usando ternarios seguros o un cast robusto */}
-                                                <input className="border p-1 rounded w-full" value={editForm.vehicle?.make || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : { make: e.target.value } as any })} />
+                                                {/* Marca: el trigger web_cars_write solo acepta una marca que ya
+                                                    exista y esté activa en marca_vehiculo, por eso es un select
+                                                    alimentado por el catálogo en vez de texto libre. */}
+                                                <select
+                                                    className="border p-1 rounded w-full"
+                                                    value={editForm.vehicle?.make || ''}
+                                                    onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : { make: e.target.value } as any })}
+                                                >
+                                                    <option value="">Seleccionar</option>
+                                                    {editForm.vehicle?.make &&
+                                                        !carBrands.some(b => b.name.toLowerCase() === editForm.vehicle!.make!.toLowerCase()) && (
+                                                            <option value={editForm.vehicle.make}>{editForm.vehicle.make} (actual)</option>
+                                                        )}
+                                                    {carBrands.map((b) => (
+                                                        <option key={b.id} value={b.name}>{b.name}</option>
+                                                    ))}
+                                                </select>
                                                 <input className="border p-1 rounded w-full" value={editForm.vehicle?.model || ''} onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, model: e.target.value } : { model: e.target.value } as any })} />
                                             </div>
                                         ) : <p>{d.vehicle.make} {d.vehicle.model}</p>}
