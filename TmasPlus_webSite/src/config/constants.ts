@@ -44,11 +44,18 @@ export const APP_CONFIG = {
   // Tipos de documento. El `value` es lo que se guarda en BD (document_type);
   // el `label` es lo que se muestra al usuario. Fuente única de verdad para el
   // selector (AddUserModal) y para las vistas de solo lectura (DriverReviewModal).
+  //
+  // El trigger web_users_write valida este valor contra public.tipo_documento
+  // en core (nombre: CC, CE, NIT, PA) y rechaza cualquier otro con "Tipo de
+  // documento inexistente o ambiguo". Los valores antiguos ('ced', 'pasaporte',
+  // 'licencia') no existen ahí — 'licencia' tampoco aplica: la licencia de
+  // conducción se maneja aparte (license_number / license_image), no es un
+  // tipo de documento de identidad.
   export const DOCUMENT_TYPE_OPTIONS = [
-    { value: 'ced', label: 'Cédula' },
-    { value: 'pasaporte', label: 'Pasaporte' },
-    { value: 'licencia', label: 'Licencia' },
-    { value: 'nit', label: 'NIT / RIF' },
+    { value: 'CC', label: 'Cédula de Ciudadanía' },
+    { value: 'CE', label: 'Cédula de Extranjería' },
+    { value: 'PA', label: 'Pasaporte' },
+    { value: 'NIT', label: 'NIT' },
   ] as const;
 
   export const DOCUMENT_TYPE_LABELS: Record<string, string> = Object.fromEntries(
