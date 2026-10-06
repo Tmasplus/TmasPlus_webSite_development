@@ -487,6 +487,21 @@ export class UsersSecondaryService {
     return data;
   }
 
+  /** Estado de confirmación del correo del conductor (solo admin). */
+  static async getEmailStatus(id: string): Promise<{ confirmed: boolean; email: string }> {
+    const { data, error } = await sb.functions.invoke('core-driver-email', { body: { id, action: 'status' } });
+    if (error || data?.error) throw new Error(data?.error || error?.message || 'No se pudo consultar el correo');
+    return data;
+  }
+
+  /** Reenvía la confirmación; con `email` primero lo corrige en Auth y perfil. */
+  static async resendConfirmation(id: string, email?: string): Promise<{ email: string }> {
+    const body = email ? { id, action: 'update_email', email } : { id, action: 'resend' };
+    const { data, error } = await sb.functions.invoke('core-driver-email', { body });
+    if (error || data?.error) throw new Error(data?.error || error?.message || 'No se pudo reenviar la confirmación');
+    return data;
+  }
+
   /**
    * Reconcilia el contador de referidos (referral_codes.total_referrals) en
    * ambos proyectos a partir de users.referral_id. Es una operación global

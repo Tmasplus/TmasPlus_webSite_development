@@ -192,6 +192,12 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     // secundarias y los documentos subidos por el panel no se veían ("Falta").
     const [primaryDocs, setPrimaryDocs] = useState<Record<string, string | null>>({});
 
+    // Confirmación de correo (solo conductores): null = desconocido/no aplica.
+    const [emailStatus, setEmailStatus] = useState<{ confirmed: boolean; email: string } | null>(null);
+    const [resending, setResending] = useState(false);
+    const [fixingEmail, setFixingEmail] = useState(false);
+    const [newEmail, setNewEmail] = useState('');
+
     const loadSecondaryDocs = (id: string, email?: string | null) => {
         DriverDocumentsService.getSecondaryDocs(id, email)
             .then(setSecondaryDocs)
@@ -213,6 +219,13 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setPrimaryDocs({});
         loadSecondaryDocs(driver.id, driver.email);
         if (source === 'secondary') loadPrimaryDocs(driver.id, driver.email);
+
+        setEmailStatus(null);
+        setFixingEmail(false);
+        setNewEmail('');
+        if (source === 'primary' && (driver.user_type || '').toLowerCase() !== 'customer') {
+            UsersSecondaryService.getEmailStatus(driver.id).then(setEmailStatus).catch(() => setEmailStatus(null));
+        }
 
         // Tanto conductores como clientes tienen su propio código de referido en
         // la tabla referral_codes (driver_id = users.id). Lo cargamos para ambos.
@@ -273,6 +286,22 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             onClose();
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResendConfirmation = async (email?: string) => {
+        setResending(true);
+        try {
+            const res = await UsersSecondaryService.resendConfirmation(driver.id, email);
+            setEmailStatus({ confirmed: false, email: res.email });
+            setFixingEmail(false);
+            setNewEmail('');
+            toast.success(`Correo de confirmación enviado a ${res.email}`);
+            if (email) onRefresh();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'No se pudo reenviar la confirmación');
+        } finally {
+            setResending(false);
         }
     };
 
@@ -392,6 +421,27 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         </select>
                                     ) : <p>{d.city}</p>}
                                 </div>
+
+                                {emailStatus && !emailStatus.confirmed && (
+                                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                                        <span className="font-semibold text-amber-800 block">Correo sin confirmar</span>
+                                        <p className="text-amber-900 break-all">{emailStatus.email}</p>
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            <Button onClick={() => handleResendConfirmation()} disabled={resending}>
+                                                {resending ? 'Enviando…' : 'Reenviar confirmación'}
+                                            </Button>
+                                            <Button variant="secondary" onClick={() => setFixingEmail(v => !v)} disabled={resending}>
+                                                {fixingEmail ? 'Cancelar' : 'Corregir correo'}
+                                            </Button>
+                                        </div>
+                                        {fixingEmail && (
+                                            <div className="flex gap-2 mt-2">
+                                                <input type="email" className="border p-1 rounded w-full" placeholder="Correo correcto" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+                                                <Button onClick={() => handleResendConfirmation(newEmail)} disabled={resending || !newEmail.trim()}>Guardar y enviar</Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {isCustomer && (
                                     <div>
