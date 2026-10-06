@@ -398,6 +398,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/core-invite-user/index.ts"
 
+[functions.core-driver-email]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/core-driver-email/index.ts"
+
 [functions.core-complaint-response]
 enabled = true
 verify_jwt = false
