@@ -305,6 +305,9 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         }
     };
 
+    // Solo si la función admin respondió el estado (cuenta Auth enlazada, core).
+    const canEditEmail = !isCustomer && emailStatus !== null;
+
     const handleSaveEdit = async () => {
         setLoading(true);
         try {
@@ -332,6 +335,17 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 
             userPayload.document_number = cedula;
             if (isCustomer) userPayload.document_type = (editForm as any).document_type ?? null;
+
+            // El correo es el acceso del conductor: se cambia en Auth y perfil por la
+            // función admin (si no estaba confirmado, además reenvía la confirmación).
+            const nextEmail = ((editForm as any).email ?? '').trim().toLowerCase();
+            const emailChanged = canEditEmail && !!nextEmail && nextEmail !== (emailStatus?.email ?? '').toLowerCase();
+            if (emailChanged) {
+                const res = await UsersSecondaryService.resendConfirmation(driver.id, nextEmail);
+                setEmailStatus(prev => ({ confirmed: prev?.confirmed ?? false, email: res.email }));
+                (editForm as any).email = res.email;
+                toast.success(emailStatus?.confirmed ? `Correo actualizado a ${res.email}` : `Correo actualizado; confirmación enviada a ${res.email}`);
+            }
             await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
 
             // Reflejamos de inmediato lo guardado en la copia local para que el
@@ -421,6 +435,20 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         </select>
                                     ) : <p>{d.city}</p>}
                                 </div>
+
+                                {canEditEmail && (
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Correo:</span>
+                                        {isEditing ? (
+                                            <input
+                                                type="email"
+                                                className="border p-1 rounded w-full mt-1"
+                                                value={(editForm as any).email ?? emailStatus!.email}
+                                                onChange={e => setEditForm({ ...editForm, email: e.target.value } as any)}
+                                            />
+                                        ) : <p className="break-all">{emailStatus!.email}{emailStatus!.confirmed ? ' ✓' : ''}</p>}
+                                    </div>
+                                )}
 
                                 {emailStatus && !emailStatus.confirmed && (
                                     <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">

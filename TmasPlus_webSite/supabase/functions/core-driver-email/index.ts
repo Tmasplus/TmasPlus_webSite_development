@@ -14,19 +14,21 @@ Deno.serve(coreHandler(async(input,viewer,url)=>{
   if(getError || !found?.user) return json({error:'No se encontro la cuenta Auth'},404);
   const confirmed=!!found.user.email_confirmed_at;
   if(action==='status') return json({confirmed,email:found.user.email});
-  if(confirmed) return json({error:'El correo ya esta confirmado',confirmed:true},409);
+  if(confirmed && action==='resend') return json({error:'El correo ya esta confirmado',confirmed:true},409);
 
   let email=found.user.email as string;
   if(action==='update_email'){
     const next=typeof input.email==='string'?input.email.trim().toLowerCase():'';
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) return json({error:'Correo invalido'},400);
     if(next!==email){
-      const {error:updError}=await admin.auth.admin.updateUserById(user.auth_id,{email:next,email_confirm:false});
+      // Si ya estaba confirmado se conserva la confirmacion (correccion del admin, sin reenvio).
+      const {error:updError}=await admin.auth.admin.updateUserById(user.auth_id,{email:next,email_confirm:confirmed});
       if(updError) return json({error:'No se pudo cambiar el correo (puede estar en uso): '+updError.message},409);
       email=next;
       const synced=await viewer.from('web_users').update({email}).eq('id',user.id);
       if(synced.error) return json({error:'Correo cambiado en Auth pero no en el perfil. Reintente.',reconciliationRequired:true},503);
     }
+    if(confirmed) return json({confirmed:true,email,sent:false});
   }
   const base=Deno.env.get('CORE_WEB_URL');
   const {error:resendError}=await admin.auth.resend({
