@@ -223,7 +223,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setEmailStatus(null);
         setFixingEmail(false);
         setNewEmail('');
-        if (source === 'primary' && (driver.user_type || '').toLowerCase() !== 'customer') {
+        // `supabaseSecondary` es alias de core, así que aplica a ambos orígenes del modal.
+        if ((driver.user_type || '').toLowerCase() !== 'customer') {
             UsersSecondaryService.getEmailStatus(driver.id).then(setEmailStatus).catch(() => setEmailStatus(null));
         }
 
