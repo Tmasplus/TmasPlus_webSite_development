@@ -1,6 +1,7 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { legacyCategoryLabel } from '@/utils/carTypeCatalog';
 import { chunk } from '@/utils/chunk';
+import { excludeDeleted, isDeletedAccount } from '@/utils/deletedAccounts';
 
 export interface SecondaryUser {
   id: string;
@@ -68,13 +69,12 @@ export class UsersSecondaryService {
   static async list(): Promise<SecondaryUser[]> {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();
-    const { data, error } = await sb
-      .from('web_users')
-      .select(this.LIST_COLUMNS)
-      .order('created_at', { ascending: false });
+    const { data, error } = await excludeDeleted(
+      sb.from('web_users').select(this.LIST_COLUMNS)
+    ).order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message || 'Error al obtener usuarios');
-    return (data || []) as SecondaryUser[];
+    return ((data || []) as SecondaryUser[]).filter((u) => !isDeletedAccount(u));
   }
 
   static async create(input: CreateUserInput): Promise<SecondaryUser> {
@@ -206,8 +206,59 @@ export class UsersSecondaryService {
     return user!;
   }
 
+  /**
+   * Borrado PERMANENTE de la persona y sus datos asociados (viajes, tracking, logs...).
+   * `dryRun` (por defecto) solo devuelve cuántas filas se borrarían por tabla.
+   */
+  static async purge(id: string, dryRun = true): Promise<Record<string, number>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+    const { data, error } = await sb.functions.invoke('core-delete-user', {
+      body: { id, permanent: true, dry_run: dryRun },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error) {
+      let message = error.message || 'Error al eliminar permanentemente';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          message = body?.message || body?.error || message;
+        } catch { /* se conserva el mensaje genérico */ }
+      }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.message || data.error);
+    return data?.counts ?? {};
+  }
+
+  /**
+   * Elimina la cuenta igual que cuando el usuario la borra desde la App:
+   * se anonimiza (el correo original queda libre), se cierra su acceso y sale
+   * de los listados. El historial de viajes se conserva.
+   */
   static async delete(id: string): Promise<void> {
-    await this.toggleBlock(id, true);
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('No hay sesión activa');
+
+    const { data, error } = await sb.functions.invoke('core-delete-user', {
+      body: { id },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (error) {
+      let message = error.message || 'Error al eliminar usuario';
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          message = body?.message || body?.error || message;
+        } catch { /* se conserva el mensaje genérico */ }
+      }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.message || data.error);
   }
 
   /**

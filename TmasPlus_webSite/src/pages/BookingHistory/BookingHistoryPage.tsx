@@ -121,6 +121,12 @@ function FareCell({ min, max, empty }: { min: number | null; max: number | null;
   );
 }
 
+/** Fecha de ejecución: cuándo el viaje realmente inició (trip_start_time o, si no, viaje_inicio_en). */
+function executionIso(b: BookingRecord): string | null {
+  const ms = toEpochMs(b.trip_start_time) ?? toEpochMs(b.trip_started_at);
+  return ms ? new Date(ms).toISOString() : null;
+}
+
 function tripDurationMin(b: BookingRecord): number | null {
   const start = toEpochMs(b.trip_start_time);
   const end = toEpochMs(b.trip_end_time);
@@ -413,7 +419,8 @@ export default function BookingHistoryPage() {
     const headers = [
       "Referencia",
       "Fecha creación",
-      "Fecha servicio",
+      "Fecha programada",
+      "Fecha ejecución",
       "Cliente",
       "Email cliente",
       "Conductor",
@@ -441,7 +448,8 @@ export default function BookingHistoryPage() {
       return [
         b.reference || b.id,
         formatDate(b.created_at),
-        formatDate(b.booking_date),
+        b.booking_type === "SCHEDULED" ? formatDate(b.booking_date) : "",
+        executionIso(b) ? formatDate(executionIso(b)) : "",
         b.customer_name || "",
         b.customer_email || "",
         b.driver_name || "",
@@ -537,11 +545,11 @@ export default function BookingHistoryPage() {
     }
   };
 
-  const loadAssignableDrivers = async (query = "") => {
+  const loadAssignableDrivers = async (query = "", bookingId = assignBooking?.id) => {
     setAssignLoading(true);
     setAssignError(null);
     try {
-      const data = await BookingsService.listAssignableDrivers(query);
+      const data = await BookingsService.listAssignableDrivers(query, bookingId);
       setAssignDrivers(data);
     } catch (e: any) {
       setAssignError(e?.message || "Error al cargar conductores");
@@ -556,7 +564,7 @@ export default function BookingHistoryPage() {
     setAssignBooking(booking);
     setAssignQuery("");
     setAssignDrivers([]);
-    loadAssignableDrivers();
+    loadAssignableDrivers("", booking.id);
   };
 
   const closeAssignModal = () => {
@@ -695,7 +703,8 @@ export default function BookingHistoryPage() {
             <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:align-bottom">
               <th>Referencia</th>
               <th>Creación</th>
-              <th>Servicio</th>
+              <th>Programada</th>
+              <th>Ejecución</th>
               <th>Cliente</th>
               <th>Conductor / Placa</th>
               <th>Categoría</th>
@@ -717,7 +726,7 @@ export default function BookingHistoryPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={13} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
@@ -745,7 +754,8 @@ export default function BookingHistoryPage() {
                       </span>
                     </td>
                     <td><DateCell iso={b.created_at} /></td>
-                    <td><DateCell iso={b.booking_date} /></td>
+                    <td><DateCell iso={b.booking_type === "SCHEDULED" ? b.booking_date : null} /></td>
+                    <td><DateCell iso={executionIso(b)} /></td>
                     <td className="max-w-[220px]">
                       <div className="font-medium text-slate-800">{b.customer_name || "—"}</div>
                       <div className="truncate text-xs text-slate-500" title={b.customer_email || ""}>
@@ -822,7 +832,7 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={13} className="text-center py-6 text-slate-400">
+                <td colSpan={14} className="text-center py-6 text-slate-400">
                   {debouncedSearch || statusFilter !== "TODOS" || driverFilter || categoryFilter || dateFrom || dateTo
                     ? "Ninguna reserva coincide con la búsqueda o los filtros."
                     : "No hay reservas registradas."}

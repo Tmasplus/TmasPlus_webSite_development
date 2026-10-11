@@ -144,8 +144,15 @@ export class BookingsService {
     if (error) throw new Error(error.message);
     return this.recover(String(data));
   }
-  static async listAssignableDrivers(query = ''): Promise<AssignableDriver[]> {
-    const { data, error } = await db.rpc('web_assignable_drivers', { p_query: query });
+  /** Puntos GPS guardados de una reserva (RPC web_booking_tracking). `since` pide solo los posteriores. */
+  static async getTrackingPoints(bookingId: string, since?: string | null): Promise<Array<{ lat: number; lng: number; recorded_at: string }>> {
+    const { data, error } = await db.rpc('web_booking_tracking', { p_booking_id: bookingId, p_since: since ?? null });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((p: any) => ({ lat: Number(p.lat), lng: Number(p.lng), recorded_at: p.recorded_at }))
+      .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  }
+  static async listAssignableDrivers(query = '', bookingId?: string): Promise<AssignableDriver[]> {
+    const { data, error } = await db.rpc('web_assignable_drivers', { p_query: query, p_booking_id: bookingId ?? null });
     if (error) throw new Error(error.message); return data ?? [];
   }
   static async assignDriver(bookingId: string, driverId: string): Promise<BookingRecord> {

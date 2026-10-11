@@ -8,6 +8,7 @@ import type {
   PaginationOptions,
 } from '@/config/database.types';
 import { ErrorHandler, AppErrorType } from '@/utils/errorHandler';
+import { excludeDeleted } from '@/utils/deletedAccounts';
 
 /**
  * Servicio de Usuarios de T+Plus Dashboard
@@ -222,10 +223,12 @@ export class UsersService {
       const offset = (page - 1) * limit;
 
       // Construir query base
-      let query = supabase
-        .from('web_users')
-        .select('*', { count: 'exact' })
-        .eq('user_type', 'driver');
+      let query = excludeDeleted(
+        supabase
+          .from('web_users')
+          .select('*', { count: 'exact' })
+          .eq('user_type', 'driver')
+      );
 
       // Aplicar filtros
       if (filters.approved !== undefined && filters.approved !== null) {
@@ -354,10 +357,12 @@ export class UsersService {
     active: number;
   }> {
     try {
-      const { data, error } = await supabase
-        .from('web_users')
-        .select('approved, blocked, driver_active_status')
-        .eq('user_type', 'driver');
+      const { data, error } = await excludeDeleted(
+        supabase
+          .from('web_users')
+          .select('approved, blocked, driver_active_status')
+          .eq('user_type', 'driver')
+      );
 
       if (error) {
         throw ErrorHandler.createError(
@@ -463,11 +468,13 @@ export class UsersService {
    */
   static async getDriverCities(): Promise<string[]> {
     try {
-      const { data, error } = await supabase
-        .from('web_users')
-        .select('city')
-        .eq('user_type', 'driver')
-        .not('city', 'is', null);
+      const { data, error } = await excludeDeleted(
+        supabase
+          .from('web_users')
+          .select('city')
+          .eq('user_type', 'driver')
+          .not('city', 'is', null)
+      );
 
       if (error) {
         throw ErrorHandler.createError(

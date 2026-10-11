@@ -11,7 +11,6 @@ import DriverStatusPage from '@/pages/Driver/DriverStatusPage';
 
 // Páginas protegidas
 import UsersPage from '@/pages/Users/UsersPage';
-import DriversPage from '@/pages/Users/DriversPage';
 import CorporateBookingsPage from '@/pages/Bookings/CorporateBookingsPage';
 import HomePage from '@/pages/Home/HomePage';
 import ShiftChangerPage from '@/pages/ShiftChanger/ShiftChangerPage';
@@ -71,7 +70,9 @@ export default function AppRoutes() {
         <Route path="/billing" element={<CompanyBillingPage />} />
         <Route path="/users/*" element={<UsersPage />} />
         <Route path="/app-drivers" element={<UsersPage mode="appDrivers" />} />
-        <Route path="/drivers" element={<DriversPage />} />
+        {/* "Conductores Web" retirado de la UI; /drivers redirige a Conductores App.
+            TODO(tentativo de eliminar): pages/Users/DriversPage.tsx y los endpoints de DriversService. */}
+        <Route path="/drivers" element={<Navigate to="/app-drivers" replace />} />
         <Route path="/officialview" element={<OfficialsViewPage />} />
         <Route path="/complaints" element={<ComplaintsViewPage />} />
         <Route path="/treasoffers" element={<OffersPage />} />

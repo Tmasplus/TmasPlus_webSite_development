@@ -1,4 +1,5 @@
 import { supabase, supabaseSecondary } from '@/config/supabase';
+import { excludeDeleted } from '@/utils/deletedAccounts';
 
 export type MembershipStatus = 'ACTIVA' | 'PENDIENTE' | 'CANCELADA' | 'VENCIDA';
 
@@ -177,10 +178,12 @@ export class MembershipsService {
     if (!q) return [];
 
     const term = `%${q}%`;
-    const { data, error } = await sb
-      .from('web_users')
-      .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
-      .eq('user_type', 'driver')
+    const { data, error } = await excludeDeleted(
+      sb
+        .from('web_users')
+        .select('id, auth_id, first_name, last_name, email, mobile, user_type, profile_image')
+        .eq('user_type', 'driver')
+    )
       .or(
         `first_name.ilike.${term},last_name.ilike.${term},email.ilike.${term},mobile.ilike.${term}`
       )

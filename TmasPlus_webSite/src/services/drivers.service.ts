@@ -19,10 +19,14 @@ import { UsersService } from './users.service';
 import { CarsService } from './cars.service';
 import { StorageService } from './storage.service';
 import { referralsService } from './referrals.service';
+import { excludeDeleted } from '@/utils/deletedAccounts';
 
 
 /**
- * 
+ * TODO(tentativo de eliminar): la vista "Conductores Web" (pages/Users/DriversPage.tsx) se retiró de la UI.
+ * Los métodos que solo usaba esa página se dejan por si acaso; revisar cuáles quedan sin uso y borrarlos.
+ * El registro/estado de conductor (RegisterDriverPage, DriverStatusPage, LoginPage, UsersPage) sigue usando este servicio.
+ *
  * Maneja el ciclo completo de registro, aprobación y gestión de conductores
  */
 export class DriversService {
@@ -596,11 +600,13 @@ export class DriversService {
       }
 
       // Top 5 ciudades
-      const { data: cityCountsData } = await supabase
-        .from('web_users')
-        .select('city')
-        .eq('user_type', 'driver')
-        .not('city', 'is', null);
+      const { data: cityCountsData } = await excludeDeleted(
+        supabase
+          .from('web_users')
+          .select('city')
+          .eq('user_type', 'driver')
+          .not('city', 'is', null)
+      );
 
       type CityCountResult = { city: string };
       const cityCounts: Record<string, number> = {};

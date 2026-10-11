@@ -31,6 +31,7 @@ type AppAccessIndex = {
 
 const EMPTY_ACCESS_INDEX: AppAccessIndex = { ids: new Set(), emailById: {}, idByEmail: {} };
 
+// TODO(tentativo de eliminar): página retirada de la UI ("Conductores Web"); /drivers redirige a /app-drivers.
 export const DriversPage: React.FC = () => {
     const { categories: carTypes } = useCarTypeCatalog();
     const [drivers, setDrivers] = useState<EnrichedDriverProfile[]>([]);
@@ -313,12 +314,12 @@ export const DriversPage: React.FC = () => {
     };
 
     const handleDelete = async (driver: EnrichedDriverProfile) => {
-        if (window.confirm(`¿Deshabilitar a ${driver.first_name} ${driver.last_name}? Se conservará su historial.`)) {
+        if (window.confirm(`¿Eliminar a ${driver.first_name} ${driver.last_name}? Dejará de aparecer en los listados, no podrá iniciar sesión y su correo quedará libre para un nuevo registro. Se conservará el historial de viajes. Esta acción no se puede deshacer.`)) {
             try {
                 setLoading(true);
-                await UsersSecondaryService.toggleBlock(driver.id, true);
+                await UsersSecondaryService.delete(driver.id);
 
-                toast.success('Conductor deshabilitado; historial conservado.');
+                toast.success('Conductor eliminado; historial conservado.');
                 fetchDrivers();
             } catch (error: any) {
                 toast.error('Error al eliminar: ' + error.message);

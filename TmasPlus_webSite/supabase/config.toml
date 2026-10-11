@@ -425,3 +425,8 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/bookingWebhookDispatcher/deno.json"
 entrypoint = "./functions/bookingWebhookDispatcher/index.ts"
+
+[functions.core-delete-user]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/core-delete-user/index.ts"

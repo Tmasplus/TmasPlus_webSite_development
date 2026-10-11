@@ -334,16 +334,40 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const handleDelete = async (u: SecondaryUser) => {
     if (
       !confirm(
-        `¿Deshabilitar a ${fullName(u)}? Se conservará su historial.`
+        `¿Eliminar a ${fullName(u)}? Dejará de aparecer en los listados, no podrá iniciar sesión y su correo quedará libre para un nuevo registro. Se conservará el historial de viajes. Esta acción no se puede deshacer.`
       )
     )
       return;
     setActionLoadingId(u.id);
     try {
       await UsersSecondaryService.delete(u.id);
-      setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, blocked: true } : x));
+      setUsers((prev) => prev.filter((x) => x.id !== u.id));
     } catch (e: any) {
       alert(e?.message || "Error al eliminar usuario");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Borrado PERMANENTE: persona + viajes, tracking y logs asociados. Primero un dry-run para mostrar
+  // cuánto se va a borrar y exigir que se escriba "ELIMINAR" antes de ejecutar.
+  const handlePurge = async (u: SecondaryUser) => {
+    setActionLoadingId(u.id);
+    try {
+      const preview = await UsersSecondaryService.purge(u.id, true);
+      const lines = Object.entries(preview)
+        .sort((a, b) => b[1] - a[1])
+        .map(([table, n]) => `  • ${table}: ${n}`)
+        .join("\n");
+      const typed = prompt(
+        `ELIMINACIÓN PERMANENTE de ${fullName(u)}.\n\nSe borrarán definitivamente, sin posibilidad de recuperarlos:\n${lines || "  • (solo el registro de la persona)"}\n\nIncluye su historial de viajes y logs (también desaparecen para la otra parte de cada viaje).\n\nEscribe ELIMINAR para confirmar:`
+      );
+      if (typed?.trim() !== "ELIMINAR") return;
+      await UsersSecondaryService.purge(u.id, false);
+      setUsers((prev) => prev.filter((x) => x.id !== u.id));
+      toast.success("Usuario y registros eliminados permanentemente");
+    } catch (e: any) {
+      alert(e?.message || "Error al eliminar permanentemente");
     } finally {
       setActionLoadingId(null);
     }
@@ -498,7 +522,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
 
   return (
     <Page
-      title={pageTitle}
+      title={`${pageTitle}${loading ? "" : ` (${users.length})`}`}
       actions={
         <>
           <Button variant="secondary" onClick={handleExportCsv}>
@@ -576,7 +600,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       )}
 
       <div className="mt-4">
-        <Card title={cardTitle}>
+        <Card title={`${cardTitle} · ${filtered.length}${filtered.length !== users.length ? ` de ${users.length}` : ""}`}>
           {loading ? (
             <div className="p-6 text-center text-slate-500 text-sm">
               Cargando usuarios...
@@ -727,7 +751,16 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                               disabled={busy}
                               className="!px-3 !py-1.5 !text-xs !text-rose-700 !border-rose-300"
                             >
-                              {busy ? "..." : "Deshabilitar"}
+                              {busy ? "..." : "Eliminar"}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handlePurge(u)}
+                              disabled={busy}
+                              title="Elimina a la persona y todos sus registros de forma permanente"
+                              className="!px-3 !py-1.5 !text-xs !text-white !bg-rose-700 !border-rose-800"
+                            >
+                              {busy ? "..." : "Eliminar permanente"}
                             </Button>
                           </div>
                         </td>
