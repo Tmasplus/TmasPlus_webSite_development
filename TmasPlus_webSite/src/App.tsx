@@ -28,7 +28,7 @@ export default function App() {
           handleLogout={() => {}}
           navigateToWhatsApp={() => {}}
         />
-        <main className="md:pl-64">
+        <main className="md:pl-24">
           <UsersPage />
         </main>
       </div>

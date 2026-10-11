@@ -36,6 +36,17 @@ async function fetchUsersById(ids: string[]): Promise<Record<string, UserSnippet
 }
 
 export class ComplaintsService {
+  /** Quejas sin atender (pendientes + en revisión). Silencioso: el header no debe mostrar toasts. */
+  static async countOpen(): Promise<number> {
+    await syncSession();
+    const { count, error } = await sb
+      .from('web_complaints')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['pending', 'in_review']);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  }
+
   static async getComplaints(
     filters: ComplaintFilters = {},
     pagination: PaginationOptions = { page: 1, limit: 20 }

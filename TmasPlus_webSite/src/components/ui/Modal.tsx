@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { classNames } from "@/utils/classNames";
 
 type ModalProps = {
@@ -35,7 +36,8 @@ export const Modal: React.FC<ModalProps> = ({
 
   if (!open) return null;
 
-  return (
+  // Portal: así ningún ancestro con transform/z-index (header, animaciones) recorta el overlay.
+  return createPortal(
     <div className="fixed inset-0 z-50">
       {/* Overlay */}
       <div
@@ -80,6 +82,7 @@ export const Modal: React.FC<ModalProps> = ({
       <style>{`
         @keyframes modalIn { from { transform: translateY(8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 };

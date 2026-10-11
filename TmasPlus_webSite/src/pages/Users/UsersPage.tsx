@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { Pencil } from "lucide-react";
 import { Page } from "@/components/layout/Page";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -694,14 +695,15 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex justify-center gap-2 flex-wrap">
-                            <Button
-                              variant="secondary"
+                            <button
+                              type="button"
                               onClick={() => handleOpenExpediente(u)}
                               disabled={loadingProfileId === u.id}
-                              className="!px-3 !py-1.5 !text-xs"
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-200 disabled:opacity-60"
                             >
+                              <Pencil size={13} />
                               {loadingProfileId === u.id ? "Cargando..." : "Editar"}
-                            </Button>
+                            </button>
                             <Button
                               variant="secondary"
                               onClick={() => handleToggleBlock(u)}

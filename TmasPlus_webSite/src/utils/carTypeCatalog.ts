@@ -38,6 +38,17 @@ export function serviceTypeForCategory(category: CarTypeRow): string {
   return String(category.id);
 }
 
+/** Valores crudos de car_type que `categoryForValue` asocia a la categoría (para filtrar en BD). */
+export function carTypeValuesForCategory(category: CarTypeRow): string[] {
+  const base = [
+    category.id,
+    category.name,
+    LEGACY_CODE_BY_ID[category.id],
+    ...(LEGACY_ALIASES_BY_ID[category.id] || []),
+  ].filter((v): v is string => !!v);
+  return [...new Set(base.flatMap((v) => [v, v.toLowerCase(), v.toUpperCase(), normalize(v)]))];
+}
+
 export function categoryForValue(
   categories: CarTypeRow[],
   value?: string | null

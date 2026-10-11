@@ -10,6 +10,8 @@ import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import { CITIES, DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { useCarBrands } from '@/hooks/useCarBrands';
+import { uploadProfilePhoto } from '@/services/profilePhoto.service';
+import { ProfilePhotoEditor } from './ProfilePhotoEditor';
 import { activeCategoryOptions, categoryForValue, categoryNameForValue, legacyCategoryLabel } from '@/utils/carTypeCatalog';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
@@ -186,6 +188,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     // por eso antes los cambios no se veían reflejados visualmente.
     const [displayDriver, setDisplayDriver] = useState<EnrichedDriverProfile | null>(driver);
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
+    // Foto elegida con "Preseleccionar"; se sube al pulsar "Guardar Cambios".
+    const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
     // Documentos que viven en el proyecto PRIMARIO (panel). Cuando el modal se
     // abre desde la lista de la App, `driver`/`driver.vehicle` son filas
@@ -215,6 +219,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         setEditForm(driver);
         setDisplayDriver(driver);
         setIsEditing(false);
+        setPendingPhoto(null);
         setSecondaryDocs({});
         setPrimaryDocs({});
         loadSecondaryDocs(driver.id, driver.email);
@@ -349,9 +354,19 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
             }
             await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
 
+            let newPhotoUrl: string | null = null;
+            if (pendingPhoto) {
+                newPhotoUrl = await uploadProfilePhoto({ id: driver.id, auth_id: (d as any).auth_id }, pendingPhoto);
+                setPendingPhoto(null);
+            }
+
             // Reflejamos de inmediato lo guardado en la copia local para que el
             // modo lectura muestre los valores nuevos sin reabrir el expediente.
-            const merged = { ...(d as any), ...(editForm as any) } as EnrichedDriverProfile;
+            const merged = {
+                ...(d as any),
+                ...(editForm as any),
+                ...(newPhotoUrl ? { profile_image: newPhotoUrl } : {}),
+            } as EnrichedDriverProfile;
             setDisplayDriver(merged);
             setEditForm(merged);
 
@@ -377,7 +392,10 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     <div className="flex items-center gap-3">
                         <Button variant="secondary" onClick={() => {
                             // Al cancelar, descartamos el borrador volviendo a la copia guardada.
-                            if (isEditing) setEditForm(d);
+                            if (isEditing) {
+                                setEditForm(d);
+                                setPendingPhoto(null);
+                            }
                             setIsEditing(!isEditing);
                         }}>
                             {isEditing ? 'Cancelar Edición' : 'Editar Datos (Admin)'}
@@ -389,6 +407,15 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
 
                     <div className="space-y-6">
+                        <ProfilePhotoEditor
+                            photoUrl={(d as any).profile_image}
+                            pendingFile={pendingPhoto}
+                            name={[d.first_name, d.last_name].filter(Boolean).join(' ')}
+                            roleLabel={isCustomer ? 'Cliente' : 'Conductor'}
+                            editing={isEditing}
+                            onPreselect={setPendingPhoto}
+                        />
+
                         <div className="bg-gradient-to-r from-sky-50 to-indigo-50 p-4 rounded-xl border border-sky-100">
                             <h3 className="text-sm font-bold text-sky-900 mb-2 uppercase tracking-wide">Programa de Referidos</h3>
                             <div className="flex justify-between items-center">

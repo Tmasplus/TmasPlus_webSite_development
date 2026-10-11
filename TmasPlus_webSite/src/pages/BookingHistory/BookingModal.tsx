@@ -1,10 +1,7 @@
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
-import {
-  BookingDetailBody,
-  BookingDetailHeader,
-  isBookingCancelled,
-} from "@/components/bookings/BookingDetailView";
+import { BookingDetailBody, BookingDetailHeader } from "@/components/bookings/BookingDetailView";
+import { isBookingCancelled } from "@/utils/bookingFare";
 import { Button } from "@/components/ui/Button";
 import type { BookingRecord } from "@/services/bookings.service";
 

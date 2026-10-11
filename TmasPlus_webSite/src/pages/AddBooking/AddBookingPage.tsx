@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { motion } from "framer-motion";
-import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/GoogleMapsAddressPicker";
+// Google Maps desactivado por decisión del cliente: solo OpenStreetMap.
+// import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/GoogleMapsAddressPicker";
+import BookingMapView, { type Location, type RouteInfo } from "@/components/maps/OsmAddressPicker";
 import { CarTypesService } from "@/services/carTypes.service";
 import type { CarTypeRow } from "@/config/database.types";
 import {

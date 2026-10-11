@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { motion } from "framer-motion";
@@ -11,10 +12,25 @@ import {
 } from "@/services/bookings.service";
 import { supabase } from "@/config/supabase";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
-import { categoryForValue, categoryNameForValue } from "@/utils/carTypeCatalog";
+import type { BookingListFilters } from "@/services/coreBookings.service";
+import { carTypeValuesForCategory, categoryNameForValue } from "@/utils/carTypeCatalog";
+import { SearchableSelect, type SearchableOption } from "@/components/ui/SearchableSelect";
+import { maxFromMinConductor, resolveFinalFare, resolveQuote } from "@/utils/bookingFare";
+import { toEpochMs } from "@/utils/tripTracking";
+import { ChevronLeft, ChevronRight, Eye } from "lucide-react";
+
+const PAGE_SIZE = 10;
+
+/** Filtros que agrupan varios estados (los usan también los indicadores del inicio). */
+const STATUS_GROUPS: Record<string, string[]> = {
+  IN_PROGRESS: ["STARTED", "ARRIVED_DESTINATION"],
+  DONE: ["COMPLETED", "PAID"],
+};
 
 const STATUSES = [
   "TODOS",
+  "IN_PROGRESS",
+  "DONE",
   "PENDING",
   "ACCEPTED",
   "ARRIVED_PICKUP",
@@ -26,10 +42,6 @@ const STATUSES = [
 ];
 
 const TERMINAL_STATUSES = ["COMPLETED", "PAID", "CANCELLED"];
-
-function getBookingDriverId(booking: BookingRecord): string | null {
-  return booking.driver_id || (booking as any).driver || null;
-}
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -62,15 +74,136 @@ function statusBadgeClass(status: string) {
   return "bg-slate-200 text-slate-700";
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  TODOS: "Todos los estados",
+  IN_PROGRESS: "En curso (pasajero a bordo)",
+  DONE: "Completadas y pagadas",
+  NEW: "Nueva",
+  PENDING: "Pendiente",
+  ACCEPTED: "Aceptada",
+  ARRIVED_PICKUP: "En recogida",
+  STARTED: "En curso",
+  ARRIVED_DESTINATION: "En destino",
+  COMPLETED: "Completada",
+  COMPLETE: "Completada",
+  PAID: "Pagada",
+  CANCELLED: "Cancelada",
+};
+
+const statusLabel = (status?: string | null) => {
+  const s = (status || "").toUpperCase();
+  return STATUS_LABELS[s] || status || "—";
+};
+
+function DateCell({ iso }: { iso?: string | null }) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || isNaN(+d)) return <span className="text-slate-400">—</span>;
+  return (
+    <div className="whitespace-nowrap">
+      <div className="text-slate-800">{d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}</div>
+      <div className="text-xs text-slate-500">{d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</div>
+    </div>
+  );
+}
+
+/** Valor cobrado (mínimo) arriba y rango mínimo–máximo debajo. */
+function FareCell({ min, max, empty }: { min: number | null; max: number | null; empty: string }) {
+  if (!min) return <span className="text-xs text-slate-400">{empty}</span>;
+  return (
+    <div className="whitespace-nowrap">
+      <div className="font-semibold text-slate-900 tabular-nums">{formatMoney(min)}</div>
+      {max && max !== min && (
+        <div className="text-[11px] text-slate-500 tabular-nums">
+          {formatMoney(min)} – {formatMoney(max)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function tripDurationMin(b: BookingRecord): number | null {
+  const start = toEpochMs(b.trip_start_time);
+  const end = toEpochMs(b.trip_end_time);
+  return start && end && end > start ? Math.round((end - start) / 60000) : null;
+}
+
+function formatDuration(min: number | null) {
+  if (min == null) return "—";
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
+function pageItems(page: number, totalPages: number): (number | "…")[] {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, page - 1);
+  const end = Math.min(totalPages - 1, page + 1);
+  if (start > 2) items.push("…");
+  for (let p = start; p <= end; p++) items.push(p);
+  if (end < totalPages - 1) items.push("…");
+  items.push(totalPages);
+  return items;
+}
+
+function Pagination({
+  page,
+  totalPages,
+  total,
+  disabled,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  disabled: boolean;
+  onChange: (page: number) => void;
+}) {
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
+  const btn =
+    "inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40";
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600">
+      <span>
+        Mostrando <b className="text-slate-800">{from}–{to}</b> de <b className="text-slate-800">{total.toLocaleString("es-CO")}</b> reservas
+      </span>
+      <div className="flex items-center gap-1">
+        <button type="button" className={`${btn} hover:bg-slate-200`} disabled={disabled || page <= 1} onClick={() => onChange(page - 1)} aria-label="Página anterior">
+          <ChevronLeft size={16} />
+        </button>
+        {pageItems(page, totalPages).map((item, i) =>
+          item === "…" ? (
+            <span key={`gap-${i}`} className="px-1 text-slate-400">…</span>
+          ) : (
+            <button
+              key={item}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(item)}
+              className={`${btn} ${item === page ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-200"}`}
+              aria-current={item === page ? "page" : undefined}
+            >
+              {item}
+            </button>
+          )
+        )}
+        <button type="button" className={`${btn} hover:bg-slate-200`} disabled={disabled || page >= totalPages} onClick={() => onChange(page + 1)} aria-label="Página siguiente">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BookingHistoryPage() {
   const { categories: carTypes, activeCategories } = useCarTypeCatalog();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("TODOS");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get("status") ?? "TODOS");
   const [driverFilter, setDriverFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get("from") ?? "");
+  const [dateTo, setDateTo] = useState(() => searchParams.get("to") ?? "");
   const [exporting, setExporting] = useState(false);
   const [openModal, setOpenModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingRecord | null>(
@@ -92,39 +225,132 @@ export default function BookingHistoryPage() {
     "connecting" | "live" | "offline"
   >("connecting");
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState(() => (searchParams.get("search") ?? "").trim());
+  const [driverQuery, setDriverQuery] = useState("");
+  const [driverOptions, setDriverOptions] = useState<SearchableOption[]>([]);
+  const [driverOptionsLoading, setDriverOptionsLoading] = useState(false);
+  const [driverLabel, setDriverLabel] = useState("");
   const isMountedRef = useRef(true);
   const realtimeStatusRef = useRef(realtimeStatus);
   const selectedBookingRef = useRef<BookingRecord | null>(null);
+  const requestSeqRef = useRef(0);
 
   realtimeStatusRef.current = realtimeStatus;
   selectedBookingRef.current = selectedBooking;
 
+  const filters = useMemo<BookingListFilters>(() => {
+    const category = carTypes.find((c) => c.id === categoryFilter);
+    return {
+      search: debouncedSearch,
+      status: statusFilter === "TODOS" || STATUS_GROUPS[statusFilter] ? null : statusFilter,
+      statuses: STATUS_GROUPS[statusFilter] ?? null,
+      driverId: driverFilter || null,
+      carTypes: category ? carTypeValuesForCategory(category) : null,
+      dateFrom: dateFrom || null,
+      dateTo: dateTo || null,
+    };
+  }, [debouncedSearch, statusFilter, driverFilter, categoryFilter, carTypes, dateFrom, dateTo]);
+
+  const filtersRef = useRef(filters);
+  const pageRef = useRef(page);
+  filtersRef.current = filters;
+  pageRef.current = page;
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
   const loadBookings = async (silent = false) => {
+    const seq = ++requestSeqRef.current;
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const data = await BookingsService.list();
-      if (!isMountedRef.current) return;
-      setBookings(data);
+      const { rows, total: count } = await BookingsService.listPage(filtersRef.current, pageRef.current, PAGE_SIZE);
+      if (!isMountedRef.current || seq !== requestSeqRef.current) return;
+      setBookings(rows);
+      setTotal(count);
       const selectedId = selectedBookingRef.current?.id;
-      if (selectedId) {
-        const refreshed = data.find((booking) => booking.id === selectedId) ?? null;
-        setSelectedBooking(refreshed);
-        if (!refreshed) setOpenModal(false);
-      }
+      const refreshed = selectedId ? rows.find((booking) => booking.id === selectedId) : null;
+      if (refreshed) setSelectedBooking(refreshed);
       setLastUpdate(new Date());
     } catch (e: any) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || seq !== requestSeqRef.current) return;
       setError(e?.message || "Error al cargar las reservas");
     } finally {
-      if (!isMountedRef.current) return;
-      if (!silent) setLoading(false);
+      if (isMountedRef.current && seq === requestSeqRef.current && !silent) setLoading(false);
     }
+  };
+
+  // Cualquier cambio de filtro vuelve a la página 1.
+  const resetPage = <T,>(setter: (v: T) => void) => (v: T) => {
+    setter(v);
+    setPage(1);
+  };
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [searchTerm]);
+
+  // Filtros que llegan por URL: buscador del header (?search=) e indicadores del inicio (?status=&from=&to=).
+  const urlSearch = searchParams.get("search");
+  const urlStatus = searchParams.get("status");
+  const urlFrom = searchParams.get("from");
+  const urlTo = searchParams.get("to");
+  useEffect(() => {
+    if (urlSearch === null && urlStatus === null && urlFrom === null && urlTo === null) return;
+    if (urlSearch !== null) setSearchTerm(urlSearch);
+    if (urlStatus !== null || urlFrom !== null || urlTo !== null) {
+      setStatusFilter(urlStatus ?? "TODOS");
+      setDateFrom(urlFrom ?? "");
+      setDateTo(urlTo ?? "");
+      setDriverFilter("");
+      setCategoryFilter("");
+      setPage(1);
+    }
+    setSearchParams({}, { replace: true });
+  }, [urlSearch, urlStatus, urlFrom, urlTo, setSearchParams]);
+
+  const filtersKey = JSON.stringify(filters);
+  useEffect(() => {
+    void loadBookings();
+  }, [filtersKey, page]);
+
+  // Si al refrescar la página actual queda fuera de rango (p. ej. tras borrar), retrocede.
+  useEffect(() => {
+    if (!loading && page > totalPages) setPage(totalPages);
+  }, [loading, page, totalPages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDriverOptionsLoading(true);
+    const id = window.setTimeout(async () => {
+      try {
+        const drivers = await BookingsService.searchDriverOptions(driverQuery);
+        if (!cancelled) setDriverOptions(drivers.map((d) => ({ value: d.id, label: d.name })));
+      } catch {
+        if (!cancelled) setDriverOptions([]);
+      } finally {
+        if (!cancelled) setDriverOptionsLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [driverQuery]);
+
+  const handleDriverChange = (value: string) => {
+    setDriverLabel(driverOptions.find((o) => o.value === value)?.label ?? "");
+    setDriverFilter(value);
+    setPage(1);
   };
 
   useEffect(() => {
     isMountedRef.current = true;
-    loadBookings();
 
     // Reload core reservations; polling also works without Realtime publication.
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -170,54 +396,17 @@ export default function BookingHistoryPage() {
     };
   }, []);
 
-  const filteredBookings = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return bookings.filter((b) => {
-      const matchesStatus =
-        statusFilter === "TODOS" ||
-        (b.status || "").toUpperCase() === statusFilter;
-      const matchesDriver = !driverFilter || getBookingDriverId(b) === driverFilter;
-      const matchesCategory =
-        !categoryFilter ||
-        categoryForValue(carTypes, b.car_type)?.id === categoryFilter;
-      const dateValue = new Date(b.booking_date || b.created_at).getTime();
-      const matchesFrom = !dateFrom || dateValue >= new Date(`${dateFrom}T00:00:00`).getTime();
-      const matchesTo = !dateTo || dateValue <= new Date(`${dateTo}T23:59:59.999`).getTime();
-      const matchesFilters = matchesStatus && matchesDriver && matchesCategory && matchesFrom && matchesTo;
-      if (!term) return matchesFilters;
-      const matchesTerm = [
-        b.id,
-        b.reference,
-        b.customer_name,
-        b.customer_email,
-        b.customer_contact,
-        b.driver_name,
-        b.driver_contact,
-        b.plate_number,
-        b.pickup_address,
-        b.drop_address,
-        b.car_type,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(term));
-      return matchesFilters && matchesTerm;
-    });
-  }, [bookings, searchTerm, statusFilter, driverFilter, categoryFilter, dateFrom, dateTo, carTypes]);
-
-  const driverOptions = useMemo(() => Array.from(new Map(bookings.flatMap((b) => {
-    const driverId = getBookingDriverId(b);
-    return driverId ? [[driverId, b.driver_name || driverId] as [string, string]] : [];
-  })).entries()), [bookings]);
   const categoryOptions = activeCategories;
 
   const exportToCSV = async () => {
-    if (filteredBookings.length === 0) {
+    if (total === 0) {
       alert("No hay datos para exportar");
       return;
     }
 
     setExporting(true);
     try {
+    const filteredBookings = await BookingsService.listAll(filters);
     const snapshots = await BookingsService.getServiceSnapshots(filteredBookings.map((b) => b.id));
     const byBooking = new Map<string, typeof snapshots>();
     snapshots.forEach((snapshot) => byBooking.set(snapshot.booking_id, [...(byBooking.get(snapshot.booking_id) || []), snapshot]));
@@ -339,8 +528,8 @@ export default function BookingHistoryPage() {
     setActionLoadingId(b.id);
     try {
       await BookingsService.delete(b.id);
-      setBookings((prev) => prev.filter((x) => x.id !== b.id));
       if (selectedBooking?.id === b.id) closeBookingModal();
+      void loadBookings(true);
     } catch (e: any) {
       alert(e?.message || "Error al eliminar la reserva");
     } finally {
@@ -465,22 +654,28 @@ export default function BookingHistoryPage() {
         />
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => resetPage(setStatusFilter)(e.target.value)}
           className="p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
         >
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {statusLabel(s)}
             </option>
           ))}
         </select>
-        <input type="date" aria-label="Fecha desde" title="Fecha desde" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
-        <input type="date" aria-label="Fecha hasta" title="Fecha hasta" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
-        <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
-          <option value="">Todos los conductores</option>
-          {driverOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
+        <input type="date" aria-label="Fecha desde" title="Fecha desde" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <input type="date" aria-label="Fecha hasta" title="Fecha hasta" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} className="p-2 border border-slate-300 rounded-lg" />
+        <SearchableSelect
+          options={driverOptions}
+          value={driverFilter}
+          onChange={handleDriverChange}
+          onQueryChange={setDriverQuery}
+          loading={driverOptionsLoading}
+          selectedLabel={driverLabel}
+          allLabel="Todos los conductores"
+          placeholder="Escribe el nombre del conductor…"
+        />
+        <select value={categoryFilter} onChange={(e) => resetPage(setCategoryFilter)(e.target.value)} className="p-2 border border-slate-300 rounded-lg">
           <option value="">Todas las categorías</option>
           {categoryOptions.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
         </select>
@@ -493,105 +688,117 @@ export default function BookingHistoryPage() {
       )}
 
       {/* Tabla */}
-      <Card className="overflow-x-auto">
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm text-slate-700">
-          <thead className="bg-slate-100 text-left">
-            <tr>
-              <th className="p-3">Referencia</th>
-              <th className="p-3">Fecha creación</th>
-              <th className="p-3">Fecha servicio</th>
-              <th className="p-3">Cliente</th>
-              <th className="p-3">Conductor</th>
-              <th className="p-3">Placa</th>
-              <th className="p-3">Tipo</th>
-              <th className="p-3">Estimado</th>
-              <th className="p-3">Final</th>
-              <th className="p-3">Duración real</th>
-              <th className="p-3">Distancia real</th>
-              <th className="p-3">Estado</th>
-              <th className="p-3 text-center">OTP</th>
-              <th className="p-3 text-center">Acciones</th>
+          <thead className="border-b border-slate-200 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:align-bottom">
+              <th>Referencia</th>
+              <th>Creación</th>
+              <th>Servicio</th>
+              <th>Cliente</th>
+              <th>Conductor / Placa</th>
+              <th>Categoría</th>
+              <th className="min-w-[150px]">
+                Estimado inicial cotizado
+                <span className="block font-normal normal-case tracking-normal text-slate-400">Mínimo · rango</span>
+              </th>
+              <th className="min-w-[150px]">
+                Precio final
+                <span className="block font-normal normal-case tracking-normal text-slate-400">Mínimo · rango</span>
+              </th>
+              <th>Duración viaje</th>
+              <th>Distancia cotizada</th>
+              <th>Estado</th>
+              <th className="text-center">OTP</th>
+              <th className="text-center">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={14} className="text-center py-6 text-slate-400">
+                <td colSpan={13} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
-            ) : filteredBookings.length > 0 ? (
-              filteredBookings.map((b) => {
+            ) : bookings.length > 0 ? (
+              bookings.map((b) => {
                 const statusUpper = (b.status || "").toUpperCase();
                 const isCancelled = statusUpper === "CANCELLED";
                 const isCompleted = statusUpper === "COMPLETED" || statusUpper === "PAID";
                 const busy = actionLoadingId === b.id;
-                const finalTotal = serviceTotal(b);
-                const estimateValue = Number(b.estimate);
-                const finalValue = Number(finalTotal);
-                const deltaPct = estimateValue && finalValue
-                  ? Math.round(((finalValue - estimateValue) / estimateValue) * 100)
-                  : null;
+                const quote = resolveQuote(b, null, []);
+                const finalFare = resolveFinalFare(b, null);
+                const durationMin = tripDurationMin(b);
+                const distanceKm = Number(b.distance);
                 return (
                   <motion.tr
                     key={b.id}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.2 }}
-                    className="border-b hover:bg-slate-50"
+                    className="border-b border-slate-100 align-top transition-colors hover:bg-sky-50/40 [&>td]:px-4 [&>td]:py-3"
                   >
-                    <td className="p-3 font-mono text-xs">
-                      {b.reference || b.id.slice(0, 8)}
+                    <td>
+                      <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700">
+                        {b.reference || b.id.slice(0, 8)}
+                      </span>
                     </td>
-                    <td className="p-3">{formatDate(b.created_at)}</td>
-                    <td className="p-3">{formatDate(b.booking_date)}</td>
-                    <td className="p-3">
-                      <div>{b.customer_name || "—"}</div>
-                      <div className="text-xs text-slate-500">
+                    <td><DateCell iso={b.created_at} /></td>
+                    <td><DateCell iso={b.booking_date} /></td>
+                    <td className="max-w-[220px]">
+                      <div className="font-medium text-slate-800">{b.customer_name || "—"}</div>
+                      <div className="truncate text-xs text-slate-500" title={b.customer_email || ""}>
                         {b.customer_email || ""}
                       </div>
                     </td>
-                    <td className="p-3">{b.driver_name || "—"}</td>
-                    <td className="p-3">{b.plate_number || "—"}</td>
-                    <td className="p-3">{categoryNameForValue(carTypes, b.car_type)}</td>
-                    <td className="p-3">{formatMoney(b.estimate)}</td>
-                    <td className="p-3">
-                      {formatMoney(finalTotal)}
-                      {deltaPct !== null && Math.abs(deltaPct) >= 5 && (
-                        <span className={`ml-2 text-xs ${deltaPct > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-                          Δ{deltaPct > 0 ? "+" : ""}{deltaPct}%
+                    <td className="max-w-[200px]">
+                      <div className="font-medium text-slate-800">{b.driver_name || <span className="text-slate-400">Sin asignar</span>}</div>
+                      {b.plate_number && (
+                        <span className="mt-1 inline-block rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                          {b.plate_number}
                         </span>
                       )}
                     </td>
-                    <td className="p-3">{b.duration != null ? `${b.duration} min` : "—"}</td>
-                    <td className="p-3">{b.distance != null ? `${b.distance} km` : "—"}</td>
-                    <td className="p-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass(
-                          b.status
-                        )}`}
-                      >
-                        {b.status}
+                    <td className="whitespace-nowrap">{categoryNameForValue(carTypes, b.car_type)}</td>
+                    <td>
+                      <FareCell min={quote.min} max={quote.max} empty="—" />
+                    </td>
+                    <td>
+                      <FareCell
+                        min={finalFare}
+                        max={finalFare ? maxFromMinConductor(finalFare) : null}
+                        empty={isCancelled ? "Cancelada" : "Pendiente"}
+                      />
+                    </td>
+                    <td className="whitespace-nowrap tabular-nums">{formatDuration(durationMin)}</td>
+                    <td className="whitespace-nowrap tabular-nums">
+                      {Number.isFinite(distanceKm) && distanceKm > 0 ? `${distanceKm.toFixed(1)} km` : "—"}
+                    </td>
+                    <td>
+                      <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(b.status)}`}>
+                        {statusLabel(b.status)}
                       </span>
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="text-center">
                       {b.otp ? (
-                        <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800 font-mono font-bold text-sm tracking-widest border border-emerald-300">
+                        <span className="inline-block rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-mono text-sm font-bold tracking-widest text-emerald-800">
                           {b.otp}
                         </span>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="p-3">
-                      <div className="flex justify-center gap-2 flex-wrap">
-                        <Button
-                          variant="secondary"
+                    <td>
+                      <div className="flex flex-col items-stretch gap-1.5">
+                        <button
+                          type="button"
                           onClick={() => openBookingModal(b)}
-                          className="!px-3 !py-1.5 !text-xs"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
                         >
-                          Ver
-                        </Button>
+                          <Eye size={14} />
+                          Detalle
+                        </button>
                         <Button
                           variant="secondary"
                           onClick={() => openAssignModal(b)}
@@ -615,13 +822,17 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={14} className="text-center py-6 text-slate-400">
-                  No hay reservas registradas.
+                <td colSpan={13} className="text-center py-6 text-slate-400">
+                  {debouncedSearch || statusFilter !== "TODOS" || driverFilter || categoryFilter || dateFrom || dateTo
+                    ? "Ninguna reserva coincide con la búsqueda o los filtros."
+                    : "No hay reservas registradas."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        </div>
+        <Pagination page={page} totalPages={totalPages} total={total} disabled={loading} onChange={setPage} />
       </Card>
 
       {/* Modal */}
