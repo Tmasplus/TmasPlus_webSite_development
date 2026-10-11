@@ -308,19 +308,27 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
     });
   }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap]);
 
+  // Un conductor está aprobado solo si tiene `approved` (perfil_conductor.aprobado) Y no está bloqueado.
+  // `approved` es lo que exige core para asignar y aceptar viajes; `blocked` solo cierra el acceso.
+  // Para clientes sigue siendo un solo eje (no bloqueado).
+  const isApprovedUser = (u: SecondaryUser) =>
+    isAppDriversMode ? !!u.approved && !u.blocked : !u.blocked;
+
   const handleToggleBlock = async (u: SecondaryUser) => {
-    const willBlock = !u.blocked;
+    const willBlock = isApprovedUser(u);
     if (
       !confirm(
         willBlock
-          ? `¿Quitar la aprobación a ${fullName(u)}? No podrá iniciar sesión.`
-          : `¿Aprobar a ${fullName(u)}? Podrá iniciar sesión en la app.`
+          ? `¿Quitar la aprobación a ${fullName(u)}? No podrá iniciar sesión${isAppDriversMode ? " ni aceptar viajes" : ""}.`
+          : `¿Aprobar a ${fullName(u)}? Podrá iniciar sesión${isAppDriversMode ? " y aceptar viajes" : " en la app"}.`
       )
     )
       return;
     setActionLoadingId(u.id);
     try {
-      const updated = await UsersSecondaryService.toggleBlock(u.id, willBlock);
+      const updated = isAppDriversMode
+        ? await UsersSecondaryService.setApproved(u.id, !willBlock)
+        : await UsersSecondaryService.toggleBlock(u.id, willBlock);
       setUsers((prev) =>
         prev.map((x) => (x.id === u.id ? { ...x, ...updated } : x))
       );
@@ -515,7 +523,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
       { header: "Tipo", value: (u) => u.user_type || "" },
       { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
-      { header: "Estado", value: (u) => (u.blocked ? "No aprobado" : "Aprobado") },
+      { header: "Estado", value: (u) => (isApprovedUser(u) ? "Aprobado" : "No aprobado") },
       { header: "Alta", value: (u) => formatDate(u.created_at) },
     ]);
   };
@@ -637,9 +645,8 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                 <tbody>
                   {filtered.map((u) => {
                     const busy = actionLoadingId === u.id;
-                    // Estado único: aprobado = no bloqueado (bloquear = quitar
-                    // aprobación, aprobar = desbloquear; es el mismo eje).
-                    const blocked = !!u.blocked;
+                    // "blocked" aquí significa "no aprobado": en conductores exige approved Y no bloqueado.
+                    const blocked = !isApprovedUser(u);
                     return (
                       <motion.tr
                         key={u.id}
@@ -758,7 +765,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                               onClick={() => handlePurge(u)}
                               disabled={busy}
                               title="Elimina a la persona y todos sus registros de forma permanente"
-                              className="!px-3 !py-1.5 !text-xs !text-white !bg-rose-700 !border-rose-800"
+                              className="!px-3 !py-1.5 !text-xs !text-rose-900 !bg-rose-100 !border-rose-400 font-semibold"
                             >
                               {busy ? "..." : "Eliminar permanente"}
                             </Button>
