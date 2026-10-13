@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces, type OsmPlace } from "./osmGeocoding";
+import { searchDebounceMs, searchPlaces, type GeocodedPlace as OsmPlace } from "./geocoding";
 
 interface Location {
   latitude: number;
@@ -17,9 +17,6 @@ interface OsmPlacesSearchInputProps {
   disabled?: boolean;
   proximity?: { lng: number; lat: number } | null;
 }
-
-// Nominatim pide no superar ~1 petición por segundo.
-const SEARCH_DEBOUNCE_MS = 700;
 
 function shortenPlaceName(placeName: string): string {
   if (!placeName) return "";
@@ -104,7 +101,7 @@ export default function OsmPlacesSearchInput({
       onClear?.();
       return;
     }
-    debounceRef.current = setTimeout(() => searchAddress(text), SEARCH_DEBOUNCE_MS);
+    debounceRef.current = setTimeout(() => searchAddress(text), searchDebounceMs());
   };
 
   const handleSelect = (s: OsmPlace) => {
@@ -204,7 +201,17 @@ export default function OsmPlacesSearchInput({
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-800 truncate">{s.mainText}</p>
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                    <span className="truncate">{s.mainText}</span>
+                    {s.approximate && (
+                      <span
+                        className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                        title="Google no encontró la dirección exacta; revisa el punto en el mapa"
+                      >
+                        Aproximada
+                      </span>
+                    )}
+                  </p>
                   {s.secondaryText && <p className="text-xs text-slate-400 truncate">{s.secondaryText}</p>}
                 </div>
               </button>

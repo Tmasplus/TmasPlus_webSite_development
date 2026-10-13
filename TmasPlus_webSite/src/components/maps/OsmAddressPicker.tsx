@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import OsmPlacesSearchInput from "./OsmPlacesSearchInput";
-import { reverseGeocode } from "./osmGeocoding";
+import { reverseGeocode } from "./geocoding";
 
 const MAPBOX_ACCESS_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined;
 
