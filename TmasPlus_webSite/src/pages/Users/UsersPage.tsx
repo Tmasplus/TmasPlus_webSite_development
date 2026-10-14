@@ -27,6 +27,7 @@ import {
 } from "@/services/memberships.service";
 import UserEditModal from "./UserEditModal";
 import AddUserModal from "./AddUserModal";
+import ReferredListModal from "./ReferredListModal";
 import DriverReviewModal, { type EnrichedDriverProfile } from "./DriverReviewModal";
 
 type StatusFilter = "todos" | "pendiente" | "aprobado" | "bloqueado";
@@ -122,6 +123,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SecondaryUser | null>(null);
   const [openAdd, setOpenAdd] = useState<null | "cliente" | "conductor">(null);
+  const [referredOwner, setReferredOwner] = useState<{ id: string; name: string } | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
   const [selectedDriverSource, setSelectedDriverSource] = useState<"primary" | "secondary">("primary");
   const [loadingProfileId, setLoadingProfileId] = useState<string | null>(null);
@@ -685,9 +687,14 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                         <td className="px-3 py-3">{u.mobile || "—"}</td>
                         <td className="px-3 py-3 text-center">
                           {referralsFor(u) > 0 ? (
-                            <span className="inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            <button
+                              type="button"
+                              title="Ver personas referidas"
+                              onClick={() => setReferredOwner({ id: u.id, name: fullName(u) })}
+                              className="inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+                            >
                               {referralsFor(u)}
-                            </span>
+                            </button>
                           ) : (
                             <span className="text-slate-400 text-xs">0</span>
                           )}
@@ -788,6 +795,12 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         onSave={handleSaveEdit}
       />
 
+      <ReferredListModal
+        open={!!referredOwner}
+        ownerId={referredOwner?.id ?? null}
+        ownerName={referredOwner?.name ?? ""}
+        onClose={() => setReferredOwner(null)}
+      />
       <DriverReviewModal
         open={!!selectedDriver}
         driver={selectedDriver}

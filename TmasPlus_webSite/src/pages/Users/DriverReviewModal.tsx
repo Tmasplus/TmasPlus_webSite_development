@@ -173,6 +173,13 @@ const DocumentManager: React.FC<{
     );
 };
 
+interface ReferredItem {
+    id: string;
+    status: string | null;
+    referred_at: string | null;
+    referred_driver: { first_name?: string | null; last_name?: string | null } | null;
+}
+
 export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh
 }) => {
@@ -188,6 +195,10 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     // por eso antes los cambios no se veían reflejados visualmente.
     const [displayDriver, setDisplayDriver] = useState<EnrichedDriverProfile | null>(driver);
     const [ownReferral, setOwnReferral] = useState({ code: 'Generando...', total: 0 });
+    // null = cargando. Quienes se registraron con el código de este usuario.
+    const [referredList, setReferredList] = useState<ReferredItem[] | null>(null);
+    // Nombre del dueño del código con el que este usuario se registró.
+    const [referredBy, setReferredBy] = useState<string | null>(null);
     // Foto elegida con "Preseleccionar"; se sube al pulsar "Guardar Cambios".
     const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
@@ -241,6 +252,33 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 if (data) setOwnReferral({ code: data.referral_code, total: data.total_referrals });
                 else setOwnReferral({ code: 'No asignado (Pendiente)', total: 0 });
             });
+
+        // Personas que se registraron con el código de este usuario.
+        let cancelled = false;
+        setReferredList(null);
+        dbClient.from('web_referrals')
+            .select('id, status, referred_at, referred_driver')
+            .eq('referrer_id', driver.id)
+            .order('referred_at', { ascending: false })
+            .then(({ data, error }: { data: ReferredItem[] | null; error: unknown }) => {
+                if (!cancelled) setReferredList(error ? [] : (data ?? []));
+            });
+
+        // Quién lo refirió: dueño del código que escribió al registrarse.
+        setReferredBy(null);
+        const usedCode = String((driver as any).referral_id ?? '').trim();
+        if (usedCode) {
+            dbClient.from('web_referral_codes')
+                .select('driver')
+                .eq('referral_code', usedCode.toUpperCase())
+                .limit(1)
+                .then(({ data }: { data: { driver: { first_name?: string; last_name?: string } | null }[] | null }) => {
+                    const owner = data?.[0]?.driver;
+                    const name = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '';
+                    if (!cancelled && name) setReferredBy(name);
+                });
+        }
+        return () => { cancelled = true; };
     }, [driver]);
 
     if (!open || !driver) return null;
@@ -428,6 +466,38 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     <p className="text-2xl font-black text-indigo-600">{ownReferral.total}</p>
                                 </div>
                             </div>
+
+                            <div className="mt-3 pt-3 border-t border-sky-100 text-sm">
+                                <p className="text-xs font-semibold text-sky-700 mb-1">
+                                    {isCustomer ? 'Personas que se registraron con su código:' : 'Se registraron con su código:'}
+                                </p>
+                                {referredList === null ? (
+                                    <p className="text-xs text-slate-400">Cargando…</p>
+                                ) : referredList.length === 0 ? (
+                                    <p className="text-xs text-slate-400">Nadie se ha registrado con su código todavía.</p>
+                                ) : (
+                                    <ul className="space-y-1 max-h-40 overflow-y-auto">
+                                        {referredList.map(r => {
+                                            const p = r.referred_driver;
+                                            const name = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
+                                            return (
+                                                <li key={r.id} className="flex justify-between gap-2 text-slate-700">
+                                                    <span className="font-medium">{name || 'Usuario sin nombre'}</span>
+                                                    <span className="text-[11px] text-slate-400 whitespace-nowrap">
+                                                        {r.referred_at ? new Date(r.referred_at).toLocaleDateString('es') : ''}
+                                                    </span>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                            {referredBy && (
+                                <p className="mt-3 p-2 bg-emerald-50 text-emerald-800 rounded border border-emerald-200 text-xs">
+                                    <span className="font-bold">Se registró con el código de:</span> {referredBy}
+                                    {d.referral_id ? ` (${d.referral_id})` : ''}
+                                </p>
+                            )}
                         </div>
 
                         <div>
@@ -540,12 +610,6 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                         : <p>{cedulaShown || '—'}</p>}
                                 </div>
 
-                                {driver.referrerName && (
-                                    <p className="mt-4 p-2 bg-emerald-50 text-emerald-800 rounded border border-emerald-200 text-xs">
-                                        <span className="font-bold">Este conductor fue referido por:</span><br />
-                                        {driver.referrerName} (Código: {driver.referral_id})
-                                    </p>
-                                )}
                             </div>
                         </div>
 

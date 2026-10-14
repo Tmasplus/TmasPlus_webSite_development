@@ -16,6 +16,7 @@ import { supabase } from '@/config/supabase';
 import { DriversService } from '@/services/drivers.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
 import { DriverDocumentsService } from '@/services/driverDocuments.service';
+import ReferredListModal from './ReferredListModal';
 import DriverReviewModal, { type EnrichedDriverProfile } from './DriverReviewModal';
 
 // 1. SOLUCIÓN TS: Tipos estrictos para eliminar el uso de `as any`
@@ -45,6 +46,7 @@ export const DriversPage: React.FC = () => {
 
     const [page, setPage] = useState(1);
     const pageSize = 10;
+    const [referredOwner, setReferredOwner] = useState<{ id: string; name: string } | null>(null);
     const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
 
     const [appAccess, setAppAccess] = useState<AppAccessIndex>(EMPTY_ACCESS_INDEX);
@@ -361,6 +363,18 @@ export const DriversPage: React.FC = () => {
                 : <div className="flex flex-col"><span className="text-xs font-bold text-sky-700">{r.referrerName}</span><span className="text-[10px] text-slate-400">({r.referral_id})</span></div>
         },
         {
+            header: "Referidos",
+            accessor: (r) => (
+                <button
+                    type="button"
+                    onClick={() => setReferredOwner({ id: r.id, name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() })}
+                    className="text-xs font-semibold text-indigo-700 hover:underline"
+                >
+                    Ver lista
+                </button>
+            )
+        },
+        {
             header: "Estado",
             accessor: (r) => {
                 let statusText = 'Pendiente';
@@ -521,6 +535,12 @@ export const DriversPage: React.FC = () => {
                 )}
             </Card>
 
+            <ReferredListModal
+                open={!!referredOwner}
+                ownerId={referredOwner?.id ?? null}
+                ownerName={referredOwner?.name ?? ''}
+                onClose={() => setReferredOwner(null)}
+            />
             <DriverReviewModal
                 open={!!selectedDriver}
                 driver={selectedDriver}
