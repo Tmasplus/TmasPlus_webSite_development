@@ -256,7 +256,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         // Personas que se registraron con el código de este usuario.
         let cancelled = false;
         setReferredList(null);
-        dbClient.from('web_referrals')
+        dbClient.from('web_referred_users')
             .select('id, status, referred_at, referred_driver')
             .eq('referrer_id', driver.id)
             .order('referred_at', { ascending: false })

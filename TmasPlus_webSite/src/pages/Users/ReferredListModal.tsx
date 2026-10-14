@@ -30,7 +30,7 @@ export const ReferredListModal: React.FC<Props> = ({ open, ownerId, ownerName, o
         let cancelled = false;
         setRows(null);
         (supabase as any)
-            .from('web_referrals')
+            .from('web_referred_users')
             .select('id, status, referred_at, referred_driver')
             .eq('referrer_id', ownerId)
             .order('referred_at', { ascending: false })
