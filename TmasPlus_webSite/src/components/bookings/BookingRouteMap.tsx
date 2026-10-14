@@ -52,8 +52,10 @@ export function BookingRouteMap(props: RouteMapProps) {
   return <LeafletRouteMap {...props} />;
 }
 
-function LeafletRouteMap({ mode, pickup, drop, suggestedPath, actualPath }: RouteMapProps) {
+function LeafletRouteMap({ mode, pickup, drop, suggestedPath, actualPath, vehicle }: RouteMapProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const fitSigRef = useRef("");
+  const vehicleRef = useRef<L.CircleMarker | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
 
@@ -114,8 +116,31 @@ function LeafletRouteMap({ mode, pickup, drop, suggestedPath, actualPath }: Rout
       bounds.push([drop.lat, drop.lng]);
     }
 
-    if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [36, 36], maxZoom: 16 });
+    // Con el servicio en vivo la ruta se redibuja en cada refresco: solo se reencuadra
+    // cuando cambia lo que se muestra, para no quitarle el zoom al usuario.
+    const fitSig = `${mode}|${pickup?.lat},${pickup?.lng}|${drop?.lat},${drop?.lng}|${path.length > 1}`;
+    if (bounds.length && fitSig !== fitSigRef.current) {
+      fitSigRef.current = fitSig;
+      map.fitBounds(L.latLngBounds(bounds), { padding: [36, 36], maxZoom: 16 });
+    }
   }, [mode, path, pickup, drop]);
+
+  // Vehículo en vivo: se mueve el marcador sin tocar el resto de capas.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!vehicle) {
+      vehicleRef.current?.remove();
+      vehicleRef.current = null;
+      return;
+    }
+    const pos: L.LatLngTuple = [vehicle.lat, vehicle.lng];
+    if (vehicleRef.current) vehicleRef.current.setLatLng(pos);
+    else
+      vehicleRef.current = L.circleMarker(pos, { radius: 9, color: "#fff", weight: 3, fillColor: "#f59e0b", fillOpacity: 1 })
+        .bindTooltip("Vehículo (en vivo)")
+        .addTo(map);
+  }, [vehicle]);
 
   return <div ref={rootRef} className="z-0 h-full w-full" aria-label="Mapa del recorrido" />;
 }

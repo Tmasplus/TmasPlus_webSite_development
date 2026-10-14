@@ -8,6 +8,8 @@ export type RouteMapProps = {
   drop: LatLng | null;
   suggestedPath: LatLng[];
   actualPath: LatLng[];
+  /** Última posición conocida del vehículo mientras el servicio está activo (null si no hay servicio en curso). */
+  vehicle?: LatLng | null;
 };
 
 export const ROUTE_COLORS = {

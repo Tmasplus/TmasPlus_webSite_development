@@ -256,6 +256,12 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
     [data?.tracking, tripStartMs, tripEndMs]
   );
   const actualPath = useMemo(() => actualPoints.map(({ lat, lng }) => ({ lat, lng })), [actualPoints]);
+  // Vehículo en vivo: último punto GPS guardado, solo mientras el servicio está activo.
+  const liveVehicle = useMemo<LatLng | null>(() => {
+    if (!ACTIVE_STATUSES.includes(status)) return null;
+    const last = data?.tracking?.[data.tracking.length - 1];
+    return last ? { lat: last.lat, lng: last.lng } : null;
+  }, [status, data?.tracking]);
   const gpsKm = actualPath.length > 1 ? pathDistanceKm(actualPath) : null;
   const realDurationMin = tripStartMs && tripEndMs && tripEndMs > tripStartMs ? (tripEndMs - tripStartMs) / 60000 : null;
 
@@ -361,6 +367,7 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
               drop={drop}
               suggestedPath={suggested.route?.path ?? []}
               actualPath={actualPath}
+              vehicle={liveVehicle}
             />
             {routeMode === "actual" && !loading && actualPath.length < 2 && (
               <MapOverlay>

@@ -14,16 +14,21 @@ export default function VehicleMapPage(){
     layer.current=L.layerGroup().addTo(map.current);
     return()=>{map.current?.remove();map.current=null;layer.current=null;};
   },[]);
+  const [reloadTick,setReloadTick]=useState(0);
+  // Solo se sigue en vivo el vehículo buscado (placa >= 3 caracteres): sin placa se
+  // hace una sola consulta (botón Actualizar) para no consumir API de más.
+  const following=plate.trim().length>=3;
   useEffect(()=>{
-    let disposed=false,inFlight=false;
+    let disposed=false,inFlight=false,timer:ReturnType<typeof setInterval>|undefined;
     const refresh=async()=>{if(inFlight)return;inFlight=true;try{
       if(import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/,'')!=='https://zvplcamcyldcquxqnftb.supabase.co') throw new Error('El seguimiento requiere la conexión principal a core. Revisar VITE_SUPABASE_URL del despliegue.');
       const {data,error}=await (supabase as any).from('web_vehicle_locations').select('*').ilike('plate_number', '%'+plate.trim().replace(/[%_]/g,'')+'%').not('driver_lat','is',null).not('driver_lng','is',null);
       if(disposed)return;if(error)throw error;setRows(data??[]);setError('');setUpdated(new Date().toLocaleTimeString());
     }catch(e:any){if(!disposed)setError(e.message);}finally{inFlight=false;}};
-    fitted.current=false;void refresh();const timer=setInterval(refresh,5000);
-    return()=>{disposed=true;clearInterval(timer);};
-  },[plate]);
+    fitted.current=false;
+    const start=setTimeout(()=>{void refresh();if(following)timer=setInterval(()=>{if(!document.hidden)void refresh();},5000);},400);
+    return()=>{disposed=true;clearTimeout(start);if(timer)clearInterval(timer);};
+  },[plate,following,reloadTick]);
   const filtered=rows.filter(r=>status==='ALL'||r.booking_status===status);
   useEffect(()=>{
     if(!map.current||!layer.current)return;layer.current.clearLayers();const points:L.LatLngTuple[]=[];
@@ -38,8 +43,9 @@ export default function VehicleMapPage(){
   },[rows,status,plate,error]);
   return <div className="p-6 space-y-4"><h1 className="text-2xl font-semibold">Ubicación de vehículos</h1>
     <div className="flex flex-wrap gap-4"><label>Placa <input className="border rounded p-2" value={plate} onChange={e=>setPlate(e.target.value.toUpperCase())} placeholder="Todas / ABC123" maxLength={20}/></label>
-    <label>Estado <select className="border rounded p-2" value={status} onChange={e=>{fitted.current=false;setStatus(e.target.value);}}><option value="ALL">Todos</option>{Object.entries(labels).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>
-    <p>{filtered.length} vehículos · Actualización cada 5 segundos · Última consulta: {updated||'pendiente'}. Gris: sin señal reciente.</p>
+    <label>Estado <select className="border rounded p-2" value={status} onChange={e=>{fitted.current=false;setStatus(e.target.value);}}><option value="ALL">Todos</option>{Object.entries(labels).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+    <button className="border rounded px-3 py-2 self-end" onClick={()=>setReloadTick(t=>t+1)}>Actualizar</button></div>
+    <p>{filtered.length} vehículos · {following?'Siguiendo en vivo la placa buscada (cada 5 segundos)':'Escribe una placa (mín. 3 caracteres) para seguirla en vivo; sin placa solo se actualiza al pulsar Actualizar'} · Última consulta: {updated||'pendiente'}. Gris: sin señal reciente.</p>
     {error&&<p role="alert" className="text-red-700">Sin actualización: {error}. Las posiciones pueden estar desactualizadas.</p>}
     <div ref={root} style={{height:'60vh',minHeight:350}} className="rounded-xl border z-0" aria-label="Mapa de vehículos"/>
     {!filtered.length&&<p>No hay posiciones para este filtro. El conductor debe conectarse y permitir ubicación en la app conectada a core.</p>}
