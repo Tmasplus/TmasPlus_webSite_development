@@ -11,7 +11,9 @@ import { formatDate } from "@/utils/formatDate";
 import { toast } from "@/utils/toast";
 import {
   CarBrandsService,
+  brandKey,
   type CarBrandRow,
+  type CarBrandUsage,
 } from "@/services/carBrands.service";
 
 const StatusBadge = ({ active }: { active: boolean }) => (
@@ -29,6 +31,7 @@ const StatusBadge = ({ active }: { active: boolean }) => (
 
 export default function CarBrandsPage() {
   const [brands, setBrands] = useState<CarBrandRow[]>([]);
+  const [usage, setUsage] = useState<Record<string, CarBrandUsage>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -42,6 +45,10 @@ export default function CarBrandsPage() {
     try {
       const data = await CarBrandsService.getAll();
       setBrands(data);
+      // El conteo es informativo: si falla, la lista igual se muestra.
+      CarBrandsService.getUsageByName()
+        .then(setUsage)
+        .catch(() => setUsage({}));
     } catch (e: any) {
       toast.error(e?.message || "Error al cargar las marcas");
     } finally {
@@ -52,6 +59,16 @@ export default function CarBrandsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Marcas equivalentes (mismo nombre salvo mayúsculas/espacios)
+  const duplicatedKeys = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const b of brands) {
+      const k = brandKey(b.name);
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+    return new Set([...count].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [brands]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -105,19 +122,35 @@ export default function CarBrandsPage() {
     }
   };
 
+  // Diálogo de confirmación: se abre con el uso actual de la marca.
+  const [deleteTarget, setDeleteTarget] = useState<{
+    brand: CarBrandRow;
+    usage: CarBrandUsage | null; // null = no se pudo comprobar
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const handleDelete = async (brand: CarBrandRow) => {
-    const confirmed = window.confirm(
-      `¿Eliminar la marca "${brand.name}"? Esta acción no se puede deshacer. ` +
-        `Los vehículos que ya la tengan guardada no se modifican. ` +
-        `Si solo quieres ocultarla en la App, mejor desactívala.`
-    );
-    if (!confirmed) return;
+    // Se consulta el uso justo antes de confirmar para no avisar con datos viejos.
     try {
-      await CarBrandsService.remove(brand.id);
+      const current = (await CarBrandsService.getUsageByName())[brand.name];
+      setDeleteTarget({ brand, usage: current ?? { vehicles: 0, drivers: 0 } });
+    } catch {
+      setDeleteTarget({ brand, usage: null });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await CarBrandsService.remove(deleteTarget.brand.id);
       toast.success("Marca eliminada");
+      setDeleteTarget(null);
       load();
     } catch (e: any) {
       toast.error(e?.message || "Error al eliminar la marca");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -174,6 +207,9 @@ export default function CarBrandsPage() {
                       Estado
                     </th>
                     <th className="px-3 py-2 font-medium whitespace-nowrap">
+                      Conductores
+                    </th>
+                    <th className="px-3 py-2 font-medium whitespace-nowrap">
                       Creada
                     </th>
                     <th className="px-3 py-2 font-medium whitespace-nowrap text-right">
@@ -190,9 +226,20 @@ export default function CarBrandsPage() {
                       <td className="px-3 py-3 text-slate-500">{idx + 1}</td>
                       <td className="px-3 py-3 font-medium text-slate-800">
                         {b.name}
+                        {duplicatedKeys.has(brandKey(b.name)) && (
+                          <span
+                            className="ml-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700"
+                            title="Hay otra marca igual que solo cambia en mayúsculas o espacios"
+                          >
+                            DUPLICADA
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <StatusBadge active={b.is_active} />
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {usage[b.name]?.drivers ?? 0}
                       </td>
                       <td className="px-3 py-3 text-slate-500">
                         {formatDate(b.created_at)}
@@ -273,6 +320,54 @@ export default function CarBrandsPage() {
             el vehículo.
           </p>
         </div>
+      </Modal>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => !deleting && setDeleteTarget(null)}
+        title="Eliminar marca"
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Eliminando..." : "Sí, eliminar"}
+            </Button>
+          </>
+        }
+      >
+        {deleteTarget && (
+          <div className="space-y-2 text-sm text-slate-700">
+            {deleteTarget.usage === null ? (
+              <p>
+                No se pudo comprobar cuántos conductores tienen{" "}
+                <strong>{deleteTarget.brand.name}</strong>. Si alguno la tiene,
+                se quedará sin marca.
+              </p>
+            ) : deleteTarget.usage.drivers > 0 ? (
+              <p>
+                <strong>{deleteTarget.usage.drivers}</strong>{" "}
+                {deleteTarget.usage.drivers === 1 ? "conductor ya tiene" : "conductores ya tienen"}{" "}
+                la marca <strong>{deleteTarget.brand.name}</strong>. Si la
+                eliminas, dejarán de tener marca y habrá que asignarles una nueva.
+              </p>
+            ) : (
+              <p>
+                Ningún conductor tiene la marca{" "}
+                <strong>{deleteTarget.brand.name}</strong>.
+              </p>
+            )}
+            <p className="text-xs text-slate-500">
+              Esta acción no se puede deshacer. Si solo quieres ocultarla en la
+              App, mejor desactívala.
+            </p>
+          </div>
+        )}
       </Modal>
     </Page>
   );

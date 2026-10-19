@@ -648,12 +648,15 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                                     alimentado por el catálogo en vez de texto libre. */}
                                                 <select
                                                     className="border p-1 rounded w-full"
-                                                    value={editForm.vehicle?.make || ''}
+                                                    value={
+                                                        carBrands.find(b => b.name.trim().toLowerCase() === (editForm.vehicle?.make || '').trim().toLowerCase())?.name
+                                                        ?? editForm.vehicle?.make ?? ''
+                                                    }
                                                     onChange={e => setEditForm({ ...editForm, vehicle: editForm.vehicle ? { ...editForm.vehicle, make: e.target.value } : { make: e.target.value } as any })}
                                                 >
                                                     <option value="">Seleccionar</option>
                                                     {editForm.vehicle?.make &&
-                                                        !carBrands.some(b => b.name.toLowerCase() === editForm.vehicle!.make!.toLowerCase()) && (
+                                                        !carBrands.some(b => b.name.trim().toLowerCase() === editForm.vehicle!.make!.trim().toLowerCase()) && (
                                                             <option value={editForm.vehicle.make}>{editForm.vehicle.make} (actual)</option>
                                                         )}
                                                     {carBrands.map((b) => (
