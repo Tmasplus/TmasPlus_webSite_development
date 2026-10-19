@@ -110,6 +110,8 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   // Cuántos conductores ha referido cada usuario (referral_codes.total_referrals,
   // proyecto primario), mapeado por users.id.
   const [referralCountMap, setReferralCountMap] = useState<Record<string, number>>({});
+  // Dueño (nombre) de cada código de referido usado al registrarse, por código en mayúsculas.
+  const [referralOwnerByCode, setReferralOwnerByCode] = useState<Record<string, string>>({});
   // Cédula tomada de la BD primaria, solo como respaldo cuando la secundaria
   // no la tiene; keyed por user.id.
   const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
@@ -257,6 +259,30 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       if (count !== undefined) refByUser[id] = count;
     }
     setReferralCountMap(refByUser);
+
+    // 5) Dueño del código con el que se registró cada usuario (para la lista y el Excel).
+    const usedCodes = [
+      ...new Set(
+        rows
+          .map((u) => String(u.referral_id || "").trim().toUpperCase())
+          .filter(Boolean)
+      ),
+    ];
+    const ownerByCode: Record<string, string> = {};
+    for (const codesChunk of chunk(usedCodes)) {
+      const { data: owners } = await supabase
+        .from("web_referral_codes")
+        .select("referral_code, driver")
+        .in("referral_code", codesChunk);
+      for (const row of (owners || []) as Array<{
+        referral_code: string;
+        driver: { first_name?: string | null; last_name?: string | null } | null;
+      }>) {
+        const name = [row.driver?.first_name, row.driver?.last_name].filter(Boolean).join(" ");
+        if (row.referral_code && name) ownerByCode[row.referral_code.toUpperCase()] = name;
+      }
+    }
+    setReferralOwnerByCode(ownerByCode);
   };
 
   const cedulaFor = (u: SecondaryUser): string =>
@@ -521,6 +547,11 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       { header: "Correo", value: (u) => u.email || "" },
       { header: "Teléfono", value: (u) => u.mobile || "" },
       { header: "Referidos", value: (u) => String(referralsFor(u)) },
+      { header: "Código con el que se registró", value: (u) => String(u.referral_id || "").trim() },
+      {
+        header: "Dueño del código",
+        value: (u) => referralOwnerByCode[String(u.referral_id || "").trim().toUpperCase()] || "",
+      },
       { header: "Ciudad", value: (u) => u.city || "" },
       { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
       { header: "Tipo", value: (u) => u.user_type || "" },

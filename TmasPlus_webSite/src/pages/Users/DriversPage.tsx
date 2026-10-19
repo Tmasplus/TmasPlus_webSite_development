@@ -425,8 +425,8 @@ export const DriversPage: React.FC = () => {
             { header: 'Teléfono', value: (d) => d.mobile },
             { header: 'Estado', value: statusLabel },
             { header: 'Acceso App', value: (d) => (appAccessIds.has(d.id) ? 'Sí' : 'No') },
-            { header: 'Referido Por', value: (d) => d.referrerName || '' },
-            { header: 'Código Referido', value: (d) => d.referral_id || '' },
+            { header: 'Código con el que se registró', value: (d) => d.referral_id || '' },
+            { header: 'Dueño del código', value: (d) => (d.referrerName && d.referrerName !== 'Sin referencia' ? d.referrerName : '') },
             { header: 'Registro', value: (d) => (d.created_at ? formatDate(d.created_at) : '') },
         ]);
     };
