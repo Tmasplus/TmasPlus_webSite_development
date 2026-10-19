@@ -259,31 +259,46 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       if (count !== undefined) refByUser[id] = count;
     }
     setReferralCountMap(refByUser);
+  };
 
-    // 5) Dueño del código con el que se registró cada usuario (para la lista y el Excel).
+  // Dueño (nombre) del código con el que se registró cada usuario, para el Excel.
+  // Va aparte de enrich() para que un fallo en otros pasos no lo deje sin ejecutar.
+  useEffect(() => {
     const usedCodes = [
       ...new Set(
-        rows
-          .map((u) => String(u.referral_id || "").trim().toUpperCase())
-          .filter(Boolean)
+        users.map((u) => String(u.referral_id || "").trim().toUpperCase()).filter(Boolean)
       ),
     ];
-    const ownerByCode: Record<string, string> = {};
-    for (const codesChunk of chunk(usedCodes)) {
-      const { data: owners } = await supabase
-        .from("web_referral_codes")
-        .select("referral_code, driver")
-        .in("referral_code", codesChunk);
-      for (const row of (owners || []) as Array<{
-        referral_code: string;
-        driver: { first_name?: string | null; last_name?: string | null } | null;
-      }>) {
-        const name = [row.driver?.first_name, row.driver?.last_name].filter(Boolean).join(" ");
-        if (row.referral_code && name) ownerByCode[row.referral_code.toUpperCase()] = name;
-      }
+    if (usedCodes.length === 0) {
+      setReferralOwnerByCode({});
+      return;
     }
-    setReferralOwnerByCode(ownerByCode);
-  };
+    let cancelled = false;
+    (async () => {
+      const ownerByCode: Record<string, string> = {};
+      for (const codesChunk of chunk(usedCodes, 100)) {
+        const { data: owners, error } = await supabase
+          .from("web_referral_codes")
+          .select("referral_code, driver")
+          .in("referral_code", codesChunk);
+        if (error) {
+          console.warn("No se pudo resolver el dueño de los códigos de referido:", error.message);
+          continue;
+        }
+        for (const row of (owners || []) as unknown as Array<{
+          referral_code: string;
+          driver: { first_name?: string | null; last_name?: string | null } | null;
+        }>) {
+          const name = [row.driver?.first_name, row.driver?.last_name].filter(Boolean).join(" ");
+          if (row.referral_code && name) ownerByCode[row.referral_code.trim().toUpperCase()] = name;
+        }
+      }
+      if (!cancelled) setReferralOwnerByCode(ownerByCode);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [users]);
 
   const cedulaFor = (u: SecondaryUser): string =>
     u.document_number || cedulaFallbackMap[u.id] || "";

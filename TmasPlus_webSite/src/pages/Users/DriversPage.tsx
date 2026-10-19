@@ -80,6 +80,7 @@ export const DriversPage: React.FC = () => {
             // 3. SOLUCIÓN TS: Type Guard estricto para eliminar nulos del arreglo
             const uniqueCodes = [...new Set(
                 result.data.map(d => d.referral_id).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+                    .map(id => id.trim().toUpperCase())
             )];
 
             let codeToNameMap: Record<string, string> = {};
@@ -92,14 +93,16 @@ export const DriversPage: React.FC = () => {
 
                     refCodes.forEach((rc: { driver_id: string, referral_code: string }) => {
                         const user = users?.find((u: { id: string, first_name: string, last_name: string }) => u.id === rc.driver_id);
-                        if (user) codeToNameMap[rc.referral_code] = `${user.first_name} ${user.last_name}`;
+                        if (user) codeToNameMap[rc.referral_code.trim().toUpperCase()] = `${user.first_name} ${user.last_name}`;
                     });
                 }
             }
 
             const enriched = result.data.map(d => ({
                 ...d,
-                referrerName: d.referral_id && codeToNameMap[d.referral_id] ? codeToNameMap[d.referral_id] : 'Sin referencia'
+                referrerName: d.referral_id && codeToNameMap[d.referral_id.trim().toUpperCase()]
+                    ? codeToNameMap[d.referral_id.trim().toUpperCase()]
+                    : 'Sin referencia'
             }));
 
             setDrivers(enriched);
