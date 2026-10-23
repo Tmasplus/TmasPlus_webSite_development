@@ -85,17 +85,25 @@ export const DriversPage: React.FC = () => {
 
             let codeToNameMap: Record<string, string> = {};
 
-            if (uniqueCodes.length > 0) {
-                const { data: refCodes } = await supabase.from('web_referral_codes').select('referral_code, driver_id').in('referral_code', uniqueCodes);
-                if (refCodes && refCodes.length > 0) {
-                    const driverIds = refCodes.map((rc: { driver_id: string, referral_code: string }) => rc.driver_id);
-                    const { data: users } = await supabase.from('web_users').select('id, first_name, last_name').in('id', driverIds);
-
-                    refCodes.forEach((rc: { driver_id: string, referral_code: string }) => {
-                        const user = users?.find((u: { id: string, first_name: string, last_name: string }) => u.id === rc.driver_id);
-                        if (user) codeToNameMap[rc.referral_code.trim().toUpperCase()] = `${user.first_name} ${user.last_name}`;
-                    });
+            // El dueño viene embebido en la vista (columna `driver`): una sola consulta,
+            // en lotes para no exceder el largo de la URL, y sin ignorar errores.
+            const CHUNK = 100;
+            for (let i = 0; i < uniqueCodes.length; i += CHUNK) {
+                const { data: refCodes, error: refError } = await supabase
+                    .from('web_referral_codes')
+                    .select('referral_code, driver')
+                    .in('referral_code', uniqueCodes.slice(i, i + CHUNK));
+                if (refError) {
+                    console.warn('No se pudo resolver el dueño de los códigos:', refError.message);
+                    continue;
                 }
+                (refCodes ?? []).forEach((rc: { referral_code: string; driver: { first_name?: string | null; last_name?: string | null } | null }) => {
+                    const name = [rc.driver?.first_name, rc.driver?.last_name]
+                        .map(part => (part ?? '').trim())
+                        .filter(Boolean)
+                        .join(' ');
+                    if (name) codeToNameMap[rc.referral_code.trim().toUpperCase()] = name;
+                });
             }
 
             const enriched = result.data.map(d => ({
