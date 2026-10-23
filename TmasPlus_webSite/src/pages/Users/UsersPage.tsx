@@ -12,6 +12,7 @@ import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
 import { exportToCsv } from "@/utils/exportCsv";
 import { chunk } from "@/utils/chunk";
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from "@/utils/referralCode";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
 import { categoryNameForValue } from "@/utils/carTypeCatalog";
 import { supabase, supabaseSecondary } from "@/config/supabase";
@@ -502,10 +503,11 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
 
       let referrerName = "Sin referencia";
       if (profile.referral_id && profile.referral_id.trim() !== "") {
+        referrerName = REFERRAL_OWNER_NOT_FOUND;
         const { data: refCodes } = await supabase
           .from("web_referral_codes")
           .select("driver_id")
-          .eq("referral_code", profile.referral_id)
+          .eq("referral_code", formatReferralCode(profile.referral_id))
           .limit(1);
         const refCode = refCodes?.[0];
         if (refCode?.driver_id) {
@@ -515,9 +517,8 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
             .eq("id", refCode.driver_id)
             .limit(1);
           const referrer = referrers?.[0];
-          if (referrer) {
-            referrerName = `${referrer.first_name} ${referrer.last_name}`;
-          }
+          const name = [referrer?.first_name, referrer?.last_name].filter(Boolean).join(" ");
+          if (name) referrerName = name;
         }
       }
 

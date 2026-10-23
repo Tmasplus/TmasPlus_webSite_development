@@ -9,6 +9,9 @@ export function formatReferralCode(raw: string | null | undefined): string {
   return clean.length > 3 ? `${clean.slice(0, 3)}-${clean.slice(3)}` : clean;
 }
 
+// Texto cuando el conductor se registró con un código que no existe.
+export const REFERRAL_OWNER_NOT_FOUND = 'No se encontró el dueño del código';
+
 export function isValidReferralCodeFormat(raw: string | null | undefined): boolean {
   return REFERRAL_CODE_REGEX.test(formatReferralCode(raw));
 }

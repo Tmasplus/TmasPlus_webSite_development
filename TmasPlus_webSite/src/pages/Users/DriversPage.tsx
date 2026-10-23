@@ -10,7 +10,7 @@ import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { exportToCsv } from '@/utils/exportCsv';
-import { formatReferralCode } from '@/utils/referralCode';
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from '@/utils/referralCode';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { categoryNameForValue } from '@/utils/carTypeCatalog';
 import { supabase } from '@/config/supabase';
@@ -109,9 +109,9 @@ export const DriversPage: React.FC = () => {
 
             const enriched = result.data.map(d => ({
                 ...d,
-                referrerName: d.referral_id && codeToNameMap[formatReferralCode(d.referral_id)]
-                    ? codeToNameMap[formatReferralCode(d.referral_id)]
-                    : 'Sin referencia'
+                referrerName: !d.referral_id?.trim()
+                    ? 'Sin referencia'
+                    : codeToNameMap[formatReferralCode(d.referral_id)] ?? REFERRAL_OWNER_NOT_FOUND
             }));
 
             setDrivers(enriched);
@@ -372,7 +372,7 @@ export const DriversPage: React.FC = () => {
             header: "Referido Por",
             accessor: (r) => r.referrerName === 'Sin referencia' || !r.referral_id
                 ? <span className="text-slate-400 text-xs italic">Sin referencia</span>
-                : <div className="flex flex-col"><span className="text-xs font-bold text-sky-700">{r.referrerName}</span><span className="text-[10px] text-slate-400">({r.referral_id})</span></div>
+                : <div className="flex flex-col"><span className={`text-xs font-bold ${r.referrerName === REFERRAL_OWNER_NOT_FOUND ? 'text-amber-700' : 'text-sky-700'}`}>{r.referrerName}</span><span className="text-[10px] text-slate-400">({r.referral_id})</span></div>
         },
         {
             header: "Referidos",

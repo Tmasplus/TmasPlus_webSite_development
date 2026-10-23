@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 //import { formatDate } from '@/utils/formatDate';
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from '@/utils/referralCode';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
@@ -270,12 +271,13 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         if (usedCode) {
             dbClient.from('web_referral_codes')
                 .select('driver')
-                .eq('referral_code', usedCode.toUpperCase())
+                .eq('referral_code', formatReferralCode(usedCode))
                 .limit(1)
-                .then(({ data }: { data: { driver: { first_name?: string; last_name?: string } | null }[] | null }) => {
+                .then(({ data, error }: { data: { driver: { first_name?: string; last_name?: string } | null }[] | null; error: unknown }) => {
+                    if (cancelled || error) return;
                     const owner = data?.[0]?.driver;
                     const name = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '';
-                    if (!cancelled && name) setReferredBy(name);
+                    setReferredBy(name || REFERRAL_OWNER_NOT_FOUND);
                 });
         }
         return () => { cancelled = true; };
@@ -493,7 +495,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                 )}
                             </div>
                             {referredBy && (
-                                <p className="mt-3 p-2 bg-emerald-50 text-emerald-800 rounded border border-emerald-200 text-xs">
+                                <p className={`mt-3 p-2 rounded border text-xs ${referredBy === REFERRAL_OWNER_NOT_FOUND ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
                                     <span className="font-bold">Se registró con el código de:</span> {referredBy}
                                     {d.referral_id ? ` (${d.referral_id})` : ''}
                                 </p>
