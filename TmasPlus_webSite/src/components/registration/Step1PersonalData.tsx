@@ -4,6 +4,7 @@ import type { DriverRegistrationStep1 } from '@/config/database.types';
 import { CITIES } from '@/config/constants';
 import { referralsService } from '@/services/referrals.service'; 
 import { supabase } from '@/config/supabase';
+import { formatReferralCode, isValidReferralCodeFormat } from '@/utils/referralCode';
 
 interface Step1Props {
     data: Partial<DriverRegistrationStep1> & { confirmPassword?: string };
@@ -102,6 +103,11 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
 
             // 3. Verificar Referido
             if (data.referral_code?.trim()) {
+                if (!isValidReferralCodeFormat(data.referral_code)) {
+                    setErrors(e => ({ ...e, referral_code: 'El código debe tener el formato AAA-XXXXX' }));
+                    setIsValidating(false);
+                    return;
+                }
                 const isValid = await referralsService.checkCodeValidity(data.referral_code);
                 if (!isValid) {
                     setErrors(e => ({ ...e, referral_code: 'Código inválido o inactivo' }));
@@ -165,7 +171,7 @@ export const Step1PersonalData: React.FC<Step1Props> = ({ data, onChange, onNext
                 {errors.city && <p className="mt-1 text-xs text-red-600 font-semibold">{errors.city}</p>}
             </div>
 
-            <FloatingInput id="referral_code" label="Código de referido (opcional)" value={data.referral_code ?? ''} onChange={(e) => update('referral_code', e.target.value.toUpperCase())} disabled={loading || isValidating} error={errors.referral_code} />
+            <FloatingInput id="referral_code" label="Código de referido (opcional)" value={data.referral_code ?? ''} maxLength={9} onChange={(e) => update('referral_code', formatReferralCode(e.target.value).slice(0, 9))} disabled={loading || isValidating} error={errors.referral_code} />
 
             <button 
                 type="submit" 

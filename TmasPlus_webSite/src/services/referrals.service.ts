@@ -9,6 +9,7 @@ import type {
   DriverReferralStats
 } from '../config/database.types';
 import { ErrorHandler, type AppError, AppErrorType } from '../utils/errorHandler';
+import { formatReferralCode } from '../utils/referralCode';
 
 // Tipos de respuesta del servicio
 interface ServiceResponse<T> {
@@ -112,7 +113,7 @@ class ReferralsService {
         };
       }
 
-      const { data, error } = await (supabase as any).rpc('web_validate_referral', { p_code: referralCode });
+      const { data, error } = await (supabase as any).rpc('web_validate_referral', { p_code: formatReferralCode(referralCode) });
 
       if (error || !data) {
         if (!data || error?.code === 'PGRST116') {
@@ -168,7 +169,7 @@ class ReferralsService {
       const { data, error } = await supabase
         .from('web_referral_codes')
         .select('id')
-        .eq('referral_code', code.trim().toUpperCase())
+        .eq('referral_code', formatReferralCode(code))
         .eq('is_active', true)
         .single();
 

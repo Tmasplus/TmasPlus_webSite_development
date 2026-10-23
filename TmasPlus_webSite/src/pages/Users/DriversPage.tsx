@@ -10,6 +10,7 @@ import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { exportToCsv } from '@/utils/exportCsv';
+import { formatReferralCode } from '@/utils/referralCode';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { categoryNameForValue } from '@/utils/carTypeCatalog';
 import { supabase } from '@/config/supabase';
@@ -80,7 +81,7 @@ export const DriversPage: React.FC = () => {
             // 3. SOLUCIÓN TS: Type Guard estricto para eliminar nulos del arreglo
             const uniqueCodes = [...new Set(
                 result.data.map(d => d.referral_id).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-                    .map(id => id.trim().toUpperCase())
+                    .map(formatReferralCode)
             )];
 
             let codeToNameMap: Record<string, string> = {};
@@ -102,14 +103,14 @@ export const DriversPage: React.FC = () => {
                         .map(part => (part ?? '').trim())
                         .filter(Boolean)
                         .join(' ');
-                    if (name) codeToNameMap[rc.referral_code.trim().toUpperCase()] = name;
+                    if (name) codeToNameMap[formatReferralCode(rc.referral_code)] = name;
                 });
             }
 
             const enriched = result.data.map(d => ({
                 ...d,
-                referrerName: d.referral_id && codeToNameMap[d.referral_id.trim().toUpperCase()]
-                    ? codeToNameMap[d.referral_id.trim().toUpperCase()]
+                referrerName: d.referral_id && codeToNameMap[formatReferralCode(d.referral_id)]
+                    ? codeToNameMap[formatReferralCode(d.referral_id)]
                     : 'Sin referencia'
             }));
 
