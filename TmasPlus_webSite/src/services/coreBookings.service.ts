@@ -125,9 +125,16 @@ export class BookingsService {
   static async getServiceSnapshots(bookingIds: string | string[]): Promise<ServiceSnapshot[]> {
     const ids = [...new Set((Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean))];
     if (!ids.length) return [];
-    const { data, error } = await db.from('reserva_snapshot').select('*').in('id_reserva', ids).order('capturado_en');
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => ({ id:r.id, booking_id:r.id_reserva, stage:r.etapa,
+    // Lotes: un .in() con miles de ids excede el largo de URL y PostgREST responde 400.
+    const data: any[] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data: part, error } = await db.from('reserva_snapshot').select('*')
+        .in('id_reserva', ids.slice(i, i + 100)).order('capturado_en');
+      if (error) throw new Error(error.message);
+      data.push(...(part ?? []));
+    }
+    data.sort((a, b) => String(a.capturado_en).localeCompare(String(b.capturado_en)));
+    return data.map((r: any) => ({ id:r.id, booking_id:r.id_reserva, stage:r.etapa,
       status:r.etapa, captured_at:r.capturado_en, latitude:r.lat, longitude:r.lng,
       address:r.datos_crudos?.address ?? null, calculated_price:r.precio_calculado,
       distance:r.distancia_km, duration:r.duracion_seg, data:r.datos_crudos ?? {}, raw:r }));
