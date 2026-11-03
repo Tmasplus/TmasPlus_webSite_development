@@ -59,13 +59,41 @@ function loadGeocoder(): Promise<google.maps.Geocoder> {
   return loader;
 }
 
-/** "Calle 174 con 8-20" → "Calle 174 # 8-20" (formato que Google entiende mejor en Colombia). */
-function normalizeColombianAddress(text: string) {
-  return text
+const STREET_TYPES: [RegExp, string][] = [
+  [/^(?:av(?:enida)?\.?\s*(?:cra|cr|kra|kr|carrera)|ak)\.?\s+/i, "Avenida Carrera "],
+  [/^(?:av(?:enida)?\.?\s*(?:cll|cl|calle)|ac)\.?\s+/i, "Avenida Calle "],
+  [/^(?:cra|cr|kra|kr|carrera)\.?\s+/i, "Carrera "],
+  [/^(?:cll|cl|calle)\.?\s+/i, "Calle "],
+  [/^(?:tv|tr|transv|transversal)\.?\s+/i, "Transversal "],
+  [/^(?:dg|diag|diagonal)\.?\s+/i, "Diagonal "],
+  [/^(?:av|avda|avenida)\.?\s+/i, "Avenida "],
+];
+
+/** Número de vía con letra y "bis": "96a" → "96A", "129 d bis" → "129D BIS". */
+const ROAD_NUMBER = String.raw`\d+\s*[a-z]?(?:\s*bis)?(?:\s*[a-z])?`;
+const compactRoad = (s: string) => s.replace(/\s+/g, "").replace(/bis/i, " BIS ").trim().toUpperCase();
+
+/**
+ * Formato que Google entiende en Colombia:
+ * "cra 96a 129d 31" → "Carrera 96A # 129D-31"; "Calle 174 con 8-20" → "Calle 174 # 8-20".
+ */
+export function normalizeColombianAddress(text: string) {
+  let out = text
     .replace(/\s+(con|no\.?|n°|nº|numero|número)\s+/i, " # ")
     .replace(/\s*#\s*/g, " # ")
     .replace(/\s+/g, " ")
     .trim();
+  for (const [re, name] of STREET_TYPES) {
+    if (re.test(out)) {
+      out = out.replace(re, name);
+      break;
+    }
+  }
+  const plain = new RegExp(String.raw`^(.*?[a-záéíóú])\s+(${ROAD_NUMBER})\s+(${ROAD_NUMBER})(?:\s+|\s*-\s*)(\d+)$`, "i").exec(out);
+  if (plain && !out.includes("#")) {
+    out = `${plain[1]} ${compactRoad(plain[2])} # ${compactRoad(plain[3])}-${plain[4]}`;
+  }
+  return out;
 }
 
 function cleanParts(formatted: string) {
@@ -90,9 +118,11 @@ function toPlace(r: google.maps.GeocoderResult): OsmPlace & { approximate: boole
   };
 }
 
+// Solo una key rechazada desactiva Google en la sesión. OVER_QUERY_LIMIT es temporal (ráfaga de búsquedas):
+// esa consulta cae a OpenStreetMap y la siguiente vuelve a intentar con Google.
 function isDenied(e: unknown) {
   const code = (e as { code?: string })?.code ?? String(e);
-  return /REQUEST_DENIED|OVER_QUERY_LIMIT/.test(code);
+  return /REQUEST_DENIED/.test(code);
 }
 
 export async function googleSearchPlaces(

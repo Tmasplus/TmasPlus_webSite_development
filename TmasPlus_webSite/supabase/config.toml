@@ -408,6 +408,16 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/core-complaint-response/index.ts"
 
+[functions.core-company-create]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/core-company-create/index.ts"
+
+[functions.core-company-collaborator]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/core-company-collaborator/index.ts"
+
 [functions.sendPush]
 enabled = true
 # Solo se invoca internamente por otras Edge Functions (dispatcher, campañas)

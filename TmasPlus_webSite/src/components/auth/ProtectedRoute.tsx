@@ -1,20 +1,24 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
+export type PortalRole = 'admin' | 'company';
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
+  /** Roles con acceso. Por defecto solo administradores. */
+  allow?: PortalRole[];
 }
 
 /**
- * Componente para proteger rutas que requieren autenticación
- * Si el usuario no está autenticado, redirige a /login
- * Si está autenticado pero no es admin, redirige a /login
+ * Protege rutas autenticadas según el rol.
+ * Sin sesión se va al login correspondiente; una empresa que entra a una ruta
+ * de administración vuelve a su portal.
  */
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, profile } = useAuth();
+export function ProtectedRoute({ children, allow = ['admin'] }: ProtectedRouteProps) {
+  const { isAuthenticated, isLoading, profile, mode } = useAuth();
   const location = useLocation();
+  const isCompanyArea = location.pathname.startsWith('/empresa/');
 
-  // Mientras carga, mostrar loader
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -26,18 +30,20 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  // Si no está autenticado, redirigir a login
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+  if (!isAuthenticated || !profile || profile.bloqueado) {
+    return <Navigate to={isCompanyArea ? '/empresas/login' : '/login'} state={{ from: location }} replace />;
   }
 
-  // Verificación adicional: debe ser admin (no bloqueado)
-  if (!profile?.es_admin || profile?.bloqueado) {
-    return <Navigate to="/login" replace />;
+  const role: PortalRole | null = profile.es_admin ? 'admin' : mode === 'company' ? 'company' : null;
+
+  if (role && allow.includes(role)) {
+    return <>{children}</>;
   }
 
-  // Si todo está bien, mostrar el componente hijo
-  return <>{children}</>;
+  if (role === 'company') {
+    return <Navigate to="/empresa/inicio" replace />;
+  }
+  return <Navigate to="/login" replace />;
 }
 
 export default ProtectedRoute;

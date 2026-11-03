@@ -1,7 +1,21 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import type { PerfilDashboard } from '@/config/domain.types';
-import { AuthService, type AuthMode, type LoginCredentials, type AuthResponse } from '@/services/auth.service';
+import {
+  AuthService,
+  isCompanyProfile,
+  modeForProfile,
+  type AuthMode,
+  type LoginCredentials,
+  type AuthResponse,
+} from '@/services/auth.service';
+import {
+  endDemoCompanySession,
+  isDemoCompanyCredentials,
+  isDemoCompanySessionActive,
+  restoreDemoCompanySession,
+  startDemoCompanySession,
+} from '@/services/companyDemoAuth';
 import { ErrorHandler } from '@/utils/errorHandler';
 import { toast } from '@/utils/toast';
 
@@ -16,6 +30,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
+  loginCompany: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   checkAuth: () => Promise<boolean>;
@@ -50,6 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updateAuthState({ isLoading: true });
       }
 
+      const demoProfile = await restoreDemoCompanySession();
+      if (demoProfile) {
+        updateAuthState({ user: null, session: null, profile: demoProfile, mode: 'company', isAuthenticated: true, isLoading: false });
+        return true;
+      }
+
       // 1. Cliente principal (admin)
       const session = await AuthService.getCurrentSession();
       const user = await AuthService.getCurrentUser();
@@ -58,6 +79,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (hasPrincipal) {
         const isAdmin = profile!.es_admin && !profile!.bloqueado;
+
+        if (!profile!.es_admin && isCompanyProfile(profile)) {
+          if (profile!.bloqueado) {
+            await AuthService.logout();
+            toast.error('El acceso de esta empresa está inactivo. Comuníquese con T+Plus.');
+            updateAuthState({ ...initialState, isLoading: false });
+            return false;
+          }
+          updateAuthState({ user, session, profile, mode: 'company', isAuthenticated: true, isLoading: false });
+          return true;
+        }
+
         const isRegisteringDriver = window.location.pathname.includes('/register-driver');
         const isUnapprovedDriver = profile!.es_conductor && profile!.aprobado !== true;
 
@@ -124,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: adminResp.user,
         session: adminResp.session,
         profile: adminResp.profile,
-        mode: 'admin',
+        mode: modeForProfile(adminResp.profile),
         isAuthenticated: true,
         isLoading: false,
       });
@@ -161,7 +194,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     throw adminErr;
   }, [updateAuthState, checkAuth]);
 
+  const loginCompany = useCallback(async (credentials: LoginCredentials): Promise<void> => {
+    updateAuthState({ isLoading: true });
+    try {
+      if (isDemoCompanyCredentials(credentials.email, credentials.password)) {
+        const demoProfile = await startDemoCompanySession();
+        toast.success('Sesión de prueba iniciada.');
+        updateAuthState({ user: null, session: null, profile: demoProfile, mode: 'company', isAuthenticated: true, isLoading: false });
+        return;
+      }
+      const resp = await AuthService.loginCompany(credentials);
+      updateAuthState({
+        user: resp.user,
+        session: resp.session,
+        profile: resp.profile,
+        mode: modeForProfile(resp.profile),
+        isAuthenticated: true,
+        isLoading: false,
+      });
+    } catch (err) {
+      updateAuthState({ ...initialState, isLoading: false });
+      throw err;
+    }
+  }, [updateAuthState]);
+
   const logout = useCallback(async (): Promise<void> => {
+    if (isDemoCompanySessionActive()) {
+      endDemoCompanySession();
+      toast.success('Sesión de prueba cerrada.');
+      updateAuthState({ ...initialState, isLoading: false });
+      return;
+    }
     try {
       await AuthService.logout();
       updateAuthState({ ...initialState, isLoading: false });
@@ -175,7 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const principal = await AuthService.getCurrentProfile();
       if (principal) {
-        updateAuthState({ profile: principal, mode: principal.es_admin ? 'admin' : 'driver' });
+        updateAuthState({ profile: principal, mode: modeForProfile(principal) });
         return;
       }
       const driverProfile = await AuthService.getCurrentDriverProfile();
@@ -207,5 +270,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [checkAuth, refreshProfile, updateAuthState]);
 
-  return <AuthContext.Provider value={{ ...state, login, logout, refreshProfile, checkAuth }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ ...state, login, loginCompany, logout, refreshProfile, checkAuth }}>{children}</AuthContext.Provider>;
 }

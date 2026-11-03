@@ -1,6 +1,10 @@
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
-import { BookingDetailBody, BookingDetailHeader } from "@/components/bookings/BookingDetailView";
+import {
+  BookingDetailBody,
+  BookingDetailHeader,
+  type LoadBookingExtras,
+} from "@/components/bookings/BookingDetailView";
 import { isBookingCancelled } from "@/utils/bookingFare";
 import { Button } from "@/components/ui/Button";
 import type { BookingRecord } from "@/services/bookings.service";
@@ -12,6 +16,9 @@ export function BookingModal({
   onCancel,
   onDelete,
   actionLoading,
+  extra,
+  hideChat,
+  loadExtras,
 }: {
   open: boolean;
   onClose: () => void;
@@ -19,6 +26,10 @@ export function BookingModal({
   onCancel?: (b: BookingRecord) => void;
   onDelete?: (b: BookingRecord) => void;
   actionLoading?: boolean;
+  /** Contenido adicional bajo el detalle (p. ej. la sección de viaje empresarial). */
+  extra?: React.ReactNode;
+  hideChat?: boolean;
+  loadExtras?: LoadBookingExtras;
 }) {
   if (!open || !booking) return null;
 
@@ -46,7 +57,19 @@ export function BookingModal({
           }
         />
 
-        <BookingDetailBody booking={booking} className="flex-1 overflow-y-auto" />
+        {extra ? (
+          <div className="flex-1 overflow-y-auto">
+            <BookingDetailBody booking={booking} hideChat={hideChat} loadExtras={loadExtras} />
+            {extra}
+          </div>
+        ) : (
+          <BookingDetailBody
+            booking={booking}
+            className="flex-1 overflow-y-auto"
+            hideChat={hideChat}
+            loadExtras={loadExtras}
+          />
+        )}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-6 py-4">
           <div className="flex flex-wrap gap-3">

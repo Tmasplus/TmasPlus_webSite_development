@@ -30,8 +30,17 @@ import UserEditModal from "./UserEditModal";
 import AddUserModal from "./AddUserModal";
 import ReferredListModal from "./ReferredListModal";
 import DriverReviewModal, { type EnrichedDriverProfile } from "./DriverReviewModal";
+import { UserCompaniesModal, type LinkableUser } from "@/components/companies/UserCompaniesModal";
+import {
+  COMPANIES_BACKEND_READY,
+  CompaniesService,
+  type CompanyLink,
+  type CompanyOption,
+} from "@/services/companies.service";
 
 type StatusFilter = "todos" | "pendiente" | "aprobado" | "bloqueado";
+/** "todos", "con_empresa", "sin_empresa" o el id de una empresa. */
+type CompanyFilter = string;
 type ReferralFilter = "todos" | "con_referido";
 type AppAccessFilter = "todos" | "con_acceso" | "sin_acceso";
 type SortFilter = "fecha_desc" | "fecha_asc" | "nombre_asc";
@@ -48,7 +57,7 @@ function fullName(u: SecondaryUser) {
 
 function isClientUser(u: SecondaryUser) {
   const type = (u.user_type || "").trim().toLowerCase();
-  return type !== "driver" && type !== "conductor";
+  return type !== "driver" && type !== "conductor" && type !== "company";
 }
 
 function isDriverUser(u: SecondaryUser) {
@@ -130,6 +139,30 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const [selectedDriver, setSelectedDriver] = useState<EnrichedDriverProfile | null>(null);
   const [selectedDriverSource, setSelectedDriverSource] = useState<"primary" | "secondary">("primary");
   const [loadingProfileId, setLoadingProfileId] = useState<string | null>(null);
+  // Vínculos con empresas (solo clientes): un cliente puede estar en varias.
+  const showCompanies = !isAppDriversMode && COMPANIES_BACKEND_READY;
+  const [companyLinks, setCompanyLinks] = useState<Record<string, CompanyLink[]>>({});
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [companyFilter, setCompanyFilter] = useState<CompanyFilter>("todos");
+  const [managingCompanies, setManagingCompanies] = useState<LinkableUser | null>(null);
+
+  const loadCompanyLinks = async () => {
+    if (!showCompanies) return;
+    try {
+      const [links, options] = await Promise.all([
+        CompaniesService.listAllCompanyLinks(),
+        CompaniesService.listCompanyOptions(),
+      ]);
+      const byPerson: Record<string, CompanyLink[]> = {};
+      for (const l of links) (byPerson[l.personId] ??= []).push(l);
+      setCompanyLinks(byPerson);
+      setCompanyOptions(options);
+    } catch (e: unknown) {
+      console.warn("No se pudieron cargar los vínculos con empresas:", e);
+    }
+  };
+
+  const activeCompaniesFor = (u: SecondaryUser) => (companyLinks[u.id] ?? []).filter((l) => l.active);
 
   const debouncedQuery = useDebounced(query);
 
@@ -144,6 +177,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const visibleRows = data.filter(isAppDriversMode ? isDriverUser : isClientUser);
       setUsers(visibleRows);
       setMembershipMap(memberships);
+      void loadCompanyLinks();
       // No bloqueamos la tabla por la cédula/categoría: se enriquece aparte.
       enrich(visibleRows);
     } catch (e: any) {
@@ -341,7 +375,16 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const matchesReferral =
         referralFilter === "todos" || !!String(u.referral_id || "").trim();
       const matchesAccess = appAccessFilter !== "sin_acceso";
-      return matchesQ && matchesStatus && matchesReferral && matchesAccess;
+      const userCompanies = (companyLinks[u.id] ?? []).filter((l) => l.active);
+      const matchesCompany =
+        !showCompanies || companyFilter === "todos"
+          ? true
+          : companyFilter === "con_empresa"
+          ? userCompanies.length > 0
+          : companyFilter === "sin_empresa"
+          ? userCompanies.length === 0
+          : userCompanies.some((l) => l.companyId === companyFilter);
+      return matchesQ && matchesStatus && matchesReferral && matchesAccess && matchesCompany;
     });
 
     return result.sort((a, b) => {
@@ -350,7 +393,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const dateB = new Date(b.created_at || 0).getTime();
       return sortBy === "fecha_desc" ? dateB - dateA : dateA - dateB;
     });
-  }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap]);
+  }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap, companyLinks, companyFilter, showCompanies]);
 
   // Un conductor está aprobado solo si tiene `approved` (perfil_conductor.aprobado) Y no está bloqueado.
   // `approved` es lo que exige core para asignar y aceptar viajes; `blocked` solo cierra el acceso.
@@ -571,6 +614,9 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       { header: "Ciudad", value: (u) => u.city || "" },
       { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
       { header: "Tipo", value: (u) => u.user_type || "" },
+      ...(showCompanies
+        ? [{ header: "Empresas", value: (u: SecondaryUser) => activeCompaniesFor(u).map((l) => l.companyName).join(" | ") }]
+        : []),
       { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
       { header: "Estado", value: (u) => (isApprovedUser(u) ? "Aprobado" : "No aprobado") },
       { header: "Alta", value: (u) => formatDate(u.created_at) },
@@ -598,7 +644,12 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         value="actual"
         onChange={() => {}}
       />
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mt-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+      <div
+        className={classNames(
+          "grid grid-cols-1 gap-3 mt-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200",
+          showCompanies ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-5"
+        )}
+      >
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Buscar</label>
           <Input
@@ -640,6 +691,23 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
             <option value="sin_acceso">Sin acceso</option>
           </select>
         </div>
+        {showCompanies && (
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Empresa</label>
+            <select
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+            >
+              <option value="todos">Todos</option>
+              <option value="con_empresa">Con alguna empresa</option>
+              <option value="sin_empresa">Sin empresa</option>
+              {companyOptions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Ordenar Por</label>
           <select className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortFilter)}>
@@ -683,6 +751,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                     <th className="px-3 py-2 font-medium text-center">Referidos</th>
                     <th className="px-3 py-2 font-medium">Categoría</th>
                     <th className="px-3 py-2 font-medium">Tipo</th>
+                    {showCompanies && <th className="px-3 py-2 font-medium">Empresas</th>}
                     <th className="px-3 py-2 font-medium">Membresía</th>
                     <th className="px-3 py-2 font-medium">Estado</th>
                     <th className="px-3 py-2 font-medium">Alta</th>
@@ -760,6 +829,40 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                             {u.user_type || "—"}
                           </span>
                         </td>
+                        {showCompanies && (
+                          <td className="px-3 py-3 min-w-[160px]">
+                            <div className="flex flex-wrap gap-1">
+                              {activeCompaniesFor(u).length === 0 ? (
+                                <span className="text-xs text-slate-400">Sin empresa</span>
+                              ) : (
+                                activeCompaniesFor(u).map((l) => (
+                                  <span
+                                    key={l.companyId}
+                                    title={[l.cargo, l.area].filter(Boolean).join(" · ") || undefined}
+                                    className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700"
+                                  >
+                                    {l.companyName}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setManagingCompanies({
+                                  id: u.id,
+                                  name: fullName(u),
+                                  email: u.email ?? null,
+                                  mobile: u.mobile ?? null,
+                                  document_number: cedulaFor(u) || null,
+                                })
+                              }
+                              className="mt-1 text-xs font-semibold text-sky-600 hover:text-sky-800"
+                            >
+                              {(companyLinks[u.id] ?? []).length ? "Gestionar" : "+ Vincular"}
+                            </button>
+                          </td>
+                        )}
                         <td className="px-3 py-3">
                           <MembershipBadge status={membershipFor(u)} />
                         </td>
@@ -857,6 +960,16 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         onReject={handleRejectDriver}
         onRefresh={load}
       />
+
+      {showCompanies && (
+        <UserCompaniesModal
+          user={managingCompanies}
+          links={managingCompanies ? companyLinks[managingCompanies.id] ?? [] : []}
+          companies={companyOptions}
+          onClose={() => setManagingCompanies(null)}
+          onChanged={() => void loadCompanyLinks()}
+        />
+      )}
 
       <AddUserModal
         open={openAdd !== null}

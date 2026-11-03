@@ -25,3 +25,8 @@ backups/
 *.njsproj
 *.sln
 *.sw?
+
+# SQL locales del modulo Empresas y Recomendadas (no se versionan)
+database/core_web/019_empresas.sql
+database/core_web/019_parche_*.sql
+database/core_web/020_reservas_recomendadas.sql

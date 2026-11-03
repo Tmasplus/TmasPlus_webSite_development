@@ -2,6 +2,21 @@ import { supabase } from '@/config/supabase';
 import type { BookingRecord, ServiceSnapshot, CustomerLite, AssignableDriver, CreateBookingInput } from './bookings.service';
 const db = supabase as any;
 
+type DbRow = Parameters<typeof normalize>[0];
+
+/** Fila de web_bookings -> BookingRecord de la UI (también para el detalle de viajes empresariales). */
+export function normalizeBooking(row: DbRow): BookingRecord {
+  return normalize(row);
+}
+
+/** Fila de reserva_snapshot -> ServiceSnapshot. */
+export function toServiceSnapshot(r: DbRow): ServiceSnapshot {
+  return { id:r.id, booking_id:r.id_reserva, stage:r.etapa,
+    status:r.etapa, captured_at:r.capturado_en, latitude:r.lat, longitude:r.lng,
+    address:r.datos_crudos?.address ?? null, calculated_price:r.precio_calculado,
+    distance:r.distancia_km, duration:r.duracion_seg, data:r.datos_crudos ?? {}, raw:r };
+}
+
 function normalize(row: any): BookingRecord {
   const statuses: Record<string,string> = {NEW:'PENDING',COMPLETE:'COMPLETED',ARRIVED:'ARRIVED_PICKUP',REACHED:'ARRIVED_DESTINATION'};
   return { ...row, status: statuses[row.status] ?? row.status,
@@ -24,7 +39,15 @@ export type BookingListFilters = {
   /** YYYY-MM-DD (hora local), sobre la fecha del servicio. */
   dateFrom?: string | null;
   dateTo?: string | null;
+  /** Solo viajes empresariales (vista web_bookings_empresa); companyId null = todas las empresas. */
+  corporate?: {
+    companyId?: string | null;
+    invoiceStatus?: string | null;
+    paymentStatus?: string | null;
+  } | null;
 };
+
+const source = (f: BookingListFilters) => (f.corporate ? 'web_bookings_empresa' : 'web_bookings');
 
 // Estados crudos de la vista que `normalize` traduce al nombre de la UI.
 const RAW_STATUSES: Record<string, string[]> = {
@@ -45,10 +68,13 @@ function applyFilters(query: any, f: BookingListFilters) {
   if (f.carTypes?.length) q = q.in('car_type', f.carTypes);
   if (f.dateFrom) q = q.gte('booking_date', new Date(`${f.dateFrom}T00:00:00`).toISOString());
   if (f.dateTo) q = q.lte('booking_date', new Date(`${f.dateTo}T23:59:59.999`).toISOString());
+  if (f.corporate?.companyId) q = q.eq('company_id', f.corporate.companyId);
+  if (f.corporate?.invoiceStatus) q = q.eq('estado_facturacion', f.corporate.invoiceStatus);
+  if (f.corporate?.paymentStatus) q = q.eq('estado_pago_conductor', f.corporate.paymentStatus);
   // PostgREST usa , ( ) como separadores del filtro `or`.
   const term = (f.search ?? '').replace(/[,()*%\\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (term) {
-    const ors = SEARCH_COLUMNS.map((c) => `${c}.ilike.*${term}*`);
+    const ors = (f.corporate ? [...SEARCH_COLUMNS, 'company_name'] : SEARCH_COLUMNS).map((c) => `${c}.ilike.*${term}*`);
     if (/^[0-9a-f-]{36}$/i.test(term)) ors.push(`id.eq.${term}`);
     q = q.or(ors.join(','));
   }
@@ -63,7 +89,7 @@ export class BookingsService {
     pageSize: number
   ): Promise<{ rows: BookingRecord[]; total: number }> {
     const from = Math.max(0, page - 1) * pageSize;
-    const query = applyFilters(db.from('web_bookings').select('*', { count: 'exact' }), filters);
+    const query = applyFilters(db.from(source(filters)).select('*', { count: 'exact' }), filters);
     const { data, error, count } = await query
       .order('created_at', { ascending: false }).order('id').range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
@@ -73,7 +99,7 @@ export class BookingsService {
   /** Solo el número de reservas que cumplen los filtros (sin traer filas). */
   static async count(filters: BookingListFilters): Promise<number> {
     const { count, error } = await applyFilters(
-      db.from('web_bookings').select('id', { count: 'exact', head: true }),
+      db.from(source(filters)).select('id', { count: 'exact', head: true }),
       filters
     );
     if (error) throw new Error(error.message);
@@ -84,7 +110,7 @@ export class BookingsService {
   static async listAll(filters: BookingListFilters): Promise<BookingRecord[]> {
     const rows: BookingRecord[] = [];
     for (let from = 0;;) {
-      const { data, error } = await applyFilters(db.from('web_bookings').select('*'), filters)
+      const { data, error } = await applyFilters(db.from(source(filters)).select('*'), filters)
         .order('created_at', { ascending: false }).order('id').range(from, from + 499);
       if (error) throw new Error(error.message);
       if (!data?.length) return rows;
@@ -126,7 +152,7 @@ export class BookingsService {
     const ids = [...new Set((Array.isArray(bookingIds) ? bookingIds : [bookingIds]).filter(Boolean))];
     if (!ids.length) return [];
     // Lotes: un .in() con miles de ids excede el largo de URL y PostgREST responde 400.
-    const data: any[] = [];
+    const data: DbRow[] = [];
     for (let i = 0; i < ids.length; i += 100) {
       const { data: part, error } = await db.from('reserva_snapshot').select('*')
         .in('id_reserva', ids.slice(i, i + 100)).order('capturado_en');
@@ -134,15 +160,12 @@ export class BookingsService {
       data.push(...(part ?? []));
     }
     data.sort((a, b) => String(a.capturado_en).localeCompare(String(b.capturado_en)));
-    return data.map((r: any) => ({ id:r.id, booking_id:r.id_reserva, stage:r.etapa,
-      status:r.etapa, captured_at:r.capturado_en, latitude:r.lat, longitude:r.lng,
-      address:r.datos_crudos?.address ?? null, calculated_price:r.precio_calculado,
-      distance:r.distancia_km, duration:r.duracion_seg, data:r.datos_crudos ?? {}, raw:r }));
+    return data.map(toServiceSnapshot);
   }
   static async searchCustomers(query: string, limit = 10): Promise<CustomerLite[]> {
     const q = query.replace(/[%(),.*]/g, '').trim(); if (!q) return [];
     const { data, error } = await db.from('web_users').select('id,first_name,last_name,email,mobile')
-      .in('user_type', ['customer','company']).eq('blocked', false)
+      .eq('user_type', 'customer').eq('blocked', false)
       .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,mobile.ilike.%${q}%`).limit(limit);
     if (error) throw new Error(error.message); return data ?? [];
   }

@@ -2,8 +2,18 @@
  * Proveedor de geocodificación para los buscadores de dirección:
  * Google si hay VITE_GOOGLE_MAPS_API_KEY y responde; si no, OpenStreetMap (Nominatim).
  */
-import { googleGeocodingAvailable, googleReverseGeocode, googleSearchPlaces } from "./googleGeocoding";
-import { reverseGeocode as osmReverseGeocode, searchPlaces as osmSearchPlaces, type OsmPlace } from "./osmGeocoding";
+import {
+  googleGeocodingAvailable,
+  googleReverseGeocode,
+  googleSearchPlaces,
+  normalizeColombianAddress,
+} from "./googleGeocoding";
+import {
+  reverseGeocode as osmReverseGeocode,
+  searchPlaces as osmSearchPlaces,
+  searchStreetCrossing,
+  type OsmPlace,
+} from "./osmGeocoding";
 
 export type GeocodedPlace = OsmPlace & { approximate?: boolean };
 
@@ -25,13 +35,16 @@ export async function searchPlaces(
     try {
       const results = await googleSearchPlaces(text, near);
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      return results;
+      if (results.length > 0) return results;
     } catch (e) {
       if ((e as Error)?.name === "AbortError") throw e;
       console.warn("[geocoding] Google falló, se usa OpenStreetMap:", e);
     }
   }
-  return osmSearchPlaces(text, near, signal);
+  const results = await osmSearchPlaces(text, near, signal);
+  if (results.length > 0) return results;
+  const crossing = await searchStreetCrossing(normalizeColombianAddress(text), near, signal);
+  return crossing ? [{ ...crossing, approximate: true }] : [];
 }
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string> {

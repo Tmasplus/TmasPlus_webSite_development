@@ -144,10 +144,10 @@ type Props = {
   lockedType?: UserType;
 };
 
+// Las empresas se crean desde el módulo Empresas, con sus datos corporativos.
 const USER_TABS = [
   { value: "cliente", label: "Cliente" },
   { value: "conductor", label: "Conductor" },
-  { value: "empresa", label: "Empresa" },
 ] as const;
 
 type FieldKind = "input" | "select" | "checkbox";
