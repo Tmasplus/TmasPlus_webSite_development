@@ -1,45 +1,8 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import {
-  BadgeCheck,
-  Bell,
-  Briefcase,
-  Building2,
-  CalendarClock,
-  CalendarPlus,
-  Car,
-  ChevronDown,
-  ChevronUp,
-  FileSignature,
-  FileText,
-  House,
-  IdCard,
-  LogOut,
-  MapPinned,
-  MessageSquareWarning,
-  Milestone,
-  Pin,
-  PinOff,
-  Receipt,
-  Repeat,
-  Settings,
-  Tag,
-  UserRound,
-  Users,
-  X,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, LogOut, Pin, PinOff, X } from "lucide-react";
 import { classNames } from "@/utils/classNames";
-
-type Subuser = {
-  InTurn: boolean;
-  Name: string;
-};
-
-type AppUser = {
-  usertype: "admin" | "company" | "driver" | string;
-  profile_image?: string | null;
-  subusers?: Subuser[];
-};
+import type { NavPage } from "./navigation";
 
 type Props = {
   /** Menú abierto en móvil (drawer). */
@@ -49,20 +12,17 @@ type Props = {
   /** Escritorio: menú fijado expandido (si no, se expande al pasar el mouse). */
   pinned?: boolean;
   onTogglePin?: () => void;
-  user: AppUser | null | undefined;
-  isAnySubuserInTurn: boolean;
-  getDisplayName: (u: AppUser) => string;
+  sections: { title: string; items: NavPage[] }[];
+  displayName: string;
+  roleLabel: string;
+  profileImage?: string | null;
   defaultProfileImage: string;
   handleLogout: () => void;
-  navigateToWhatsApp: () => void;
 };
 
 /** Ancho del menú contraído / expandido (px). El layout usa estos valores para el padding. */
 export const SIDEBAR_COLLAPSED_PX = 72;
 export const SIDEBAR_EXPANDED_PX = 256;
-
-type NavEntry = { to: string; label: string; icon: React.ReactNode; show: boolean };
-type NavSection = { title: string; items: NavEntry[] };
 
 const ICON = 19;
 
@@ -146,84 +106,16 @@ export const Sidebar: React.FC<Props> = ({
   onClose,
   pinned = false,
   onTogglePin,
-  user,
-  isAnySubuserInTurn,
-  getDisplayName,
+  sections,
+  displayName,
+  roleLabel,
+  profileImage,
   defaultProfileImage,
   handleLogout,
 }) => {
   const [hovered, setHovered] = useState(false);
   const expanded = pinned || hovered || open;
   const scroll = useScrollHints();
-
-  const isAdmin = user?.usertype === "admin";
-  // const isCompany = user?.usertype === "company";
-  const isCompany = user?.usertype === "admin";
-  // const isDriver = user?.usertype === "driver";
-  const isDriver = user?.usertype === "admin";
-  const hasAdminSubuserInTurn = !!user?.subusers?.some((s) => s.InTurn && s.Name === "Administrador");
-  const adminOrCompany = isAdmin || (isCompany && isAnySubuserInTurn);
-
-  const sections: NavSection[] = [
-    {
-      title: "Principal",
-      items: [{ to: "/home", label: "Inicio", icon: <House size={ICON} />, show: true }],
-    },
-    {
-      title: "Reservas",
-      items: [
-        { to: "/bookingHistory", label: "Historial de reservas", icon: <CalendarClock size={ICON} />, show: isAdmin },
-        { to: "/addbooking", label: "Añadir reserva", icon: <CalendarPlus size={ICON} />, show: isAdmin },
-        { to: "/bookingCorp", label: "Reservas corporativas", icon: <Building2 size={ICON} />, show: adminOrCompany },
-        { to: "/bookingdetails", label: "Detalle de reserva", icon: <FileText size={ICON} />, show: adminOrCompany },
-      ],
-    },
-    {
-      title: "Usuarios",
-      items: [
-        { to: "/users", label: "Usuarios App", icon: <Users size={ICON} />, show: adminOrCompany },
-        { to: "/app-drivers", label: "Conductores App", icon: <IdCard size={ICON} />, show: adminOrCompany },
-        // Conductores Web: oculto, ya no se usa. La ruta /drivers sigue disponible.
-        // { to: "/drivers", label: "Conductores Web", icon: <Car size={ICON} />, show: adminOrCompany },
-      ],
-    },
-    {
-      title: "Gestión",
-      items: [
-        { to: "/memberships", label: "Membresías", icon: <BadgeCheck size={ICON} />, show: isAdmin },
-        { to: "/notifications", label: "Notificaciones", icon: <Bell size={ICON} />, show: isAdmin },
-        { to: "/billing", label: "Módulo de facturación", icon: <Receipt size={ICON} />, show: isAdmin },
-        { to: "/shiftchanger", label: "Cambiar turno", icon: <Repeat size={ICON} />, show: isCompany },
-        {
-          to: "/officialview",
-          label: "Funcionarios",
-          icon: <Briefcase size={ICON} />,
-          show: isCompany && isAnySubuserInTurn && hasAdminSubuserInTurn,
-        },
-        { to: "/complaints", label: "Quejas", icon: <MessageSquareWarning size={ICON} />, show: true },
-      ],
-    },
-    {
-      title: "Operación",
-      items: [
-        { to: "/vehicle-map", label: "Mapa de vehículos", icon: <MapPinned size={ICON} />, show: isAdmin },
-        { to: "/treasoffers", label: "Ofertas TREAS", icon: <Tag size={ICON} />, show: isAdmin },
-        { to: "/contracts", label: "Contratos", icon: <FileSignature size={ICON} />, show: isDriver },
-        { to: "/car-brands", label: "Marcas de vehículos", icon: <Car size={ICON} />, show: isAdmin },
-        { to: "/tolls", label: "Peajes", icon: <Milestone size={ICON} />, show: isAdmin },
-      ],
-    },
-    {
-      title: "Cuenta",
-      items: [
-        { to: "/userprofile", label: "Perfil", icon: <UserRound size={ICON} />, show: user?.usertype !== "company" },
-        { to: "/settings", label: "Configuración", icon: <Settings size={ICON} />, show: isAdmin },
-      ],
-    },
-  ];
-
-  const displayName = user ? getDisplayName(user) : "";
-  const roleLabel = isAdmin ? "Administrador" : user?.usertype === "company" ? "Empresa" : "Usuario";
   const closeMobile = () => onClose?.();
 
   return (
@@ -253,7 +145,7 @@ export const Sidebar: React.FC<Props> = ({
         {/* Perfil */}
         <div className="flex items-center gap-3 border-b border-slate-100 px-[13px] py-4">
           <img
-            src={user?.profile_image || defaultProfileImage}
+            src={profileImage || defaultProfileImage}
             alt="Foto de perfil"
             className="h-11 w-11 shrink-0 rounded-full border-2 border-white object-cover shadow-md ring-2 ring-sky-100"
           />
@@ -302,7 +194,7 @@ export const Sidebar: React.FC<Props> = ({
             className="h-full overflow-y-auto overflow-x-hidden px-2 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {sections.map((section, i) => {
-              const items = section.items.filter((item) => item.show);
+              const items = section.items;
               if (!items.length) return null;
               return (
                 <div key={section.title} className={i > 0 ? "mt-3" : ""}>
@@ -318,9 +210,12 @@ export const Sidebar: React.FC<Props> = ({
                     {!expanded && i > 0 && <span className="absolute inset-x-3 top-1/2 h-px bg-slate-100" />}
                   </div>
                   <ul className="space-y-0.5">
-                    {items.map((item) => (
-                      <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label} expanded={expanded} onNavigate={closeMobile} />
-                    ))}
+                    {items.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <NavItem key={item.to} to={item.to} icon={<Icon size={ICON} />} label={item.label} expanded={expanded} onNavigate={closeMobile} />
+                      );
+                    })}
                   </ul>
                 </div>
               );

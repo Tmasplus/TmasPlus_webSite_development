@@ -174,7 +174,9 @@ export function BookingDetailHeader({ booking, actions }: { booking: BookingReco
   );
 }
 
-function useBookingDetailExtras(booking: BookingRecord) {
+export type LoadBookingExtras = (booking: BookingRecord) => Promise<BookingDetailExtras>;
+
+function useBookingDetailExtras(booking: BookingRecord, loadExtras: LoadBookingExtras = fetchBookingDetailExtras) {
   const [data, setData] = useState<BookingDetailExtras | null>(null);
   const [loading, setLoading] = useState(true);
   const status = (booking.status || "").toUpperCase();
@@ -184,13 +186,13 @@ function useBookingDetailExtras(booking: BookingRecord) {
     async (silent: boolean) => {
       if (!silent) setLoading(true);
       try {
-        setData(await fetchBookingDetailExtras(booking));
+        setData(await loadExtras(booking));
       } finally {
         if (!silent) setLoading(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [booking.id, booking.status, booking.updated_at]
+    [booking.id, booking.status, booking.updated_at, loadExtras]
   );
 
   useEffect(() => {
@@ -227,9 +229,21 @@ function snapshotAt(snapshots: ServiceSnapshot[], stage: string) {
   return snapshots.find((s) => s.stage === stage)?.captured_at || null;
 }
 
-export function BookingDetailBody({ booking, className = "" }: { booking: BookingRecord; className?: string }) {
+export function BookingDetailBody({
+  booking,
+  className = "",
+  hideChat = false,
+  loadExtras,
+}: {
+  booking: BookingRecord;
+  className?: string;
+  /** Oculta la pestaña de chat (p. ej. para el usuario empresa). */
+  hideChat?: boolean;
+  /** Origen alternativo de los datos del detalle (p. ej. la RPC del portal de empresas). */
+  loadExtras?: LoadBookingExtras;
+}) {
   const { categories: carTypes } = useCarTypeCatalog();
-  const { data, loading } = useBookingDetailExtras(booking);
+  const { data, loading } = useBookingDetailExtras(booking, loadExtras);
   const [tab, setTab] = useState<RouteMode | "chat">("suggested");
   const routeMode: RouteMode = tab === "actual" ? "actual" : "suggested";
 
@@ -336,7 +350,7 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
                   ["actual", "Ruta realizada"],
                   ["chat", "Chat"],
                 ] as const
-              ).map(([value, label]) => (
+              ).filter(([value]) => !(hideChat && value === "chat")).map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
@@ -351,7 +365,7 @@ export function BookingDetailBody({ booking, className = "" }: { booking: Bookin
             </div>
           </div>
 
-          {tab === "chat" ? (
+          {tab === "chat" && !hideChat ? (
             <BookingChatPanel
               bookingId={booking.id}
               live={ACTIVE_STATUSES.includes(status)}

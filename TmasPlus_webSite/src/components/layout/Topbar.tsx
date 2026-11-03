@@ -15,19 +15,22 @@ import logo from "@/assets/Logo-v3.png";
 import { SIDEBAR_COLLAPSED_PX } from "@/components/layout/Sidebar";
 import { ComplaintsService } from "@/services/complaints.service";
 import { CommandPalette } from "./CommandPalette";
-import { pageForPath } from "./navigation";
+import { pageForPath, type Portal } from "./navigation";
 
 export type TopbarAccount = {
   name: string;
   email: string;
   roleLabel?: string;
   canOpenSettings?: boolean;
+  /** Página de "Mi cuenta". */
+  profileTo?: string;
 };
 
 type Props = {
   onToggleSidebar?: () => void;
   account?: TopbarAccount | null;
   onLogout?: () => void;
+  portal?: Portal;
 };
 
 function AccountMenu({ account, onLogout }: { account: TopbarAccount; onLogout?: () => void }) {
@@ -84,7 +87,7 @@ function AccountMenu({ account, onLogout }: { account: TopbarAccount; onLogout?:
           </div>
 
           <div className="p-1.5">
-            <Link to="/userprofile" role="menuitem" onClick={() => setOpen(false)} className={item}>
+            <Link to={account.profileTo ?? "/userprofile"} role="menuitem" onClick={() => setOpen(false)} className={item}>
               <UserRound size={16} className="text-sky-500" />
               Mi cuenta
             </Link>
@@ -191,7 +194,7 @@ function ComplaintsShortcut() {
   );
 }
 
-export const Topbar: React.FC<Props> = ({ onToggleSidebar, account, onLogout }) => {
+export const Topbar: React.FC<Props> = ({ onToggleSidebar, account, onLogout, portal = "admin" }) => {
   const { pathname } = useLocation();
   const page = pageForPath(pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -256,20 +259,20 @@ export const Topbar: React.FC<Props> = ({ onToggleSidebar, account, onLogout }) 
 
     <div className="flex shrink-0 items-center gap-2">
       <Link
-        to="/addbooking"
+        to={portal === "company" ? "/empresa/reservar" : "/addbooking"}
         className="hidden h-9 items-center gap-1.5 rounded-xl bg-white px-3 text-sm font-semibold text-sky-600 shadow-sm transition-colors hover:bg-sky-50 sm:flex"
-        title="Añadir reserva"
+        title={portal === "company" ? "Solicitar viaje" : "Añadir reserva"}
       >
         <Plus size={16} />
-        <span className="hidden lg:inline">Nueva reserva</span>
+        <span className="hidden lg:inline">{portal === "company" ? "Solicitar viaje" : "Nueva reserva"}</span>
       </Link>
-      <ComplaintsShortcut />
+      {portal === "admin" && <ComplaintsShortcut />}
       <Clock />
       <span className="mx-1 hidden h-7 w-px bg-white/25 xl:block" />
       {account && <AccountMenu account={account} onLogout={onLogout} />}
     </div>
 
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} portal={portal} />
   </header>
   );
 };

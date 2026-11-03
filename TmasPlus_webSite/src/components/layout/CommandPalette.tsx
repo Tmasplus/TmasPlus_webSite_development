@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarClock, CornerDownLeft, FileText, Search, type LucideIcon } from "lucide-react";
-import { NAV_PAGES } from "./navigation";
+import { navPagesFor, type Portal } from "./navigation";
 
 type Command = {
   id: string;
@@ -19,7 +19,15 @@ const normalize = (s: string) =>
     .trim();
 
 /** Buscador global: navegar a cualquier módulo o buscar reservas. */
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({
+  open,
+  onClose,
+  portal = "admin",
+}: {
+  open: boolean;
+  onClose: () => void;
+  portal?: Portal;
+}) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -37,7 +45,18 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const commands = useMemo<Command[]>(() => {
     const q = normalize(query);
     const text = query.trim();
-    const actions: Command[] = text
+    const companyActions: Command[] = text
+      ? [
+          {
+            id: "search-company-history",
+            label: `Buscar «${text}» en el historial de viajes`,
+            hint: "Colaborador, referencia, dirección…",
+            icon: CalendarClock,
+            to: `/empresa/reservas?search=${encodeURIComponent(text)}`,
+          },
+        ]
+      : [];
+    const adminActions: Command[] = text
       ? [
           {
             id: "search-history",
@@ -55,11 +74,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           },
         ]
       : [];
-    const pages = NAV_PAGES.filter(
+    const pages = navPagesFor(portal).filter(
       (p) => !q || normalize(`${p.label} ${p.section} ${p.keywords ?? ""}`).includes(q)
     ).map<Command>((p) => ({ id: p.to, label: p.label, hint: p.section, icon: p.icon, to: p.to }));
-    return [...pages, ...actions];
-  }, [query]);
+    return [...pages, ...(portal === "company" ? companyActions : adminActions)];
+  }, [query, portal]);
 
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-index="${highlight}"]`)?.scrollIntoView({ block: "nearest" });

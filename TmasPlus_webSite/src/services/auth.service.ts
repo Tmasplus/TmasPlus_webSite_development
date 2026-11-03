@@ -22,7 +22,17 @@ export interface AuthResponse {
   profile: PerfilDashboard;
 }
 
-export type AuthMode = 'admin' | 'driver';
+export type AuthMode = 'admin' | 'driver' | 'company';
+
+export function isCompanyProfile(profile: PerfilDashboard | null | undefined): boolean {
+  return !!profile?.roles?.includes('empresa');
+}
+
+export function modeForProfile(profile: PerfilDashboard): AuthMode {
+  if (profile.es_admin) return 'admin';
+  if (isCompanyProfile(profile)) return 'company';
+  return 'driver';
+}
 
 export interface DriverAuthResponse {
   user: User;
@@ -85,8 +95,8 @@ export class AuthService {
       const isAdmin = profile.es_admin;
       const isUnapprovedDriver = profile.es_conductor && !profile.aprobado;
 
-      // Solo admins o conductores aún no aprobados pueden entrar al dashboard.
-      if (!isAdmin && !isUnapprovedDriver) {
+      // Solo admins, empresas o conductores aún no aprobados pueden entrar al dashboard.
+      if (!isAdmin && !isUnapprovedDriver && !isCompanyProfile(profile)) {
         await supabase.auth.signOut();
         throw ErrorHandler.createError(
           AppErrorType.AUTHORIZATION,
@@ -111,6 +121,46 @@ export class AuthService {
       }
       throw ErrorHandler.handleWithToast(error, 'AuthService.loginAdmin');
     }
+  }
+
+  /**
+   * Login del portal de empresas. Un administrador también puede entrar por aquí.
+   */
+  static async loginCompany(credentials: LoginCredentials): Promise<AuthResponse> {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: credentials.email.trim(),
+      password: credentials.password,
+    });
+
+    if (authError) {
+      throw ErrorHandler.handleAuthError(authError);
+    }
+    if (!authData.user || !authData.session) {
+      throw ErrorHandler.createError(AppErrorType.AUTHENTICATION, 'No se pudo iniciar sesión.');
+    }
+
+    const profile = await this.fetchPerfil();
+    if (!profile) {
+      await supabase.auth.signOut();
+      throw ErrorHandler.createError(AppErrorType.NOT_FOUND, 'No se encontró el perfil de la empresa.');
+    }
+    if (profile.bloqueado) {
+      await supabase.auth.signOut();
+      throw ErrorHandler.createError(
+        AppErrorType.AUTHORIZATION,
+        'El acceso de esta empresa está inactivo. Comuníquese con T+Plus.'
+      );
+    }
+    if (!profile.es_admin && !isCompanyProfile(profile)) {
+      await supabase.auth.signOut();
+      throw ErrorHandler.createError(
+        AppErrorType.AUTHORIZATION,
+        'Esta cuenta no pertenece a una empresa. Ingresa por el acceso principal o por la App Móvil.'
+      );
+    }
+
+    toast.success(ToastMessages.LOGIN_SUCCESS);
+    return { user: authData.user, session: authData.session, profile };
   }
 
   /**

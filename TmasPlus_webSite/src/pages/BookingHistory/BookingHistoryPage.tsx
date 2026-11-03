@@ -18,6 +18,16 @@ import { SearchableSelect, type SearchableOption } from "@/components/ui/Searcha
 import { maxFromMinConductor, resolveFinalFare, resolveQuote } from "@/utils/bookingFare";
 import { toEpochMs } from "@/utils/tripTracking";
 import { ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { InvoiceStatusBadge, PaymentStatusBadge } from "@/components/companies/CompanyUi";
+import { BillingStatusModal, type BillingChange } from "@/components/companies/BillingStatusModal";
+import { CorporateBookingExtra } from "@/components/companies/CorporateBillingSection";
+import {
+  CompaniesService,
+  DRIVER_PAYMENT_STATUS_LABELS,
+  INVOICE_STATUS_LABELS,
+  type DriverPaymentStatus,
+  type InvoiceStatus,
+} from "@/services/companies.service";
 
 const PAGE_SIZE = 10;
 
@@ -200,7 +210,26 @@ function Pagination({
   );
 }
 
+type BookingHistoryViewProps = {
+  /** Solo viajes empresariales; companyId null = todas las empresas. Agrega factura y pago al conductor. */
+  corporate?: { companyId: string | null };
+  /** Dentro de otra página: sin padding ni título principal. */
+  embedded?: boolean;
+};
+
 export default function BookingHistoryPage() {
+  return <BookingHistoryView />;
+}
+
+export function BookingHistoryView({ corporate, embedded = false }: BookingHistoryViewProps) {
+  const isCorporate = !!corporate;
+  const corporateCompanyId = corporate?.companyId ?? null;
+  const showCompany = isCorporate && !corporateCompanyId;
+  const [invoiceFilter, setInvoiceFilter] = useState<InvoiceStatus | "">("");
+  const [paymentFilter, setPaymentFilter] = useState<DriverPaymentStatus | "">("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [billingChange, setBillingChange] = useState<BillingChange | null>(null);
+  const [savingBilling, setSavingBilling] = useState(false);
   const { categories: carTypes, activeCategories } = useCarTypeCatalog();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -239,6 +268,7 @@ export default function BookingHistoryPage() {
   const [driverOptionsLoading, setDriverOptionsLoading] = useState(false);
   const [driverLabel, setDriverLabel] = useState("");
   const isMountedRef = useRef(true);
+  const channelNameRef = useRef(isCorporate ? "corporate-bookings-realtime" : "bookings-history-realtime");
   const realtimeStatusRef = useRef(realtimeStatus);
   const selectedBookingRef = useRef<BookingRecord | null>(null);
   const requestSeqRef = useRef(0);
@@ -256,8 +286,11 @@ export default function BookingHistoryPage() {
       carTypes: category ? carTypeValuesForCategory(category) : null,
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
+      corporate: isCorporate
+        ? { companyId: corporateCompanyId, invoiceStatus: invoiceFilter || null, paymentStatus: paymentFilter || null }
+        : null,
     };
-  }, [debouncedSearch, statusFilter, driverFilter, categoryFilter, carTypes, dateFrom, dateTo]);
+  }, [debouncedSearch, statusFilter, driverFilter, categoryFilter, carTypes, dateFrom, dateTo, isCorporate, corporateCompanyId, invoiceFilter, paymentFilter]);
 
   const filtersRef = useRef(filters);
   const pageRef = useRef(page);
@@ -275,6 +308,7 @@ export default function BookingHistoryPage() {
       if (!isMountedRef.current || seq !== requestSeqRef.current) return;
       setBookings(rows);
       setTotal(count);
+      setSelected((prev) => (prev.size ? new Set(rows.filter((r) => prev.has(r.id)).map((r) => r.id)) : prev));
       const selectedId = selectedBookingRef.current?.id;
       const refreshed = selectedId ? rows.find((booking) => booking.id === selectedId) : null;
       if (refreshed) setSelectedBooking(refreshed);
@@ -363,7 +397,7 @@ export default function BookingHistoryPage() {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     if (supabase) {
       channel = supabase
-        .channel("bookings-history-realtime")
+        .channel(channelNameRef.current)
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "reserva" },
@@ -437,6 +471,7 @@ export default function BookingHistoryPage() {
       "Llegó destino",
       "Completado",
       "Cancelado",
+      ...(isCorporate ? ["Empresa", "Factura", "N.° factura", "Pago conductor"] : []),
     ];
 
     const rows = filteredBookings.map((b) => {
@@ -466,6 +501,14 @@ export default function BookingHistoryPage() {
         stageAt("arrival_destination"),
         stageAt("completed"),
         stageAt("cancelled"),
+        ...(isCorporate
+          ? [
+              b.company_name || "",
+              INVOICE_STATUS_LABELS[b.estado_facturacion as InvoiceStatus] ?? "",
+              b.factura_referencia || "",
+              DRIVER_PAYMENT_STATUS_LABELS[b.estado_pago_conductor as DriverPaymentStatus] ?? "",
+            ]
+          : []),
       ];
     });
 
@@ -485,7 +528,7 @@ export default function BookingHistoryPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "historial_reservas.csv";
+    a.download = isCorporate ? "viajes_empresariales.csv" : "historial_reservas.csv";
     a.click();
     URL.revokeObjectURL(url);
     } catch (e: any) {
@@ -604,12 +647,42 @@ export default function BookingHistoryPage() {
     }
   };
 
+  // Factura / pago al conductor (solo vista empresarial). Los cancelados no se facturan.
+  const isCompletedBooking = (b: BookingRecord) => ["COMPLETED", "PAID"].includes((b.status || "").toUpperCase());
+  const selectableIds = bookings.filter(isCompletedBooking).map((b) => b.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds));
+  const bulkBilling = (field: BillingChange["field"], value: BillingChange["value"]) =>
+    setBillingChange({ field, value, bookingIds: [...selected] });
+  const confirmBilling = async (referencia: string, nota: string) => {
+    if (!billingChange) return;
+    setSavingBilling(true);
+    try {
+      await CompaniesService.setBillingStatus(billingChange.bookingIds, billingChange.field, billingChange.value, referencia, nota);
+      setBillingChange(null);
+      setSelected(new Set());
+      void loadBookings(true);
+    } catch (e) {
+      alert(e instanceof Error && e.message ? e.message : "No se pudo actualizar el estado");
+    } finally {
+      setSavingBilling(false);
+    }
+  };
+  const columnCount = 14 + (isCorporate ? 3 : 0) + (showCompany ? 1 : 0);
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className={embedded ? "" : "p-6"}>
+      <div className={`flex items-center justify-between ${embedded ? "mb-4" : "mb-6"}`}>
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Historial de reservas
+          <h1 className={embedded ? "text-lg font-semibold text-slate-900" : "text-2xl font-semibold text-slate-900"}>
+            {isCorporate ? "Viajes empresariales" : "Historial de reservas"}
           </h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
             <span
@@ -687,7 +760,47 @@ export default function BookingHistoryPage() {
           <option value="">Todas las categorías</option>
           {categoryOptions.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
         </select>
+        {isCorporate && (
+          <>
+            <select
+              value={invoiceFilter}
+              onChange={(e) => resetPage(setInvoiceFilter)(e.target.value as InvoiceStatus | "")}
+              className="p-2 border border-slate-300 rounded-lg"
+              aria-label="Estado de factura"
+            >
+              <option value="">Factura: todas</option>
+              {(Object.keys(INVOICE_STATUS_LABELS) as InvoiceStatus[]).map((s) => (
+                <option key={s} value={s}>{INVOICE_STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+            <select
+              value={paymentFilter}
+              onChange={(e) => resetPage(setPaymentFilter)(e.target.value as DriverPaymentStatus | "")}
+              className="p-2 border border-slate-300 rounded-lg"
+              aria-label="Pago al conductor"
+            >
+              <option value="">Pago conductor: todos</option>
+              {(Object.keys(DRIVER_PAYMENT_STATUS_LABELS) as DriverPaymentStatus[]).map((s) => (
+                <option key={s} value={s}>{DRIVER_PAYMENT_STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
+
+      {isCorporate && selected.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm">
+          <span className="font-medium text-sky-800">{selected.size} seleccionado{selected.size === 1 ? "" : "s"}:</span>
+          <Button className="!px-3 !py-1.5 !text-xs" onClick={() => bulkBilling("facturacion", "facturado")}>Marcar facturado</Button>
+          <Button variant="secondary" className="!px-3 !py-1.5 !text-xs" onClick={() => bulkBilling("facturacion", "sin_facturar")}>Sin facturar</Button>
+          <span className="mx-1 h-5 w-px bg-sky-200" />
+          <Button className="!px-3 !py-1.5 !text-xs" onClick={() => bulkBilling("pago_conductor", "pagado")}>Marcar pagado al conductor</Button>
+          <Button variant="secondary" className="!px-3 !py-1.5 !text-xs" onClick={() => bulkBilling("pago_conductor", "sin_pagar")}>Sin pagar</Button>
+          <button type="button" className="ml-auto text-xs font-semibold text-sky-700 underline" onClick={() => setSelected(new Set())}>
+            Limpiar selección
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm">
@@ -701,7 +814,13 @@ export default function BookingHistoryPage() {
         <table className="w-full text-sm text-slate-700">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:align-bottom">
+              {isCorporate && (
+                <th className="w-10">
+                  <input type="checkbox" aria-label="Seleccionar visibles" checked={allSelected} onChange={toggleSelectAll} />
+                </th>
+              )}
               <th>Referencia</th>
+              {showCompany && <th>Empresa</th>}
               <th>Creación</th>
               <th>Programada</th>
               <th>Ejecución</th>
@@ -720,13 +839,15 @@ export default function BookingHistoryPage() {
               <th>Distancia cotizada</th>
               <th>Estado</th>
               <th className="text-center">OTP</th>
+              {isCorporate && <th>Factura</th>}
+              {isCorporate && <th>Pago conductor</th>}
               <th className="text-center">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={14} className="text-center py-6 text-slate-400">
+                <td colSpan={columnCount} className="text-center py-6 text-slate-400">
                   Cargando reservas...
                 </td>
               </tr>
@@ -748,11 +869,24 @@ export default function BookingHistoryPage() {
                     transition={{ duration: 0.2 }}
                     className="border-b border-slate-100 align-top transition-colors hover:bg-sky-50/40 [&>td]:px-4 [&>td]:py-3"
                   >
+                    {isCorporate && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Seleccionar ${b.reference || b.id}`}
+                          checked={selected.has(b.id)}
+                          disabled={!isCompleted}
+                          title={isCompleted ? undefined : "Solo se facturan viajes completados"}
+                          onChange={() => toggleSelect(b.id)}
+                        />
+                      </td>
+                    )}
                     <td>
                       <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700">
                         {b.reference || b.id.slice(0, 8)}
                       </span>
                     </td>
+                    {showCompany && <td className="max-w-[180px] font-medium text-slate-800">{b.company_name || "—"}</td>}
                     <td><DateCell iso={b.created_at} /></td>
                     <td><DateCell iso={b.booking_type === "SCHEDULED" ? b.booking_date : null} /></td>
                     <td><DateCell iso={executionIso(b)} /></td>
@@ -799,6 +933,29 @@ export default function BookingHistoryPage() {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
+                    {isCorporate && (
+                      <td>
+                        {!isCompleted ? (
+                          <span className="text-xs text-slate-400">{isCancelled ? "No se factura" : "Al completar"}</span>
+                        ) : (
+                          <>
+                            <InvoiceStatusBadge status={b.estado_facturacion ?? "sin_facturar"} />
+                            {b.factura_referencia && (
+                              <div className="mt-0.5 font-mono text-[11px] text-slate-500">{b.factura_referencia}</div>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    )}
+                    {isCorporate && (
+                      <td>
+                        {!isCompleted ? (
+                          <span className="text-xs text-slate-400">—</span>
+                        ) : (
+                          <PaymentStatusBadge status={b.estado_pago_conductor ?? "sin_pagar"} />
+                        )}
+                      </td>
+                    )}
                     <td>
                       <div className="flex flex-col items-stretch gap-1.5">
                         <button
@@ -832,7 +989,7 @@ export default function BookingHistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={14} className="text-center py-6 text-slate-400">
+                <td colSpan={columnCount} className="text-center py-6 text-slate-400">
                   {debouncedSearch || statusFilter !== "TODOS" || driverFilter || categoryFilter || dateFrom || dateTo
                     ? "Ninguna reserva coincide con la búsqueda o los filtros."
                     : "No hay reservas registradas."}
@@ -854,6 +1011,18 @@ export default function BookingHistoryPage() {
         actionLoading={
           selectedBooking ? actionLoadingId === selectedBooking.id : false
         }
+        extra={
+          isCorporate && selectedBooking ? (
+            <CorporateBookingExtra bookingId={selectedBooking.id} onChanged={() => void loadBookings(true)} />
+          ) : undefined
+        }
+      />
+
+      <BillingStatusModal
+        change={billingChange}
+        saving={savingBilling}
+        onClose={() => setBillingChange(null)}
+        onConfirm={confirmBilling}
       />
 
       {assignBooking && (

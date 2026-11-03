@@ -113,7 +113,7 @@ export const FloatingSelect: React.FC<
 };
 
 export const Checkbox: React.FC<
-  { label: string } & React.InputHTMLAttributes<HTMLInputElement>
+  { label: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>
 > = ({ label, required, checked, className, ...props }) => {
   const isInvalid = required && !checked;
 

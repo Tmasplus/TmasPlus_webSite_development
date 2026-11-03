@@ -9,8 +9,10 @@ import { CarTypesService } from "@/services/carTypes.service";
 import type { CarTypeRow } from "@/config/database.types";
 import {
   BookingsService,
+  type CreateBookingInput,
   type CustomerLite,
 } from "@/services/bookings.service";
+import { CORPORATE_PAYMENT_MODE } from "@/services/companies.service";
 import { isNearAirport } from "@/utils/airports";
 import {
   DELTA_AEROPUERTO,
@@ -22,6 +24,27 @@ const PAYMENT_LABEL_TO_DB: Record<string, string> = {
   Efectivo: "cash",
   Nequi: "nequi",
   Daviplata: "daviplata",
+  Empresarial: CORPORATE_PAYMENT_MODE,
+};
+
+const ADMIN_PAYMENT_OPTIONS = ["Efectivo", "Nequi", "Daviplata"];
+
+const defaultSearchCustomers = (query: string, limit: number) => BookingsService.searchCustomers(query, limit);
+const defaultCreateBooking = (input: CreateBookingInput) => BookingsService.create(input);
+
+/** Sin props reproduce el alta de reservas del administrador. */
+export type AddBookingPageProps = {
+  title?: string;
+  customerLabel?: string;
+  customerPlaceholder?: string;
+  searchCustomers?: (query: string, limit: number) => Promise<CustomerLite[]>;
+  createBooking?: (input: CreateBookingInput) => Promise<unknown>;
+  paymentOptions?: string[];
+  initialCustomer?: CustomerLite | null;
+  successMessage?: string;
+  notice?: React.ReactNode;
+  /** Muestra el id interno de la persona seleccionada. */
+  showCustomerId?: boolean;
 };
 
 const TRIP_LABEL_TO_DB: Record<string, string> = {
@@ -33,13 +56,24 @@ function customerFullName(c: CustomerLite) {
   return [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email || c.id;
 }
 
-export default function AddBookingPage() {
+export default function AddBookingPage({
+  title = "Añadir nueva reserva",
+  customerLabel = "Cliente",
+  customerPlaceholder = "Buscar cliente por nombre, email o teléfono...",
+  searchCustomers = defaultSearchCustomers,
+  createBooking = defaultCreateBooking,
+  paymentOptions = ADMIN_PAYMENT_OPTIONS,
+  initialCustomer = null,
+  successMessage = "Tu reserva fue registrada exitosamente en la base de datos.",
+  notice,
+  showCustomerId = true,
+}: AddBookingPageProps = {}) {
   const [originLoc, setOriginLoc] = useState<Location | null>(null);
   const [destLoc, setDestLoc] = useState<Location | null>(null);
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [tripType, setTripType] = useState("Solo ida");
   const [vehicleType, setVehicleType] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Efectivo");
+  const [paymentMethod, setPaymentMethod] = useState(paymentOptions[0]);
   const [isScheduled, setIsScheduled] = useState(false);
   const [dateTime, setDateTime] = useState("");
   const [hours, setHours] = useState(0);
@@ -66,10 +100,12 @@ export default function AddBookingPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Customer picker
-  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerQuery, setCustomerQuery] = useState(
+    initialCustomer ? customerFullName(initialCustomer) : ""
+  );
   const [customerResults, setCustomerResults] = useState<CustomerLite[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerLite | null>(
-    null
+    initialCustomer
   );
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -94,7 +130,7 @@ export default function AddBookingPage() {
     debounceRef.current = window.setTimeout(async () => {
       setSearchingCustomer(true);
       try {
-        const res = await BookingsService.searchCustomers(customerQuery, 8);
+        const res = await searchCustomers(customerQuery, 8);
         setCustomerResults(res);
         setShowResults(true);
       } catch {
@@ -106,7 +142,7 @@ export default function AddBookingPage() {
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
-  }, [customerQuery, selectedCustomer]);
+  }, [customerQuery, selectedCustomer, searchCustomers]);
 
   const origin = originLoc?.title || "";
   const destination = destLoc?.title || "";
@@ -237,7 +273,7 @@ export default function AddBookingPage() {
     setSubmitError(null);
 
     if (!selectedCustomer) {
-      setSubmitError("Selecciona un cliente.");
+      setSubmitError(`Selecciona un ${customerLabel.toLowerCase()}.`);
       return;
     }
     if (!originLoc || !destLoc) {
@@ -282,7 +318,7 @@ export default function AddBookingPage() {
 
     setSubmitting(true);
     try {
-      await BookingsService.create({
+      await createBooking({
         customer_id: selectedCustomer.id,
         customer_name: customerFullName(selectedCustomer),
         customer_email: selectedCustomer.email,
@@ -330,7 +366,7 @@ export default function AddBookingPage() {
     setRouteInfo(null);
     setTripType("Solo ida");
     setVehicleType("");
-    setPaymentMethod("Efectivo");
+    setPaymentMethod(paymentOptions[0]);
     setIsScheduled(false);
     setDateTime("");
     setHours(0);
@@ -345,13 +381,14 @@ export default function AddBookingPage() {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold text-slate-900 mb-6">
-        Añadir nueva reserva
+        {title}
       </h1>
+      {notice}
 
       <Card className="p-6 space-y-6">
         {/* ── Cliente ── */}
         <div>
-          <label className="block text-sm text-slate-600 mb-1">Cliente</label>
+          <label className="block text-sm text-slate-600 mb-1">{customerLabel}</label>
           <div className="relative">
             <div className="flex gap-2">
               <input
@@ -362,7 +399,7 @@ export default function AddBookingPage() {
                   if (selectedCustomer) setSelectedCustomer(null);
                 }}
                 onFocus={() => customerResults.length > 0 && setShowResults(true)}
-                placeholder="Buscar cliente por nombre, email o teléfono..."
+                placeholder={customerPlaceholder}
                 className="flex-1 p-2 border border-slate-300 rounded-lg"
               />
               {selectedCustomer && (
@@ -398,7 +435,11 @@ export default function AddBookingPage() {
           </div>
           {selectedCustomer && (
             <div className="mt-2 text-xs text-slate-500">
-              ID: <span className="font-mono">{selectedCustomer.id}</span> ·{" "}
+              {showCustomerId && (
+                <>
+                  ID: <span className="font-mono">{selectedCustomer.id}</span> ·{" "}
+                </>
+              )}
               {selectedCustomer.email || "sin email"} ·{" "}
               {selectedCustomer.mobile || "sin teléfono"}
             </div>
@@ -440,11 +481,12 @@ export default function AddBookingPage() {
             <select
               value={paymentMethod}
               onChange={(e) => setPaymentMethod(e.target.value)}
-              className="w-full p-2 border border-slate-300 rounded-lg"
+              disabled={paymentOptions.length === 1}
+              className="w-full p-2 border border-slate-300 rounded-lg disabled:bg-slate-50 disabled:text-slate-700"
             >
-              <option>Efectivo</option>
-              <option>Nequi</option>
-              <option>Daviplata</option>
+              {paymentOptions.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -639,7 +681,7 @@ export default function AddBookingPage() {
               ¡Reserva creada!
             </h2>
             <p className="text-slate-600 mb-4">
-              Tu reserva fue registrada exitosamente en la base de datos.
+              {successMessage}
             </p>
             <Button onClick={() => setSuccess(false)}>Cerrar</Button>
           </motion.div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { FloatingInput } from '@/components/ui/FloatingField';
 import { useAuth } from '@/hooks/useAuth';
@@ -29,6 +30,11 @@ export const LoginPage: React.FC = () => {
     // Admin (BD principal)
     if (mode === 'admin') {
       navigate('/home', { replace: true });
+      return;
+    }
+
+    if (mode === 'company') {
+      navigate('/empresa/inicio', { replace: true });
       return;
     }
 
@@ -259,6 +265,17 @@ export const LoginPage: React.FC = () => {
           >
             Registrarse como conductor
           </Button>
+
+          <Button
+            type="button"
+            className="w-full"
+            variant="secondary"
+            onClick={() => navigate('/empresas/login')}
+            disabled={loading}
+          >
+            <Building2 size={18} className="text-sky-600" />
+            Empresas
+          </Button>
         </form>
 
         {/* Información de acceso */}
@@ -266,7 +283,9 @@ export const LoginPage: React.FC = () => {
           <p className="text-xs text-blue-800 text-center">
             <strong>Acceso solo para administradores</strong>
             <br />
-            Los conductores deben usar la aplicación móvil
+            Los conductores deben usar la aplicación móvil.
+            <br />
+            Las empresas ingresan con el botón «Empresas».
           </p>
         </div>
 

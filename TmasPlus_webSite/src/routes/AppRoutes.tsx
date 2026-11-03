@@ -7,6 +7,7 @@ import LoginPage from '@/pages/Auth/LoginPage';
 import RegisterDriverPage from '@/pages/Auth/RegisterDriverPage';
 import UpdatePasswordPage from '@/pages/Auth/UpdatePasswordPage';
 import WelcomePage from '@/pages/Auth/WelcomePage';
+import CompanyLoginPage from '@/pages/Auth/CompanyLoginPage';
 import DriverStatusPage from '@/pages/Driver/DriverStatusPage';
 
 // Páginas protegidas
@@ -29,6 +30,15 @@ import NotificationsPage from '@/pages/Notifications/NotificationsPage';
 import VehicleMapPage from '@/pages/Vehicles/VehicleMapPage';
 import MembershipsPage from '@/pages/Memberships/MembershipsPage';
 import CarBrandsPage from '@/pages/CarBrands/CarBrandsPage';
+import CompaniesPage from '@/pages/Companies/CompaniesPage';
+import CompanyDetailPage from '@/pages/Companies/CompanyDetailPage';
+
+// Portal de empresas
+import CompanyHomePage from '@/pages/CompanyPortal/CompanyHomePage';
+import CompanyNewBookingPage from '@/pages/CompanyPortal/CompanyNewBookingPage';
+import CompanyBookingsPage from '@/pages/CompanyPortal/CompanyBookingsPage';
+import CompanyCollaboratorsPage from '@/pages/CompanyPortal/CompanyCollaboratorsPage';
+import CompanyProfilePage from '@/pages/CompanyPortal/CompanyProfilePage';
 
 // Página 404
 const NotFound = () => (
@@ -49,6 +59,7 @@ export default function AppRoutes() {
       <Route path="/update-password" element={<UpdatePasswordPage />} />
       <Route path="/welcome" element={<WelcomePage />} />
       <Route path="/driver-status" element={<DriverStatusPage />} />
+      <Route path="/empresas/login" element={<CompanyLoginPage />} />
 
       {/* Redirige raíz a /login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
@@ -84,6 +95,24 @@ export default function AppRoutes() {
         <Route path="/vehicle-map" element={<VehicleMapPage />} />
         <Route path="/memberships" element={<MembershipsPage />} />
         <Route path="/car-brands" element={<CarBrandsPage />} />
+        <Route path="/empresas" element={<CompaniesPage />} />
+        <Route path="/empresas/:id" element={<CompanyDetailPage />} />
+      </Route>
+
+      {/* Portal de empresas. El admin entra con "Ver portal de la empresa". */}
+      <Route
+        element={
+          <ProtectedRoute allow={['company', 'admin']}>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/empresa" element={<Navigate to="/empresa/inicio" replace />} />
+        <Route path="/empresa/inicio" element={<CompanyHomePage />} />
+        <Route path="/empresa/reservar" element={<CompanyNewBookingPage />} />
+        <Route path="/empresa/reservas" element={<CompanyBookingsPage />} />
+        <Route path="/empresa/colaboradores" element={<CompanyCollaboratorsPage />} />
+        <Route path="/empresa/perfil" element={<CompanyProfilePage />} />
       </Route>
 
       {/* 404 */}
