@@ -9,6 +9,8 @@ import {
   type BillingEvent,
   type BillingField,
   type ChargeLine,
+  type ChargeParam,
+  type ChargeParamKey,
   type Collaborator,
   type CollaboratorInput,
   type Company,
@@ -19,6 +21,7 @@ import {
   type CompanyInput,
   type CompanyLink,
   type CompanyOption,
+  type CompanyTripTariff,
   type CompanyViewer,
   type CorporateTripDetail,
   type DriverPaymentStatus,
@@ -238,6 +241,7 @@ function toBooking(row: Row, charges: ChargeLine[], history: BillingEvent[]): Co
     factura_referencia: row.factura_referencia,
     estado_pago_conductor: row.estado_pago_conductor,
     driver_share: row.driver_share === null || row.driver_share === undefined ? null : Number(row.driver_share),
+    company_charge: row.company_charge === null || row.company_charge === undefined ? null : Number(row.company_charge),
     cobros: charges,
     historial_cobro: history,
   };
@@ -584,6 +588,46 @@ export const CompaniesCore = {
       p_nota: nota,
     });
     if (error) fail(error, "No se pudo actualizar el estado");
+  },
+
+  async getTripTariff(bookingId: string): Promise<CompanyTripTariff | null> {
+    const { data, error } = await db.from("web_reserva_empresa_tarifas").select("*").eq("id_reserva", bookingId).maybeSingle();
+    if (error) fail(error, "No se pudo cargar la tarifa del viaje");
+    if (!data) return null;
+    return {
+      porcentaje_tplus: Number(data.porcentaje_tplus),
+      payu_comision: Number(data.payu_comision),
+      paquete_polizas: Number(data.paquete_polizas),
+      factor_procesamiento: Number(data.factor_procesamiento),
+      iva_procesamiento: Number(data.iva_procesamiento),
+      actualizado_en: data.actualizado_en ?? null,
+      actualizado_por: data.actualizado_por_nombre ?? null,
+    };
+  },
+
+  async setTripTariff(bookingId: string, porcentaje: number, payu: number): Promise<void> {
+    const { error } = await db.rpc("web_admin_set_tarifa_reserva_empresa", {
+      p_reserva: bookingId,
+      p_porcentaje: porcentaje,
+      p_payu: payu,
+    });
+    if (error) fail(error, "No se pudo actualizar la tarifa del viaje");
+  },
+
+  async listChargeParams(): Promise<ChargeParam[]> {
+    const { data, error } = await db.from("empresa_cobro_parametro").select("clave,valor,descripcion,actualizado_en");
+    if (error) fail(error, "No se pudieron cargar los valores por defecto");
+    return (data ?? []).map((r: Row) => ({
+      clave: r.clave,
+      valor: Number(r.valor),
+      descripcion: r.descripcion,
+      actualizado_en: r.actualizado_en ?? null,
+    }));
+  },
+
+  async setChargeParam(key: ChargeParamKey, value: number): Promise<void> {
+    const { error } = await db.rpc("web_admin_set_parametro_cobro_empresa", { p_clave: key, p_valor: value });
+    if (error) fail(error, "No se pudo guardar el valor por defecto");
   },
 
   async createBooking(companyId: string, input: CreateBookingInput, requestedBy: CompanyViewer): Promise<CompanyBooking> {

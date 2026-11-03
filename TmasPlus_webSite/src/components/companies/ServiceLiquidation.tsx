@@ -20,7 +20,6 @@ export const ServiceLiquidation: React.FC<{ booking: CompanyBooking }> = ({ book
   // Cancelado: no se factura nada. En curso: los valores son la estimación hasta que se complete.
   const amountOf = (codigo: string) =>
     cancelled ? 0 : booking.cobros.find((c) => c.concepto === codigo)?.monto ?? null;
-  const pending = !cancelled && CHARGE_CONCEPTS.some((c) => amountOf(c.codigo) === null);
   const total = CHARGE_CONCEPTS.reduce((sum, c) => sum + (amountOf(c.codigo) ?? 0), 0);
   const totalLabel = cancelled ? "Viaje cancelado: no se factura" : billable ? "El cliente pagó Empresarial" : "Estimado (aún no se factura)";
 
@@ -85,12 +84,6 @@ export const ServiceLiquidation: React.FC<{ booking: CompanyBooking }> = ({ book
           </tbody>
         </table>
       </div>
-      {pending && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Total parcial: los cobros adicionales para empresas (hosting, pólizas, procesamiento de datos, IVA y
-          comisiones) se calcularán cuando se defina la lógica de cobro.
-        </p>
-      )}
     </div>
   );
 };

@@ -24,6 +24,7 @@ import {
   INVOICE_STATUS_LABELS,
   canCancelBooking,
   collaboratorFullName,
+  companyCharge,
   isBillableTrip,
   type Collaborator,
   type CompanyBooking,
@@ -155,9 +156,9 @@ export const CompanyBookingsPanel: React.FC<Props> = ({ companyId, viewer, initi
     const pendingPayment = billable.filter((r) => r.estado_pago_conductor === "sin_pagar");
     return {
       count: rows.length,
-      completed: { count: billable.length, amount: sum(billable, (b) => b.total_cost) },
-      pendingInvoice: { count: pendingInvoice.length, amount: sum(pendingInvoice, (b) => b.total_cost) },
-      invoiced: { count: invoiced.length, amount: sum(invoiced, (b) => b.total_cost) },
+      completed: { count: billable.length, amount: sum(billable, companyCharge) },
+      pendingInvoice: { count: pendingInvoice.length, amount: sum(pendingInvoice, companyCharge) },
+      invoiced: { count: invoiced.length, amount: sum(invoiced, companyCharge) },
       pendingPayment: { count: pendingPayment.length, amount: sum(pendingPayment, (b) => b.driver_share ?? b.total_cost) },
     };
   }, [rows]);
@@ -269,7 +270,7 @@ export const CompanyBookingsPanel: React.FC<Props> = ({ companyId, viewer, initi
       { header: "Estado", value: (r) => BOOKING_STATUS_LABELS[r.status] },
       { header: "Conductor", value: (r) => r.driver_name },
       { header: "Placa", value: (r) => r.plate_number },
-      { header: "Valor", value: (r) => r.total_cost },
+      { header: "Valor", value: (r) => companyCharge(r) },
       { header: "Factura", value: (r) => INVOICE_STATUS_LABELS[r.estado_facturacion] },
       { header: "N.° factura", value: (r) => r.factura_referencia },
       ...(isAdmin
@@ -483,12 +484,12 @@ export const CompanyBookingsPanel: React.FC<Props> = ({ companyId, viewer, initi
                         </td>
                         <td className="px-3 py-3 text-right whitespace-nowrap">
                           {billable ? (
-                            <span className="font-medium">{formatMoney(b.total_cost)}</span>
+                            <span className="font-medium">{formatMoney(companyCharge(b))}</span>
                           ) : cancelled ? (
                             <span className="text-slate-400">{formatMoney(0)}</span>
                           ) : (
                             <>
-                              <div className="text-slate-500">{formatMoney(b.total_cost)}</div>
+                              <div className="text-slate-500">{formatMoney(companyCharge(b))}</div>
                               <div className="text-[11px] text-slate-400">Estimado</div>
                             </>
                           )}

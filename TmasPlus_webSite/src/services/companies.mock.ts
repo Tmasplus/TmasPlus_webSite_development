@@ -22,7 +22,10 @@ import {
   type CompanyInput,
   type CompanyLink,
   type CompanyOption,
+  type CompanyTripTariff,
   type CompanyViewer,
+  type ChargeParam,
+  type ChargeParamKey,
 } from "./companies.service";
 
 // Almacén de demostración en localStorage: se reemplaza por las RPC de core
@@ -31,11 +34,56 @@ const STORAGE_KEY = "tplus_demo_empresas_v1";
 
 type StoredCompany = Omit<Company, "total_colaboradores" | "total_viajes">;
 
+type StoredBooking = CompanyBooking & { tarifa?: CompanyTripTariff };
+
 type Store = {
   companies: StoredCompany[];
   collaborators: Collaborator[];
-  bookings: CompanyBooking[];
+  bookings: StoredBooking[];
+  params?: Record<ChargeParamKey, number>;
 };
+
+const DEFAULT_PARAMS: Record<ChargeParamKey, number> = {
+  porcentaje_tplus: 30,
+  payu_comision: 10000,
+  paquete_polizas: 800,
+  factor_procesamiento: 8,
+  iva_procesamiento: 19,
+};
+
+const PARAM_DESCRIPTIONS: Record<ChargeParamKey, string> = {
+  porcentaje_tplus: "Porcentaje T+Plus sobre lo que se le paga al conductor (%)",
+  payu_comision: "Comision PayU por viaje (COP); va dentro del hosting tecnologico",
+  paquete_polizas: "Paquete de polizas / seguro por viaje, IVA incluido (COP)",
+  factor_procesamiento: "Procesamiento de datos: porcentaje del valor T+Plus (%)",
+  iva_procesamiento: "IVA sobre el procesamiento de datos (%)",
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function tariffFrom(params: Record<ChargeParamKey, number>): CompanyTripTariff {
+  return { ...params, actualizado_en: null, actualizado_por: null };
+}
+
+// Misma fórmula que _reserva_empresa_liquidar en la base de datos.
+function liquidate(b: StoredBooking, tariff: CompanyTripTariff): Pick<CompanyBooking, "cobros" | "company_charge"> {
+  const base = Math.max(Number(b.total_cost) || 0, 0);
+  const tplus = (base * tariff.porcentaje_tplus) / 100;
+  const proc = round2((tplus * tariff.factor_procesamiento) / 100);
+  const amounts: Record<string, number> = {
+    costo_viaje: base,
+    hosting_tecnologico: round2(tplus - proc + tariff.payu_comision),
+    paquete_polizas: tariff.paquete_polizas,
+    procesamiento_datos: proc,
+    iva_procesamiento_datos: round2((proc * tariff.iva_procesamiento) / 100),
+  };
+  const cobros = CHARGE_CONCEPTS.map((c) => ({
+    concepto: c.codigo,
+    monto: amounts[c.codigo] ?? null,
+    tercero: c.codigo === "costo_viaje" ? b.driver_name : null,
+  }));
+  return { cobros, company_charge: round2(Object.values(amounts).reduce((s, v) => s + v, 0)) };
+}
 
 function load(): Store {
   try {
@@ -45,21 +93,27 @@ function load(): Store {
       return {
         companies: (parsed.companies ?? []).map((c) => ({ ...c, documentos: c.documentos ?? [] })),
         collaborators: parsed.collaborators ?? [],
-        bookings: (parsed.bookings ?? []).map((b) => ({
-          ...b,
-          estado_facturacion: b.estado_facturacion ?? "sin_facturar",
-          factura_referencia: b.factura_referencia ?? null,
-          estado_pago_conductor: b.estado_pago_conductor ?? "sin_pagar",
-          driver_share: b.driver_share ?? null,
-          cobros: b.cobros ?? initialCharges(b.total_cost, b.driver_name),
-          historial_cobro: b.historial_cobro ?? [],
-        })),
+        bookings: (parsed.bookings ?? []).map((b) => {
+          const booking: StoredBooking = {
+            ...b,
+            estado_facturacion: b.estado_facturacion ?? "sin_facturar",
+            factura_referencia: b.factura_referencia ?? null,
+            estado_pago_conductor: b.estado_pago_conductor ?? "sin_pagar",
+            driver_share: b.driver_share ?? null,
+            historial_cobro: b.historial_cobro ?? [],
+            tarifa: b.tarifa ?? tariffFrom(parsed.params ?? DEFAULT_PARAMS),
+          } as StoredBooking;
+          return booking.estado_facturacion === "facturado" && b.cobros && b.company_charge !== undefined
+            ? booking
+            : { ...booking, ...liquidate(booking, booking.tarifa!) };
+        }),
+        params: parsed.params ?? { ...DEFAULT_PARAMS },
       };
     }
   } catch {
     /* datos corruptos: se empieza vacío */
   }
-  return { companies: [], collaborators: [], bookings: [] };
+  return { companies: [], collaborators: [], bookings: [], params: { ...DEFAULT_PARAMS } };
 }
 
 function save(store: Store) {
@@ -68,15 +122,6 @@ function save(store: Store) {
   } catch {
     throw new Error("No hay espacio para guardar los datos de demostración. Usa un logo más liviano.");
   }
-}
-
-// Mientras no exista la lógica de cobro empresarial, solo se conoce el costo del viaje.
-function initialCharges(totalCost: number, driverName: string | null) {
-  return CHARGE_CONCEPTS.map((c) => ({
-    concepto: c.codigo,
-    monto: c.codigo === "costo_viaje" ? totalCost : null,
-    tercero: c.codigo === "costo_viaje" ? driverName : null,
-  }));
 }
 
 const latency = () => new Promise((r) => setTimeout(r, 200));
@@ -542,7 +587,7 @@ export const CompaniesMock = {
     if (!collaborator) throw new Error("El colaborador no pertenece a la empresa.");
     if (!collaborator.activo) throw new Error("El colaborador está inactivo.");
     const now = new Date().toISOString();
-    const booking: CompanyBooking = {
+    const booking: StoredBooking = {
       id: crypto.randomUUID(),
       reference: randomReference(),
       status: "PENDING",
@@ -578,12 +623,61 @@ export const CompaniesMock = {
       factura_referencia: null,
       estado_pago_conductor: "sin_pagar",
       driver_share: input.driver_share ?? null,
-      cobros: initialCharges(input.total_cost, null),
+      company_charge: null,
+      cobros: [],
       historial_cobro: [],
+      tarifa: tariffFrom(store.params ?? DEFAULT_PARAMS),
     };
+    Object.assign(booking, liquidate(booking, booking.tarifa!));
     store.bookings.unshift(booking);
     save(store);
     return booking;
+  },
+
+  async getTripTariff(bookingId: string): Promise<CompanyTripTariff | null> {
+    await latency();
+    const b = load().bookings.find((x) => x.id === bookingId);
+    return b?.tarifa ?? null;
+  },
+
+  async setTripTariff(bookingId: string, porcentaje: number, payu: number): Promise<void> {
+    await latency();
+    if (porcentaje < 0 || porcentaje > 100) throw new Error("El porcentaje T+Plus debe estar entre 0 y 100");
+    if (payu < 0) throw new Error("La comisión PayU no puede ser negativa");
+    const store = load();
+    const b = store.bookings.find((x) => x.id === bookingId);
+    if (!b) throw new Error("Viaje empresarial no encontrado");
+    if (b.estado_facturacion === "facturado") {
+      throw new Error("El servicio ya está facturado: su liquidación no se puede modificar");
+    }
+    b.tarifa = {
+      ...(b.tarifa ?? tariffFrom(store.params ?? DEFAULT_PARAMS)),
+      porcentaje_tplus: porcentaje,
+      payu_comision: payu,
+      actualizado_en: new Date().toISOString(),
+      actualizado_por: "Administrador T+Plus",
+    };
+    Object.assign(b, liquidate(b, b.tarifa));
+    save(store);
+  },
+
+  async listChargeParams(): Promise<ChargeParam[]> {
+    await latency();
+    const params = load().params ?? DEFAULT_PARAMS;
+    return (Object.keys(DEFAULT_PARAMS) as ChargeParamKey[]).map((clave) => ({
+      clave,
+      valor: params[clave],
+      descripcion: PARAM_DESCRIPTIONS[clave],
+      actualizado_en: null,
+    }));
+  },
+
+  async setChargeParam(key: ChargeParamKey, value: number): Promise<void> {
+    await latency();
+    if (value < 0) throw new Error("El valor no puede ser negativo");
+    const store = load();
+    store.params = { ...(store.params ?? DEFAULT_PARAMS), [key]: value };
+    save(store);
   },
 
   async cancelBooking(bookingId: string, reason: string, viewer: CompanyViewer): Promise<CompanyBooking> {

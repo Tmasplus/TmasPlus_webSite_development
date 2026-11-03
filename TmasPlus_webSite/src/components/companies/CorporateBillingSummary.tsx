@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { formatMoney } from "@/components/companies/format";
-import { CompaniesService, isBillableTrip, type CompanyBooking } from "@/services/companies.service";
+import { CompaniesService, companyCharge, isBillableTrip, type CompanyBooking } from "@/services/companies.service";
 
 type Totals = { count: number; amount: number };
 
@@ -30,8 +30,8 @@ export const CorporateBillingSummary: React.FC<{ companyId: string | null }> = (
     try {
       const rows = (await CompaniesService.listBookings({ companyId }, "admin")).filter(isBillableTrip);
       setTotals({
-        pending: sum(rows.filter((r) => r.estado_facturacion === "sin_facturar"), (b) => b.total_cost),
-        invoiced: sum(rows.filter((r) => r.estado_facturacion === "facturado"), (b) => b.total_cost),
+        pending: sum(rows.filter((r) => r.estado_facturacion === "sin_facturar"), companyCharge),
+        invoiced: sum(rows.filter((r) => r.estado_facturacion === "facturado"), companyCharge),
         unpaid: sum(rows.filter((r) => r.estado_pago_conductor === "sin_pagar"), (b) => b.driver_share ?? b.total_cost),
       });
     } catch {

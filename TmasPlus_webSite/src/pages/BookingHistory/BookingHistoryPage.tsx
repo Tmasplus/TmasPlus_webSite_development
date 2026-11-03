@@ -471,7 +471,7 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
       "Llegó destino",
       "Completado",
       "Cancelado",
-      ...(isCorporate ? ["Empresa", "Factura", "N.° factura", "Pago conductor"] : []),
+      ...(isCorporate ? ["Empresa", "Cobro empresa", "Factura", "N.° factura", "Pago conductor"] : []),
     ];
 
     const rows = filteredBookings.map((b) => {
@@ -504,6 +504,7 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
         ...(isCorporate
           ? [
               b.company_name || "",
+              b.status === "CANCELLED" ? 0 : b.company_charge ?? "",
               INVOICE_STATUS_LABELS[b.estado_facturacion as InvoiceStatus] ?? "",
               b.factura_referencia || "",
               DRIVER_PAYMENT_STATUS_LABELS[b.estado_pago_conductor as DriverPaymentStatus] ?? "",
@@ -940,6 +941,11 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
                         ) : (
                           <>
                             <InvoiceStatusBadge status={b.estado_facturacion ?? "sin_facturar"} />
+                            {b.company_charge != null && (
+                              <div className="mt-0.5 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-700">
+                                {formatMoney(Number(b.company_charge))}
+                              </div>
+                            )}
                             {b.factura_referencia && (
                               <div className="mt-0.5 font-mono text-[11px] text-slate-500">{b.factura_referencia}</div>
                             )}

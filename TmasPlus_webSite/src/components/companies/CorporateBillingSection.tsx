@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { InvoiceStatusBadge, PaymentStatusBadge } from "@/components/companies/CompanyUi";
 import { BillingStatusModal, type BillingChange } from "@/components/companies/BillingStatusModal";
 import { ServiceLiquidation } from "@/components/companies/ServiceLiquidation";
+import { TripTariffEditor } from "@/components/companies/TripTariffEditor";
 import { errorMessage, formatDateTime, formatMoney } from "@/components/companies/format";
 import {
   CompaniesService,
@@ -108,6 +109,11 @@ export const CorporateBillingSection: React.FC<{
 
       <div>
         <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Liquidación del servicio</h4>
+        {isAdmin && booking.status !== "CANCELLED" && (
+          <div className="mb-3">
+            <TripTariffEditor booking={booking} onSaved={onChanged} />
+          </div>
+        )}
         <ServiceLiquidation booking={booking} />
       </div>
 

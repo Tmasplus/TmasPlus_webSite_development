@@ -9,6 +9,7 @@ import { formatDateTime, formatMoney } from "@/components/companies/format";
 import {
   ACTIVE_BOOKING_STATUSES,
   CompaniesService,
+  companyCharge,
   isBillableTrip,
   type Collaborator,
   type Company,
@@ -82,10 +83,10 @@ function HomeContent({ companyId, viewer }: { companyId: string; viewer: Company
       activeCollaborators: collaborators.filter((c) => c.activo).length,
       inProgress: bookings.filter((b) => ACTIVE_BOOKING_STATUSES.includes(b.status)).length,
       monthTrips: thisMonth.length,
-      monthAmount: thisMonth.reduce((s, b) => s + (Number(b.total_cost) || 0), 0),
+      monthAmount: thisMonth.reduce((s, b) => s + (Number(companyCharge(b)) || 0), 0),
       invoiced: bookings
         .filter((b) => isBillableTrip(b) && b.estado_facturacion === "facturado")
-        .reduce((s, b) => s + (Number(b.total_cost) || 0), 0),
+        .reduce((s, b) => s + (Number(companyCharge(b)) || 0), 0),
     };
   }, [bookings, collaborators]);
 
@@ -142,7 +143,7 @@ function HomeContent({ companyId, viewer }: { companyId: string; viewer: Company
                 </div>
                 <span className="text-xs text-slate-500 whitespace-nowrap">{formatDateTime(b.booking_date)}</span>
                 <BookingStatusBadge status={b.status} />
-                <span className="w-24 text-right text-sm font-medium text-slate-700">{formatMoney(b.total_cost)}</span>
+                <span className="w-24 text-right text-sm font-medium text-slate-700">{formatMoney(companyCharge(b))}</span>
               </li>
             ))}
           </ul>

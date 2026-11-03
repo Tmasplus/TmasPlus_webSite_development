@@ -233,7 +233,11 @@ export interface BillingEvent {
 
 export type ChargeCategory = "ingreso_terceros" | "ingreso_propio" | "impuesto";
 
-/** Catálogo de conceptos de cobro (tabla concepto_cobro). La lógica de cálculo está pendiente. */
+/**
+ * Conceptos que se cobran a la empresa (tabla concepto_cobro). La base de datos calcula los montos
+ * (_reserva_empresa_liquidar): procesamiento = conductor × % T+Plus × 8 %; IVA = procesamiento × 19 %;
+ * hosting = conductor × % T+Plus − procesamiento + PayU; pólizas = valor fijo. Total = suma de las líneas.
+ */
 export const CHARGE_CONCEPTS: {
   codigo: string;
   nombre: string;
@@ -242,7 +246,6 @@ export const CHARGE_CONCEPTS: {
   grupo_factura: string;
 }[] = [
   { codigo: "costo_viaje", nombre: "Costo del viaje", categoria: "ingreso_terceros", grupo_factura: "Ingresos recibidos para terceros (conductor)" },
-  { codigo: "comision_tercero", nombre: "Comisión hotel u otra empresa", categoria: "ingreso_terceros", grupo_factura: "Ingresos recibidos para terceros (comisión)" },
   { codigo: "hosting_tecnologico", nombre: "Hosting tecnológico", categoria: "ingreso_propio", grupo_factura: "Hosting tecnológico total" },
   { codigo: "paquete_polizas", nombre: "Paquete de pólizas", categoria: "ingreso_propio", grupo_factura: "Hosting tecnológico total" },
   { codigo: "procesamiento_datos", nombre: "Procesamiento de datos", categoria: "ingreso_propio", grupo_factura: "Procesamiento de datos" },
@@ -298,9 +301,42 @@ export interface CompanyBooking {
   estado_pago_conductor: DriverPaymentStatus | null;
   /** Valor a pagar al conductor; solo administrador. */
   driver_share: number | null;
+  /** Total que se le cobra a la empresa (suma de la liquidación); null si aún no se ha liquidado. */
+  company_charge: number | null;
   cobros: ChargeLine[];
   /** Solo administrador. */
   historial_cobro: BillingEvent[];
+}
+
+/** Lo que paga la empresa por el viaje: la liquidación completa; si no existe, el precio del viaje. */
+export function companyCharge(b: Pick<CompanyBooking, "company_charge" | "total_cost">): number {
+  return b.company_charge ?? b.total_cost;
+}
+
+/** Parámetros del cobro de un viaje (solo admin). Los porcentajes van de 0 a 100. */
+export interface CompanyTripTariff {
+  porcentaje_tplus: number;
+  payu_comision: number;
+  paquete_polizas: number;
+  factor_procesamiento: number;
+  iva_procesamiento: number;
+  actualizado_en: string | null;
+  actualizado_por: string | null;
+}
+
+export type ChargeParamKey =
+  | "porcentaje_tplus"
+  | "payu_comision"
+  | "paquete_polizas"
+  | "factor_procesamiento"
+  | "iva_procesamiento";
+
+/** Valor por defecto del cobro a empresas (tabla empresa_cobro_parametro). */
+export interface ChargeParam {
+  clave: ChargeParamKey;
+  valor: number;
+  descripcion: string;
+  actualizado_en: string | null;
 }
 
 export interface CompanyBookingFilters {
@@ -395,6 +431,14 @@ export const CompaniesService = {
     referencia: string | null,
     nota: string | null
   ): Promise<void> => impl().setBillingStatus(bookingIds, field, value, referencia, nota),
+  /** Solo administrador: % T+Plus, PayU y demás parámetros con que se liquidó el viaje. */
+  getTripTariff: (bookingId: string): Promise<CompanyTripTariff | null> => impl().getTripTariff(bookingId),
+  /** Solo administrador: cambia el % T+Plus y el PayU de ese viaje (no los valores por defecto) y lo reliquida. */
+  setTripTariff: (bookingId: string, porcentaje: number, payu: number): Promise<void> =>
+    impl().setTripTariff(bookingId, porcentaje, payu),
+  /** Solo administrador: valores por defecto del cobro a empresas. */
+  listChargeParams: (): Promise<ChargeParam[]> => impl().listChargeParams(),
+  setChargeParam: (key: ChargeParamKey, value: number): Promise<void> => impl().setChargeParam(key, value),
   createBooking: (
     companyId: string,
     input: CreateBookingInput,

@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ActiveBadge, CompanyLogo, DemoNotice } from "@/components/companies/CompanyUi";
 import { CompanyBookingsPanel } from "@/components/companies/CompanyBookingsPanel";
 import { CorporateBillingSummary } from "@/components/companies/CorporateBillingSummary";
+import { ChargeDefaultsCard } from "@/components/companies/ChargeDefaultsCard";
 import { BookingHistoryView } from "@/pages/BookingHistory/BookingHistoryPage";
 import { errorMessage, formatDate } from "@/components/companies/format";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -170,6 +171,7 @@ export const CompaniesPage: React.FC = () => {
       {tab === "facturacion" ? (
         COMPANIES_BACKEND_READY ? (
           <>
+            <ChargeDefaultsCard />
             <CorporateBillingSummary companyId={null} />
             <BookingHistoryView corporate={{ companyId: null }} embedded />
           </>

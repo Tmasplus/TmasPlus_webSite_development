@@ -138,10 +138,6 @@ export const LoginPage: React.FC = () => {
 
 
 
-  const handleRegister = () => {
-    navigate('/register-driver');
-  };
-
   // Si está cargando la verificación de auth, mostrar loader
   if (authLoading) {
     return (
@@ -260,16 +256,6 @@ export const LoginPage: React.FC = () => {
             type="button"
             className="w-full"
             variant="secondary"
-            onClick={handleRegister}
-            disabled={loading}
-          >
-            Registrarse como conductor
-          </Button>
-
-          <Button
-            type="button"
-            className="w-full"
-            variant="secondary"
             onClick={() => navigate('/empresas/login')}
             disabled={loading}
           >
@@ -277,17 +263,6 @@ export const LoginPage: React.FC = () => {
             Empresas
           </Button>
         </form>
-
-        {/* Información de acceso */}
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-          <p className="text-xs text-blue-800 text-center">
-            <strong>Acceso solo para administradores</strong>
-            <br />
-            Los conductores deben usar la aplicación móvil.
-            <br />
-            Las empresas ingresan con el botón «Empresas».
-          </p>
-        </div>
 
         {/* Footer */}
         <p className="mt-8 text-center text-xs text-slate-500">

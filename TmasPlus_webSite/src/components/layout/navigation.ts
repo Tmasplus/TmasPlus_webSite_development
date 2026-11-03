@@ -4,7 +4,6 @@ import {
   Bell,
   Briefcase,
   Building,
-  Building2,
   CalendarClock,
   CalendarPlus,
   Car,
@@ -39,7 +38,8 @@ export const NAV_PAGES: NavPage[] = [
   { to: "/home", label: "Inicio", section: "Principal", icon: House, portal: "admin", keywords: "dashboard panel resumen" },
   { to: "/bookingHistory", label: "Historial de reservas", section: "Reservas", icon: CalendarClock, portal: "admin", keywords: "viajes servicios" },
   { to: "/addbooking", label: "Añadir reserva", section: "Reservas", icon: CalendarPlus, portal: "admin", keywords: "nueva crear viaje" },
-  { to: "/bookingCorp", label: "Reservas corporativas", section: "Reservas", icon: Building2, portal: "admin", keywords: "empresas" },
+  // Oculta del menú: los viajes empresariales se gestionan en Empresas › Cobros y facturación. La ruta sigue activa.
+  // { to: "/bookingCorp", label: "Reservas corporativas", section: "Reservas", icon: Building2, portal: "admin", keywords: "empresas" },
   { to: "/bookingdetails", label: "Detalle de reserva", section: "Reservas", icon: FileText, portal: "admin", keywords: "referencia" },
   { to: "/users", label: "Usuarios App", section: "Usuarios", icon: Users, portal: "admin", keywords: "clientes pasajeros" },
   { to: "/app-drivers", label: "Conductores App", section: "Usuarios", icon: IdCard, portal: "admin", keywords: "choferes" },
