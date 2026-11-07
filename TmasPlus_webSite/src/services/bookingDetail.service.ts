@@ -168,6 +168,23 @@ export async function fetchChatMessages(bookingId: string): Promise<ChatMessage[
   });
 }
 
+export const ADMIN_CHAT_NAME = "Admin T+Plus";
+
+/** Mensaje del administrador en el chat del servicio; lo ven conductor y cliente en la app. */
+export async function sendAdminChatMessage(bookingId: string, message: string): Promise<void> {
+  const mensaje = message.trim();
+  if (!mensaje) return;
+  // RLS: el admin solo puede insertar con id_remitente NULL o el suyo; NULL evita depender del perfil cargado.
+  const { error } = await db.from("mensaje_chat").insert({
+    id_reserva: bookingId,
+    id_remitente: null,
+    rol_remitente: "admin",
+    remitente_nombre: ADMIN_CHAT_NAME,
+    mensaje,
+  });
+  if (error) throw new Error(error.message);
+}
+
 function settle<T>(promise: Promise<T>, fallback: T, errors: string[]): Promise<T> {
   return promise.catch((e: unknown) => {
     errors.push(e instanceof Error ? e.message : String(e));

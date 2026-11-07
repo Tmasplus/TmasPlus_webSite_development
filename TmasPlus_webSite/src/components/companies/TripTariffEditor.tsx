@@ -94,8 +94,8 @@ export const TripTariffEditor: React.FC<{ booking: CompanyBooking; onSaved: () =
       </div>
       <p className="mt-2 text-xs text-slate-500">
         Pólizas {formatMoney(tariff.paquete_polizas)} · Procesamiento {tariff.factor_procesamiento} % del valor T+Plus ·
-        IVA {tariff.iva_procesamiento} %. Solo cambia este viaje; los valores por defecto se editan en Empresas › Cobros
-        y facturación.
+        IVA {tariff.iva_procesamiento} %. Solo cambia este viaje; la tarifa de la empresa se edita con el botón «Tarifa»
+        del listado de Empresas.
         {tariff.actualizado_por && (
           <> Ajustado por {tariff.actualizado_por} el {formatDateTime(tariff.actualizado_en)}.</>
         )}
