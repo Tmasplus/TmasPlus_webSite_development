@@ -10,7 +10,7 @@ import { formatDate } from '@/utils/formatDate';
 import { classNames } from '@/utils/classNames';
 import { toast } from '@/utils/toast';
 import { exportToCsv } from '@/utils/exportCsv';
-import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from '@/utils/referralCode';
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND, referralOwnerTypeLabel } from '@/utils/referralCode';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { categoryNameForValue } from '@/utils/carTypeCatalog';
 import { supabase } from '@/config/supabase';
@@ -85,6 +85,7 @@ export const DriversPage: React.FC = () => {
             )];
 
             let codeToNameMap: Record<string, string> = {};
+            const codeToTypeMap: Record<string, string> = {};
 
             // El dueño viene embebido en la vista (columna `driver`): una sola consulta,
             // en lotes para no exceder el largo de la URL, y sin ignorar errores.
@@ -98,17 +99,21 @@ export const DriversPage: React.FC = () => {
                     console.warn('No se pudo resolver el dueño de los códigos:', refError.message);
                     continue;
                 }
-                (refCodes ?? []).forEach((rc: { referral_code: string; driver: { first_name?: string | null; last_name?: string | null } | null }) => {
+                (refCodes ?? []).forEach((rc: { referral_code: string; driver: { first_name?: string | null; last_name?: string | null; user_type?: string | null } | null }) => {
                     const name = [rc.driver?.first_name, rc.driver?.last_name]
                         .map(part => (part ?? '').trim())
                         .filter(Boolean)
                         .join(' ');
-                    if (name) codeToNameMap[formatReferralCode(rc.referral_code)] = name;
+                    if (name) {
+                        codeToNameMap[formatReferralCode(rc.referral_code)] = name;
+                        codeToTypeMap[formatReferralCode(rc.referral_code)] = referralOwnerTypeLabel(rc.driver?.user_type);
+                    }
                 });
             }
 
             const enriched = result.data.map(d => ({
                 ...d,
+                referrerType: d.referral_id?.trim() ? codeToTypeMap[formatReferralCode(d.referral_id)] ?? '' : '',
                 referrerName: !d.referral_id?.trim()
                     ? 'Sin referencia'
                     : codeToNameMap[formatReferralCode(d.referral_id)] ?? REFERRAL_OWNER_NOT_FOUND
@@ -372,7 +377,7 @@ export const DriversPage: React.FC = () => {
             header: "Referido Por",
             accessor: (r) => r.referrerName === 'Sin referencia' || !r.referral_id
                 ? <span className="text-slate-400 text-xs italic">Sin referencia</span>
-                : <div className="flex flex-col"><span className={`text-xs font-bold ${r.referrerName === REFERRAL_OWNER_NOT_FOUND ? 'text-amber-700' : 'text-sky-700'}`}>{r.referrerName}</span><span className="text-[10px] text-slate-400">({r.referral_id})</span></div>
+                : <div className="flex flex-col"><span className={`text-xs font-bold ${r.referrerName === REFERRAL_OWNER_NOT_FOUND ? 'text-amber-700' : 'text-sky-700'}`}>{r.referrerName}</span>{r.referrerType && <span className={`w-fit rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.referrerType === 'Conductor' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>{r.referrerType}</span>}<span className="text-[10px] text-slate-400">({r.referral_id})</span></div>
         },
         {
             header: "Referidos",

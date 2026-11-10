@@ -12,7 +12,7 @@ import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
 import { exportToCsv } from "@/utils/exportCsv";
 import { chunk } from "@/utils/chunk";
-import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from "@/utils/referralCode";
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND, referralOwnerTypeLabel } from "@/utils/referralCode";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
 import { categoryNameForValue } from "@/utils/carTypeCatalog";
 import { supabase, supabaseSecondary } from "@/config/supabase";
@@ -122,6 +122,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const [referralCountMap, setReferralCountMap] = useState<Record<string, number>>({});
   // Dueño (nombre) de cada código de referido usado al registrarse, por código en mayúsculas.
   const [referralOwnerByCode, setReferralOwnerByCode] = useState<Record<string, string>>({});
+  const [referralOwnerTypeByCode, setReferralOwnerTypeByCode] = useState<Record<string, string>>({});
   // Cédula tomada de la BD primaria, solo como respaldo cuando la secundaria
   // no la tiene; keyed por user.id.
   const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
@@ -306,11 +307,13 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
     ];
     if (usedCodes.length === 0) {
       setReferralOwnerByCode({});
+      setReferralOwnerTypeByCode({});
       return;
     }
     let cancelled = false;
     (async () => {
       const ownerByCode: Record<string, string> = {};
+      const typeByCode: Record<string, string> = {};
       for (const codesChunk of chunk(usedCodes, 100)) {
         const { data: owners, error } = await supabase
           .from("web_referral_codes")
@@ -322,13 +325,20 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         }
         for (const row of (owners || []) as unknown as Array<{
           referral_code: string;
-          driver: { first_name?: string | null; last_name?: string | null } | null;
+          driver: { first_name?: string | null; last_name?: string | null; user_type?: string | null } | null;
         }>) {
           const name = [row.driver?.first_name, row.driver?.last_name].filter(Boolean).join(" ");
-          if (row.referral_code && name) ownerByCode[row.referral_code.trim().toUpperCase()] = name;
+          if (row.referral_code && name) {
+            const key = row.referral_code.trim().toUpperCase();
+            ownerByCode[key] = name;
+            typeByCode[key] = referralOwnerTypeLabel(row.driver?.user_type);
+          }
         }
       }
-      if (!cancelled) setReferralOwnerByCode(ownerByCode);
+      if (!cancelled) {
+        setReferralOwnerByCode(ownerByCode);
+        setReferralOwnerTypeByCode(typeByCode);
+      }
     })();
     return () => {
       cancelled = true;
@@ -610,6 +620,10 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       {
         header: "Dueño del código",
         value: (u) => referralOwnerByCode[String(u.referral_id || "").trim().toUpperCase()] || "",
+      },
+      {
+        header: "Tipo de dueño del código",
+        value: (u) => referralOwnerTypeByCode[String(u.referral_id || "").trim().toUpperCase()] || "",
       },
       { header: "Ciudad", value: (u) => u.city || "" },
       { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
