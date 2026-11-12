@@ -626,7 +626,15 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         value: (u) => referralOwnerTypeByCode[String(u.referral_id || "").trim().toUpperCase()] || "",
       },
       { header: "Ciudad", value: (u) => u.city || "" },
-      { header: "Categoría", value: (u) => categoryNameForValue(carTypes, categoryFor(u)) },
+      {
+        header: "Categoría",
+        value: (u) => {
+          const raw = categoryFor(u);
+          const name = categoryNameForValue(carTypes, raw);
+          // Sin coincidencia en el catálogo, se exporta el valor crudo en vez de "—".
+          return name === "—" ? String(raw || "") : name;
+        },
+      },
       { header: "Tipo", value: (u) => u.user_type || "" },
       ...(showCompanies
         ? [{ header: "Empresas", value: (u: SecondaryUser) => activeCompaniesFor(u).map((l) => l.companyName).join(" | ") }]
