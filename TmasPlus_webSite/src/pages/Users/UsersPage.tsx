@@ -628,11 +628,10 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       { header: "Ciudad", value: (u) => u.city || "" },
       {
         header: "Categoría",
+        // Solo categorías vigentes del catálogo; valores heredados sin match quedan vacíos.
         value: (u) => {
-          const raw = categoryFor(u);
-          const name = categoryNameForValue(carTypes, raw);
-          // Sin coincidencia en el catálogo, se exporta el valor crudo en vez de "—".
-          return name === "—" ? String(raw || "") : name;
+          const name = categoryNameForValue(carTypes, categoryFor(u));
+          return name === "—" ? "" : name;
         },
       },
       { header: "Tipo", value: (u) => u.user_type || "" },
