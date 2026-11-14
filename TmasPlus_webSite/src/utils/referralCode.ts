@@ -12,6 +12,17 @@ export function formatReferralCode(raw: string | null | undefined): string {
 // Texto cuando el conductor se registró con un código que no existe.
 export const REFERRAL_OWNER_NOT_FOUND = 'No se encontró el dueño del código';
 
+// El dueño de un código puede ser conductor o cliente (web_users.user_type).
+export function referralOwnerTypeLabel(userType: string | null | undefined): string {
+  switch ((userType ?? '').toLowerCase()) {
+    case 'driver': return 'Conductor';
+    case 'customer': return 'Cliente';
+    case 'company': return 'Empresa';
+    case 'admin': return 'Administrador';
+    default: return '';
+  }
+}
+
 export function isValidReferralCodeFormat(raw: string | null | undefined): boolean {
   return REFERRAL_CODE_REGEX.test(formatReferralCode(raw));
 }

@@ -22,6 +22,7 @@ import {
   type CompanyInput,
   type CompanyLink,
   type CompanyOption,
+  type CompanyTariff,
   type CompanyTripTariff,
   type CompanyViewer,
   type ChargeParam,
@@ -41,6 +42,7 @@ type Store = {
   collaborators: Collaborator[];
   bookings: StoredBooking[];
   params?: Record<ChargeParamKey, number>;
+  companyTariffs?: Record<string, { porcentaje_tplus: number | null; payu_comision: number | null; actualizado_en: string }>;
 };
 
 const DEFAULT_PARAMS: Record<ChargeParamKey, number> = {
@@ -60,6 +62,17 @@ const PARAM_DESCRIPTIONS: Record<ChargeParamKey, string> = {
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Valores por defecto con el % T+Plus y PayU propios de la empresa, si los tiene. */
+function companyParams(store: Store, companyId: string): Record<ChargeParamKey, number> {
+  const params = store.params ?? DEFAULT_PARAMS;
+  const own = store.companyTariffs?.[companyId];
+  return {
+    ...params,
+    porcentaje_tplus: own?.porcentaje_tplus ?? params.porcentaje_tplus,
+    payu_comision: own?.payu_comision ?? params.payu_comision,
+  };
+}
 
 function tariffFrom(params: Record<ChargeParamKey, number>): CompanyTripTariff {
   return { ...params, actualizado_en: null, actualizado_por: null };
@@ -91,7 +104,11 @@ function load(): Store {
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Store>;
       return {
-        companies: (parsed.companies ?? []).map((c) => ({ ...c, documentos: c.documentos ?? [] })),
+        companies: (parsed.companies ?? []).map((c) => ({
+          ...c,
+          documentos: c.documentos ?? [],
+          correo_facturacion: c.correo_facturacion ?? null,
+        })),
         collaborators: parsed.collaborators ?? [],
         bookings: (parsed.bookings ?? []).map((b) => {
           const booking: StoredBooking = {
@@ -108,6 +125,7 @@ function load(): Store {
             : { ...booking, ...liquidate(booking, booking.tarifa!) };
         }),
         params: parsed.params ?? { ...DEFAULT_PARAMS },
+        companyTariffs: parsed.companyTariffs ?? {},
       };
     }
   } catch {
@@ -185,6 +203,7 @@ function cleanCompanyInput(
     tipo_empresa_otra: input.tipo_empresa_otra,
     ciiu: input.ciiu,
     correo_corporativo: input.correo_corporativo.trim().toLowerCase(),
+    correo_facturacion: input.correo_facturacion?.trim().toLowerCase() || null,
     telefono: input.telefono.trim(),
     pais: input.pais,
     departamento: input.departamento,
@@ -233,6 +252,7 @@ function seedDemoCompany(store: Store, email: string): StoredCompany {
     ciiu: "4923",
     logo_url: null,
     correo_corporativo: "contacto@empresademo.test",
+    correo_facturacion: "facturacion@empresademo.test",
     telefono: "6010000000",
     pais: "Colombia",
     departamento: "Bogotá D. C.",
@@ -626,7 +646,7 @@ export const CompaniesMock = {
       company_charge: null,
       cobros: [],
       historial_cobro: [],
-      tarifa: tariffFrom(store.params ?? DEFAULT_PARAMS),
+      tarifa: tariffFrom(companyParams(store, companyId)),
     };
     Object.assign(booking, liquidate(booking, booking.tarifa!));
     store.bookings.unshift(booking);
@@ -678,6 +698,61 @@ export const CompaniesMock = {
     const store = load();
     store.params = { ...(store.params ?? DEFAULT_PARAMS), [key]: value };
     save(store);
+  },
+
+  async getCompanyTariff(companyId: string): Promise<CompanyTariff> {
+    await latency();
+    const store = load();
+    findCompany(store, companyId);
+    const params = store.params ?? DEFAULT_PARAMS;
+    const own = store.companyTariffs?.[companyId];
+    return {
+      porcentaje_tplus: own?.porcentaje_tplus ?? params.porcentaje_tplus,
+      payu_comision: own?.payu_comision ?? params.payu_comision,
+      porcentaje_personalizado: own?.porcentaje_tplus != null,
+      payu_personalizado: own?.payu_comision != null,
+      porcentaje_defecto: params.porcentaje_tplus,
+      payu_defecto: params.payu_comision,
+      actualizado_en: own?.actualizado_en ?? null,
+      actualizado_por: own ? "Administrador T+Plus" : null,
+    };
+  },
+
+  async setCompanyTariff(
+    companyId: string,
+    porcentaje: number | null,
+    payu: number | null,
+    applyToUninvoiced: boolean
+  ): Promise<number> {
+    await latency();
+    if (porcentaje != null && (porcentaje < 0 || porcentaje > 100)) {
+      throw new Error("El porcentaje T+Plus debe estar entre 0 y 100");
+    }
+    if (payu != null && payu < 0) throw new Error("La comisión PayU no puede ser negativa");
+    const store = load();
+    findCompany(store, companyId);
+    const tariffs = { ...(store.companyTariffs ?? {}) };
+    if (porcentaje == null && payu == null) delete tariffs[companyId];
+    else tariffs[companyId] = { porcentaje_tplus: porcentaje, payu_comision: payu, actualizado_en: new Date().toISOString() };
+    store.companyTariffs = tariffs;
+    let count = 0;
+    if (applyToUninvoiced) {
+      const own = companyParams(store, companyId);
+      for (const b of store.bookings) {
+        if (b.company_id !== companyId || b.estado_facturacion === "facturado") continue;
+        b.tarifa = {
+          ...(b.tarifa ?? tariffFrom(own)),
+          porcentaje_tplus: own.porcentaje_tplus,
+          payu_comision: own.payu_comision,
+          actualizado_en: new Date().toISOString(),
+          actualizado_por: "Administrador T+Plus",
+        };
+        Object.assign(b, liquidate(b, b.tarifa));
+        count++;
+      }
+    }
+    save(store);
+    return count;
   },
 
   async cancelBooking(bookingId: string, reason: string, viewer: CompanyViewer): Promise<CompanyBooking> {

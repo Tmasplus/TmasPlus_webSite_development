@@ -137,7 +137,7 @@ function LeafletRouteMap({ mode, pickup, drop, suggestedPath, actualPath, vehicl
     const pos: L.LatLngTuple = [vehicle.lat, vehicle.lng];
     if (vehicleRef.current) vehicleRef.current.setLatLng(pos);
     else
-      vehicleRef.current = L.circleMarker(pos, { radius: 9, color: "#fff", weight: 3, fillColor: "#f59e0b", fillOpacity: 1 })
+      vehicleRef.current = L.circleMarker(pos, { radius: 9, color: "#fff", weight: 3, fillColor: ROUTE_COLORS.vehicle, fillOpacity: 1 })
         .bindTooltip("Vehículo (en vivo)")
         .addTo(map);
   }, [vehicle]);

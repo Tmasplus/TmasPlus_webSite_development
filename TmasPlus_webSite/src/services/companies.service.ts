@@ -78,6 +78,8 @@ export interface Company {
   ciiu: string | null;
   logo_url: string | null;
   correo_corporativo: string;
+  /** Correo al que se envían las facturas; opcional. */
+  correo_facturacion: string | null;
   telefono: string;
   pais: string;
   departamento: string;
@@ -324,6 +326,19 @@ export interface CompanyTripTariff {
   actualizado_por: string | null;
 }
 
+/** Tarifa con que se liquidan los viajes nuevos de una empresa (solo admin). */
+export interface CompanyTariff {
+  porcentaje_tplus: number;
+  payu_comision: number;
+  /** false = la empresa usa el valor por defecto. */
+  porcentaje_personalizado: boolean;
+  payu_personalizado: boolean;
+  porcentaje_defecto: number;
+  payu_defecto: number;
+  actualizado_en: string | null;
+  actualizado_por: string | null;
+}
+
 export type ChargeParamKey =
   | "porcentaje_tplus"
   | "payu_comision"
@@ -439,6 +454,18 @@ export const CompaniesService = {
   /** Solo administrador: valores por defecto del cobro a empresas. */
   listChargeParams: (): Promise<ChargeParam[]> => impl().listChargeParams(),
   setChargeParam: (key: ChargeParamKey, value: number): Promise<void> => impl().setChargeParam(key, value),
+  /** Solo administrador: tarifa propia de la empresa (o la de por defecto si no tiene). */
+  getCompanyTariff: (companyId: string): Promise<CompanyTariff> => impl().getCompanyTariff(companyId),
+  /**
+   * Solo administrador: null en un valor = usa el de por defecto. Con applyToUninvoiced también reliquida los viajes
+   * de la empresa que aún no están facturados. Devuelve cuántos viajes se reliquidaron.
+   */
+  setCompanyTariff: (
+    companyId: string,
+    porcentaje: number | null,
+    payu: number | null,
+    applyToUninvoiced: boolean
+  ): Promise<number> => impl().setCompanyTariff(companyId, porcentaje, payu, applyToUninvoiced),
   createBooking: (
     companyId: string,
     input: CreateBookingInput,

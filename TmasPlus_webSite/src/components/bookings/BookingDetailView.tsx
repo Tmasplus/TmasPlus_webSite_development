@@ -336,7 +336,7 @@ export function BookingDetailBody({
                 <h3 className="text-base font-bold text-[#082f49]">{tab === "chat" ? "Chat del servicio" : "Recorrido"}</h3>
                 <p className="text-xs text-slate-500">
                   {tab === "chat"
-                    ? "Conversación entre cliente y conductor, con fecha y hora de cada mensaje"
+                    ? "Conversación entre cliente y conductor, con fecha y hora de cada mensaje. Puedes escribir como Admin T+Plus"
                     : tab === "suggested"
                     ? "Ruta calculada entre origen y destino"
                     : "Trayecto GPS del conductor entre inicio y fin del viaje"}
@@ -371,6 +371,7 @@ export function BookingDetailBody({
               live={ACTIVE_STATUSES.includes(status)}
               customerName={data?.customer?.name ?? booking.customer_name}
               driverName={data?.driver?.name ?? booking.driver_name}
+              canSend={!hideChat}
             />
           ) : (
           <>

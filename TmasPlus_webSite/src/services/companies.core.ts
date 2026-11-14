@@ -21,6 +21,7 @@ import {
   type CompanyInput,
   type CompanyLink,
   type CompanyOption,
+  type CompanyTariff,
   type CompanyTripTariff,
   type CompanyViewer,
   type CorporateTripDetail,
@@ -136,6 +137,7 @@ function toCompany(row: Row, docs: Row[]): Company {
     ciiu: row.ciiu,
     logo_url: row.logo_url,
     correo_corporativo: row.correo_corporativo ?? "",
+    correo_facturacion: row.correo_facturacion ?? null,
     telefono: row.telefono ?? "",
     pais: row.pais ?? "Colombia",
     departamento: row.departamento ?? "",
@@ -628,6 +630,38 @@ export const CompaniesCore = {
   async setChargeParam(key: ChargeParamKey, value: number): Promise<void> {
     const { error } = await db.rpc("web_admin_set_parametro_cobro_empresa", { p_clave: key, p_valor: value });
     if (error) fail(error, "No se pudo guardar el valor por defecto");
+  },
+
+  async getCompanyTariff(companyId: string): Promise<CompanyTariff> {
+    const { data, error } = await db.from("web_empresa_tarifas").select("*").eq("id_empresa", companyId).maybeSingle();
+    if (error) fail(error, "No se pudo cargar la tarifa de la empresa");
+    if (!data) throw new Error("Empresa no encontrada");
+    return {
+      porcentaje_tplus: Number(data.porcentaje_tplus),
+      payu_comision: Number(data.payu_comision),
+      porcentaje_personalizado: !!data.porcentaje_personalizado,
+      payu_personalizado: !!data.payu_personalizado,
+      porcentaje_defecto: Number(data.porcentaje_defecto),
+      payu_defecto: Number(data.payu_defecto),
+      actualizado_en: data.actualizado_en ?? null,
+      actualizado_por: data.actualizado_por_nombre ?? null,
+    };
+  },
+
+  async setCompanyTariff(
+    companyId: string,
+    porcentaje: number | null,
+    payu: number | null,
+    applyToUninvoiced: boolean
+  ): Promise<number> {
+    const { data, error } = await db.rpc("web_admin_set_tarifa_empresa", {
+      p_empresa: companyId,
+      p_porcentaje: porcentaje,
+      p_payu: payu,
+      p_aplicar_sin_facturar: applyToUninvoiced,
+    });
+    if (error) fail(error, "No se pudo guardar la tarifa de la empresa");
+    return Number(data) || 0;
   },
 
   async createBooking(companyId: string, input: CreateBookingInput, requestedBy: CompanyViewer): Promise<CompanyBooking> {

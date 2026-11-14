@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button';
 //import { formatDate } from '@/utils/formatDate';
 import { supabase, supabaseSecondary } from '@/config/supabase';
 import { toast } from '@/utils/toast';
-import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND } from '@/utils/referralCode';
+import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND, referralOwnerTypeLabel } from '@/utils/referralCode';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
 import { UsersSecondaryService } from '@/services/usersSecondary.service';
@@ -200,6 +200,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [referredList, setReferredList] = useState<ReferredItem[] | null>(null);
     // Nombre del dueño del código con el que este usuario se registró.
     const [referredBy, setReferredBy] = useState<string | null>(null);
+    const [referredByType, setReferredByType] = useState('');
     // Foto elegida con "Preseleccionar"; se sube al pulsar "Guardar Cambios".
     const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
     const [secondaryDocs, setSecondaryDocs] = useState<Record<string, string | null>>({});
@@ -267,17 +268,19 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
 
         // Quién lo refirió: dueño del código que escribió al registrarse.
         setReferredBy(null);
+        setReferredByType('');
         const usedCode = String((driver as any).referral_id ?? '').trim();
         if (usedCode) {
             dbClient.from('web_referral_codes')
                 .select('driver')
                 .eq('referral_code', formatReferralCode(usedCode))
                 .limit(1)
-                .then(({ data, error }: { data: { driver: { first_name?: string; last_name?: string } | null }[] | null; error: unknown }) => {
+                .then(({ data, error }: { data: { driver: { first_name?: string; last_name?: string; user_type?: string | null } | null }[] | null; error: unknown }) => {
                     if (cancelled || error) return;
                     const owner = data?.[0]?.driver;
                     const name = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '';
                     setReferredBy(name || REFERRAL_OWNER_NOT_FOUND);
+                    setReferredByType(name ? referralOwnerTypeLabel(owner?.user_type) : '');
                 });
         }
         return () => { cancelled = true; };
@@ -496,7 +499,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                             </div>
                             {referredBy && (
                                 <p className={`mt-3 p-2 rounded border text-xs ${referredBy === REFERRAL_OWNER_NOT_FOUND ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
-                                    <span className="font-bold">Se registró con el código de:</span> {referredBy}
+                                    <span className="font-bold">Se registró con el código de:</span> {referredBy}{referredByType && <span className="ml-1 font-semibold">({referredByType})</span>}
                                     {d.referral_id ? ` (${d.referral_id})` : ''}
                                 </p>
                             )}

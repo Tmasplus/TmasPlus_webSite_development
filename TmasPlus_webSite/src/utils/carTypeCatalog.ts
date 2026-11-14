@@ -62,6 +62,7 @@ export function categoryForValue(
         category.id,
         category.name,
         serviceTypeForCategory(category),
+        LEGACY_CODE_BY_ID[category.id],
         ...(LEGACY_ALIASES_BY_ID[category.id] || []),
       ];
       return aliases.some((alias) => normalize(alias) === normalized);

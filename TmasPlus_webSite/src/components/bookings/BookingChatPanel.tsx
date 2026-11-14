@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, MessagesSquare, RefreshCw } from "lucide-react";
-import { fetchChatMessages, type ChatMessage } from "@/services/bookingDetail.service";
+import { AlertTriangle, MessagesSquare, RefreshCw, Send } from "lucide-react";
+import {
+  ADMIN_CHAT_NAME,
+  fetchChatMessages,
+  sendAdminChatMessage,
+  type ChatMessage,
+} from "@/services/bookingDetail.service";
+import { toast } from "@/utils/toast";
 
 const CHAT_REFRESH_MS = 5000;
+const MAX_LENGTH = 1000;
 
 const ROLE_LABEL: Record<ChatMessage["senderRole"], string> = {
   customer: "Cliente",
@@ -25,17 +32,22 @@ export function BookingChatPanel({
   live,
   customerName,
   driverName,
+  canSend = false,
 }: {
   bookingId: string;
   /** Viaje en curso: refresca el chat periódicamente. */
   live: boolean;
   customerName?: string | null;
   driverName?: string | null;
+  /** Solo administrador: puede escribir como «Admin T+Plus». */
+  canSend?: boolean;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastCountRef = useRef(0);
 
@@ -76,13 +88,30 @@ export function BookingChatPanel({
     setRefreshing(false);
   };
 
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      await sendAdminChatMessage(bookingId, text);
+      setDraft("");
+      await load();
+    } catch (e: unknown) {
+      toast.error(`No se pudo enviar el mensaje: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const nameFor = (m: ChatMessage) =>
-    m.senderName || (m.senderRole === "customer" ? customerName : m.senderRole === "driver" ? driverName : null) || ROLE_LABEL[m.senderRole];
+    m.senderName ||
+    (m.senderRole === "customer" ? customerName : m.senderRole === "driver" ? driverName : ADMIN_CHAT_NAME) ||
+    ROLE_LABEL[m.senderRole];
 
   let lastDay = "";
 
   return (
-    <div className="flex h-[26rem] flex-col">
+    <div className={`flex flex-col ${canSend ? "h-[30rem]" : "h-[26rem]"}`}>
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-5 py-2.5 text-xs text-slate-500">
         <span className="flex items-center gap-2">
           {live && (
@@ -99,6 +128,9 @@ export function BookingChatPanel({
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-blue-600" /> Conductor
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-cyan-500" /> {ADMIN_CHAT_NAME}
           </span>
           <button
             type="button"
@@ -132,6 +164,7 @@ export function BookingChatPanel({
             const showDay = day !== lastDay;
             lastDay = day;
             const isDriver = m.senderRole === "driver";
+            const isAdmin = m.senderRole === "admin";
             return (
               <div key={m.id}>
                 {showDay && (
@@ -141,19 +174,33 @@ export function BookingChatPanel({
                     <span className="h-px flex-1 bg-slate-100" />
                   </div>
                 )}
-                <div className={`flex ${isDriver ? "justify-end" : "justify-start"}`}>
+                <div className={`flex ${isAdmin ? "justify-center" : isDriver ? "justify-end" : "justify-start"}`}>
                   <div className="max-w-[75%]">
-                    <p className={`mb-0.5 text-[11px] font-semibold ${isDriver ? "text-right text-blue-700" : "text-slate-500"}`}>
+                    <p
+                      className={`mb-0.5 text-[11px] font-semibold ${
+                        isAdmin ? "text-center text-cyan-700" : isDriver ? "text-right text-blue-700" : "text-slate-500"
+                      }`}
+                    >
                       {nameFor(m)} · {ROLE_LABEL[m.senderRole]}
                     </p>
                     <div
                       className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm [overflow-wrap:anywhere] ${
-                        isDriver ? "rounded-tr-sm bg-blue-600 text-white" : "rounded-tl-sm bg-slate-100 text-slate-800"
+                        isAdmin
+                          ? "border border-cyan-200 bg-cyan-50 text-cyan-900"
+                          : isDriver
+                          ? "rounded-tr-sm bg-blue-600 text-white"
+                          : "rounded-tl-sm bg-slate-100 text-slate-800"
                       }`}
                     >
                       {m.message}
                     </div>
-                    <p className={`mt-0.5 text-[10px] tabular-nums text-slate-400 ${isDriver ? "text-right" : ""}`}>{timeLabel(m.createdAt)}</p>
+                    <p
+                      className={`mt-0.5 text-[10px] tabular-nums text-slate-400 ${
+                        isAdmin ? "text-center" : isDriver ? "text-right" : ""
+                      }`}
+                    >
+                      {timeLabel(m.createdAt)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -161,6 +208,40 @@ export function BookingChatPanel({
           })
         )}
       </div>
+
+      {canSend && (
+        <form
+          className="flex items-end gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.slice(0, MAX_LENGTH))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={2}
+            placeholder={`Escribe como ${ADMIN_CHAT_NAME}… (Enter envía, Shift+Enter salto de línea)`}
+            className="min-h-[2.75rem] flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none"
+            disabled={sending}
+            aria-label="Mensaje del administrador"
+          />
+          <button
+            type="submit"
+            disabled={sending || !draft.trim()}
+            className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-cyan-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-cyan-700 disabled:opacity-50"
+          >
+            <Send size={15} />
+            {sending ? "Enviando…" : "Enviar"}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

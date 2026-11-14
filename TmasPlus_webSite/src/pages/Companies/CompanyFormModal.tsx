@@ -38,6 +38,7 @@ const emptyForm: FormState = {
   tipo_empresa_otra: "",
   ciiu: "",
   correo_corporativo: "",
+  correo_facturacion: "",
   telefono: "",
   pais: "Colombia",
   departamento: "",
@@ -73,6 +74,7 @@ function formFromCompany(c: Company): FormState {
     tipo_empresa_otra: c.tipo_empresa_otra ?? "",
     ciiu: c.ciiu ?? "",
     correo_corporativo: c.correo_corporativo,
+    correo_facturacion: c.correo_facturacion ?? "",
     telefono: c.telefono,
     pais: c.pais,
     departamento: c.departamento,
@@ -133,8 +135,9 @@ function validate(f: FormState, isEdit: boolean, existingDocs: CompanyDocument[]
     e.dv = `No corresponde al NIT (debería ser ${expected})`;
   }
   if (f.tipo_empresa === "OTRA" && !f.tipo_empresa_otra?.trim()) e.tipo_empresa_otra = "Indica el tipo de empresa";
-  for (const k of ["correo_corporativo", "rep_email", "acceso_email"] as const) {
-    if (f[k] && !isValidEmail(f[k])) e[k] = "Correo no válido";
+  for (const k of ["correo_corporativo", "correo_facturacion", "rep_email", "acceso_email"] as const) {
+    const v = f[k]?.trim();
+    if (v && !isValidEmail(v)) e[k] = "Correo no válido";
   }
   for (const k of ["telefono", "rep_telefono"] as const) {
     const v = f[k] ?? "";
@@ -348,6 +351,9 @@ export const CompanyFormModal: React.FC<Props> = ({ open, onClose, onSaved, comp
           <FloatingInput id="correo_corporativo" label="Correo corporativo" type="email" required
             value={form.correo_corporativo} onChange={(e) => update("correo_corporativo", e.target.value)}
             error={err("correo_corporativo")} />
+          <FloatingInput id="correo_facturacion" label="Correo de facturación" type="email"
+            value={form.correo_facturacion ?? ""} onChange={(e) => update("correo_facturacion", e.target.value)}
+            error={err("correo_facturacion")} />
           <FloatingInput id="telefono" label="Teléfono empresarial" required inputMode="tel" value={form.telefono}
             onChange={(e) => update("telefono", e.target.value)} error={err("telefono")} />
           <FloatingSelect id="pais" label="País" required value={form.pais}

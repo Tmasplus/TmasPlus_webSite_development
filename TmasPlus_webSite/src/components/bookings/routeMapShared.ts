@@ -18,4 +18,5 @@ export const ROUTE_COLORS = {
   pickup: "#0284c7",
   drop: "#e11d48",
   end: "#0f172a",
+  vehicle: "#00f4f5",
 };

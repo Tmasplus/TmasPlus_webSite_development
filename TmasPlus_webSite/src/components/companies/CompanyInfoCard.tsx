@@ -69,6 +69,7 @@ export const CompanyInfoCard: React.FC<{ company: Company }> = ({ company: c }) 
       <Card title="Contacto y ubicación">
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Correo corporativo">{c.correo_corporativo}</Field>
+          <Field label="Correo de facturación">{c.correo_facturacion}</Field>
           <Field label="Teléfono empresarial">{c.telefono}</Field>
           <Field label="País">{c.pais}</Field>
           <Field label="Departamento y ciudad">{[c.departamento, c.ciudad].filter(Boolean).join(" · ")}</Field>

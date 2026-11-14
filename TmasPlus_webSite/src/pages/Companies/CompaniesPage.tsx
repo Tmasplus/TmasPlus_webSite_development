@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Download, Eye, Pencil, Plus, RefreshCw } from "lucide-react";
+import { Download, Eye, Pencil, Percent, Plus, RefreshCw } from "lucide-react";
 import { Page } from "@/components/layout/Page";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -11,6 +11,7 @@ import { ActiveBadge, CompanyLogo, DemoNotice } from "@/components/companies/Com
 import { CompanyBookingsPanel } from "@/components/companies/CompanyBookingsPanel";
 import { CorporateBillingSummary } from "@/components/companies/CorporateBillingSummary";
 import { ChargeDefaultsCard } from "@/components/companies/ChargeDefaultsCard";
+import { CompanyTariffModal } from "@/components/companies/CompanyTariffModal";
 import { BookingHistoryView } from "@/pages/BookingHistory/BookingHistoryPage";
 import { errorMessage, formatDate } from "@/components/companies/format";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -50,6 +51,8 @@ export const CompaniesPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Company | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [tariffCompany, setTariffCompany] = useState<Company | null>(null);
+  const closeTariff = useCallback(() => setTariffCompany(null), []);
   const dq = useDebounced(query, 250);
 
   const load = useCallback(async () => {
@@ -129,6 +132,7 @@ export const CompaniesPage: React.FC = () => {
       { header: "Tipo", value: (c) => companyTypeLabel(c) },
       { header: "CIIU", value: (c) => c.ciiu },
       { header: "Correo corporativo", value: (c) => c.correo_corporativo },
+      { header: "Correo de facturación", value: (c) => c.correo_facturacion },
       { header: "Teléfono", value: (c) => c.telefono },
       { header: "Departamento", value: (c) => c.departamento },
       { header: "Ciudad", value: (c) => c.ciudad },
@@ -306,6 +310,15 @@ export const CompaniesPage: React.FC = () => {
                               <Pencil size={13} />
                               Editar
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setTariffCompany(c)}
+                              title="% T+Plus y comisión PayU de esta empresa"
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 shadow-sm transition-colors hover:bg-sky-100"
+                            >
+                              <Percent size={13} />
+                              Tarifa
+                            </button>
                             <Button
                               variant="secondary"
                               onClick={() => toggleActive(c)}
@@ -336,6 +349,7 @@ export const CompaniesPage: React.FC = () => {
         company={editing}
         onSaved={() => load()}
       />
+      <CompanyTariffModal company={tariffCompany} onClose={closeTariff} />
     </Page>
   );
 };
