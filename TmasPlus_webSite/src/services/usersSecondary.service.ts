@@ -77,6 +77,35 @@ export class UsersSecondaryService {
     return ((data || []) as SecondaryUser[]).filter((u) => !isDeletedAccount(u));
   }
 
+  /** Estado de "Gestión" de cada conductor (id → código). Pagina de a 1000 filas. */
+  static async managementByDriver(): Promise<Record<string, string>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const map: Record<string, string> = {};
+    const pageSize = 1000;
+    for (let from = 0; ; ) {
+      const { data, error } = await sb
+        .from('web_driver_management')
+        .select('id, management_status')
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error && (error as { code?: string }).code === 'PGRST103') break;
+      if (error) throw new Error(error.message || 'Error al obtener la gestión de conductores');
+      const rows = (data || []) as Array<{ id: string; management_status: string | null }>;
+      if (rows.length === 0) break;
+      for (const row of rows) if (row.management_status) map[row.id] = row.management_status;
+      from += rows.length;
+    }
+    return map;
+  }
+
+  static async setManagement(id: string, status: string): Promise<void> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const { error } = await sb.rpc('web_set_driver_management', { p_id: id, p_status: status });
+    if (error) throw new Error(error.message || 'No se pudo guardar la gestión');
+  }
+
   static async create(input: CreateUserInput): Promise<SecondaryUser> {
     if (!sb) throw new Error('Cliente secundario no configurado');
     await syncSession();

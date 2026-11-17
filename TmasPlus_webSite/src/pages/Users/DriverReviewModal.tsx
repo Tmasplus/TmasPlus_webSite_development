@@ -13,6 +13,7 @@ import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { useCarBrands } from '@/hooks/useCarBrands';
 import { uploadProfilePhoto } from '@/services/profilePhoto.service';
 import { ProfilePhotoEditor } from './ProfilePhotoEditor';
+import { DRIVER_MANAGEMENT_OPTIONS, driverManagementOption } from '@/utils/driverManagement';
 import { activeCategoryOptions, categoryForValue, categoryNameForValue, legacyCategoryLabel } from '@/utils/carTypeCatalog';
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
@@ -28,6 +29,9 @@ interface DriverReviewModalProps {
     onApprove: (id: string) => Promise<void>;
     onReject: (id: string) => Promise<void>;
     onRefresh: () => void;
+    /** Gestión (seguimiento manual) actual; si no se pasa junto a onChangeManagement, no se muestra. */
+    management?: string;
+    onChangeManagement?: (id: string, value: string) => Promise<void> | void;
 }
 
 // Enlace compacto que resuelve/firma la URL (primaria o secundaria, según el
@@ -182,7 +186,7 @@ interface ReferredItem {
 }
 
 export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
-    open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh
+    open, driver, source = 'primary', onClose, onApprove, onReject, onRefresh, management, onChangeManagement
 }) => {
     const { categories: carTypes } = useCarTypeCatalog();
     const categoryOptions = activeCategoryOptions(carTypes);
@@ -522,6 +526,22 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                     <span className="font-semibold text-slate-500 block">Teléfono:</span>
                                     {isEditing ? <input className="border p-1 rounded w-full mt-1" value={editForm.mobile || ''} onChange={e => setEditForm({ ...editForm, mobile: e.target.value })} /> : <p>{d.mobile}</p>}
                                 </div>
+
+                                {onChangeManagement && (
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Gestión:</span>
+                                        <select
+                                            className={`border p-1 rounded w-full mt-1 text-sm font-medium ${driverManagementOption(management).style}`}
+                                            value={management || 'sin_gestion'}
+                                            onChange={e => void onChangeManagement(d.id, e.target.value)}
+                                        >
+                                            {DRIVER_MANAGEMENT_OPTIONS.map(o => (
+                                                <option key={o.value} value={o.value}>{o.label}</option>
+                                            ))}
+                                        </select>
+                                        <p className="text-[11px] text-slate-400 mt-1">Se guarda al elegirla.</p>
+                                    </div>
+                                )}
 
                                 <div>
                                     <span className="font-semibold text-slate-500 block">Ciudad:</span>

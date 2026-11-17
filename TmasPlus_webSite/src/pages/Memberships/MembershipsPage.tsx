@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { formatDate } from "@/utils/formatDate";
 import { classNames } from "@/utils/classNames";
 import { toast } from "@/utils/toast";
+import { exportToCsv } from "@/utils/exportCsv";
 import {
   MembershipsService,
   type MembershipWithUser,
@@ -89,11 +90,43 @@ export default function MembershipsPage() {
     }
   };
 
+  // Mismas columnas que el listado (sin Acciones); el correo va en columna aparte.
+  const handleExportCsv = () => {
+    if (memberships.length === 0) {
+      toast.error("No hay membresías para exportar.");
+      return;
+    }
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    exportToCsv(`membresias_${dateStamp}`, memberships, [
+      { header: "#", value: (m) => memberships.indexOf(m) },
+      {
+        header: "Conductor",
+        value: (m) =>
+          m.user
+            ? [m.user.first_name, m.user.last_name].filter(Boolean).join(" ")
+            : String(m.conductor ?? ""),
+      },
+      { header: "Correo", value: (m) => m.user?.email || "" },
+      { header: "Placa", value: (m) => m.car?.plate || "" },
+      { header: "Estado", value: (m) => String(m.status) },
+      { header: "Costo", value: (m) => m.costo },
+      { header: "Inicio", value: (m) => formatDate(m.fecha_inicio) },
+      { header: "Fin", value: (m) => formatDate(m.fecha_terminada) },
+      { header: "Periodo", value: (m) => `${m.periodo} días` },
+      { header: "Creada", value: (m) => formatDate(m.created_at) },
+    ]);
+  };
+
   return (
     <Page
       title="Membresías"
       actions={
-        <Button onClick={() => setModalOpen(true)}>+ Nueva Membresía</Button>
+        <>
+          <Button variant="secondary" onClick={handleExportCsv}>
+            Exportar CSV
+          </Button>
+          <Button onClick={() => setModalOpen(true)}>+ Nueva Membresía</Button>
+        </>
       }
     >
       <motion.div

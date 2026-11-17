@@ -15,6 +15,10 @@ import { chunk } from "@/utils/chunk";
 import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND, referralOwnerTypeLabel } from "@/utils/referralCode";
 import { useCarTypeCatalog } from "@/hooks/useCarTypeCatalog";
 import { categoryNameForValue } from "@/utils/carTypeCatalog";
+import {
+  DRIVER_MANAGEMENT_OPTIONS,
+  driverManagementOption,
+} from "@/utils/driverManagement";
 import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
   UsersSecondaryService,
@@ -126,12 +130,16 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   // Cédula tomada de la BD primaria, solo como respaldo cuando la secundaria
   // no la tiene; keyed por user.id.
   const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
+  // Gestión manual (seguimiento comercial) por users.id; ausente = "Sin gestión".
+  const [managementMap, setManagementMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("todos");
   const [referralFilter, setReferralFilter] = useState<ReferralFilter>("todos");
   const [appAccessFilter, setAppAccessFilter] = useState<AppAccessFilter>("todos");
+  /** "todos" o el código de un estado de Gestión. */
+  const [managementFilter, setManagementFilter] = useState<string>("todos");
   const [sortBy, setSortBy] = useState<SortFilter>("fecha_desc");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SecondaryUser | null>(null);
@@ -171,10 +179,17 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
     setLoading(true);
     setError(null);
     try {
-      const [data, memberships] = await Promise.all([
+      const [data, memberships, management] = await Promise.all([
         UsersSecondaryService.list(),
         MembershipsService.statusByConductor().catch(() => ({})),
+        isAppDriversMode
+          ? UsersSecondaryService.managementByDriver().catch((e) => {
+              console.warn("No se pudo cargar la gestión de conductores:", e);
+              return {} as Record<string, string>;
+            })
+          : Promise.resolve({} as Record<string, string>),
       ]);
+      setManagementMap(management);
       const visibleRows = data.filter(isAppDriversMode ? isDriverUser : isClientUser);
       setUsers(visibleRows);
       setMembershipMap(memberships);
@@ -362,6 +377,24 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const membershipFor = (u: SecondaryUser): MembershipStatus | string | undefined =>
     (u.auth_id && membershipMap[u.auth_id]) || membershipMap[u.id];
 
+  const managementFor = (u: SecondaryUser): string => managementMap[u.id] || "sin_gestion";
+
+  const handleChangeManagement = async (u: SecondaryUser, value: string) => {
+    const previous = managementMap[u.id];
+    setManagementMap((prev) => ({ ...prev, [u.id]: value }));
+    try {
+      await UsersSecondaryService.setManagement(u.id, value);
+    } catch (e: any) {
+      setManagementMap((prev) => {
+        const next = { ...prev };
+        if (previous) next[u.id] = previous;
+        else delete next[u.id];
+        return next;
+      });
+      toast.error(e?.message || "No se pudo guardar la gestión");
+    }
+  };
+
   useEffect(() => {
     load();
   }, [mode]);
@@ -394,7 +427,11 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
           : companyFilter === "sin_empresa"
           ? userCompanies.length === 0
           : userCompanies.some((l) => l.companyId === companyFilter);
-      return matchesQ && matchesStatus && matchesReferral && matchesAccess && matchesCompany;
+      const matchesManagement =
+        !isAppDriversMode || managementFilter === "todos"
+          ? true
+          : (managementMap[u.id] || "sin_gestion") === managementFilter;
+      return matchesQ && matchesStatus && matchesReferral && matchesAccess && matchesCompany && matchesManagement;
     });
 
     return result.sort((a, b) => {
@@ -403,7 +440,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       const dateB = new Date(b.created_at || 0).getTime();
       return sortBy === "fecha_desc" ? dateB - dateA : dateA - dateB;
     });
-  }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap, companyLinks, companyFilter, showCompanies]);
+  }, [users, debouncedQuery, status, referralFilter, appAccessFilter, sortBy, cedulaFallbackMap, companyLinks, companyFilter, showCompanies, managementFilter, managementMap, isAppDriversMode]);
 
   // Un conductor está aprobado solo si tiene `approved` (perfil_conductor.aprobado) Y no está bloqueado.
   // `approved` es lo que exige core para asignar y aceptar viajes; `blocked` solo cierra el acceso.
@@ -640,6 +677,9 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         : []),
       { header: "Membresía", value: (u) => (membershipFor(u) ? String(membershipFor(u)) : "Sin membresía") },
       { header: "Estado", value: (u) => (isApprovedUser(u) ? "Aprobado" : "No aprobado") },
+      ...(isAppDriversMode
+        ? [{ header: "Gestión", value: (u: SecondaryUser) => driverManagementOption(managementFor(u)).label }]
+        : []),
       { header: "Alta", value: (u) => formatDate(u.created_at) },
     ]);
   };
@@ -668,7 +708,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       <div
         className={classNames(
           "grid grid-cols-1 gap-3 mt-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200",
-          showCompanies ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-5"
+          showCompanies || isAppDriversMode ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-5"
         )}
       >
         <div>
@@ -712,6 +752,21 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
             <option value="sin_acceso">Sin acceso</option>
           </select>
         </div>
+        {isAppDriversMode && (
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Gestión</label>
+            <select
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
+              value={managementFilter}
+              onChange={(e) => setManagementFilter(e.target.value)}
+            >
+              <option value="todos">Todas</option>
+              {DRIVER_MANAGEMENT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {showCompanies && (
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Empresa</label>
@@ -775,6 +830,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                     {showCompanies && <th className="px-3 py-2 font-medium">Empresas</th>}
                     <th className="px-3 py-2 font-medium">Membresía</th>
                     <th className="px-3 py-2 font-medium">Estado</th>
+                    {isAppDriversMode && <th className="px-3 py-2 font-medium">Gestión</th>}
                     <th className="px-3 py-2 font-medium">Alta</th>
                     <th className="px-3 py-2 font-medium text-center">
                       Acciones
@@ -899,6 +955,23 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
                             {blocked ? "No aprobado" : "Aprobado"}
                           </span>
                         </td>
+                        {isAppDriversMode && (
+                          <td className="px-3 py-3 min-w-[200px]">
+                            <select
+                              aria-label={`Gestión de ${fullName(u)}`}
+                              value={managementFor(u)}
+                              onChange={(e) => void handleChangeManagement(u, e.target.value)}
+                              className={classNames(
+                                "w-full rounded-lg border px-2 py-1 text-xs font-medium",
+                                driverManagementOption(managementFor(u)).style
+                              )}
+                            >
+                              {DRIVER_MANAGEMENT_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                        )}
                         <td className="px-3 py-3">
                           {formatDate(u.created_at)}
                         </td>
@@ -980,6 +1053,15 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
         onApprove={handleApproveDriver}
         onReject={handleRejectDriver}
         onRefresh={load}
+        {...(isAppDriversMode && selectedDriverSource === "secondary" && selectedDriver
+          ? {
+              management: managementMap[selectedDriver.id] || "sin_gestion",
+              onChangeManagement: (id: string, value: string) => {
+                const u = users.find((x) => x.id === id);
+                return u ? handleChangeManagement(u, value) : undefined;
+              },
+            }
+          : {})}
       />
 
       {showCompanies && (
