@@ -9,6 +9,7 @@ import {
   Car,
   FileSignature,
   FileText,
+  Handshake,
   House,
   IdCard,
   MapPinned,
@@ -40,6 +41,7 @@ export const NAV_PAGES: NavPage[] = [
   { to: "/addbooking", label: "Añadir reserva", section: "Reservas", icon: CalendarPlus, portal: "admin", keywords: "nueva crear viaje" },
   // Oculta del menú: los viajes empresariales se gestionan en Empresas › Cobros y facturación. La ruta sigue activa.
   // { to: "/bookingCorp", label: "Reservas corporativas", section: "Reservas", icon: Building2, portal: "admin", keywords: "empresas" },
+  { to: "/bookingRecommended", label: "Reservas recomendadas", section: "Reservas", icon: Handshake, portal: "admin", keywords: "referidos compartidos conductor cliente cartera liquidacion soporte" },
   { to: "/bookingdetails", label: "Detalle de reserva", section: "Reservas", icon: FileText, portal: "admin", keywords: "referencia" },
   { to: "/users", label: "Usuarios App", section: "Usuarios", icon: Users, portal: "admin", keywords: "clientes pasajeros" },
   { to: "/app-drivers", label: "Conductores App", section: "Usuarios", icon: IdCard, portal: "admin", keywords: "choferes" },

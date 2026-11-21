@@ -32,6 +32,7 @@ import MembershipsPage from '@/pages/Memberships/MembershipsPage';
 import CarBrandsPage from '@/pages/CarBrands/CarBrandsPage';
 import CompaniesPage from '@/pages/Companies/CompaniesPage';
 import CompanyDetailPage from '@/pages/Companies/CompanyDetailPage';
+import RecommendedBookingsPage from '@/pages/RecommendedBookings/RecommendedBookingsPage';
 
 // Portal de empresas
 import CompanyHomePage from '@/pages/CompanyPortal/CompanyHomePage';
@@ -77,6 +78,7 @@ export default function AppRoutes() {
         <Route path="/bookingHistory" element={<BookingHistoryPage />} />
         <Route path="/addbooking" element={<AddBookingPage />} />
         <Route path="/bookingCorp" element={<CorporateBookingsPage />} />
+        <Route path="/bookingRecommended" element={<RecommendedBookingsPage />} />
         <Route path="/bookingdetails" element={<BookingDetailsPage />} />
         <Route path="/billing" element={<CompanyBillingPage />} />
         <Route path="/users/*" element={<UsersPage />} />

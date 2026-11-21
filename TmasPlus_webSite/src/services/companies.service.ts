@@ -123,6 +123,8 @@ export interface Collaborator {
   city: string;
   cargo: string | null;
   area: string | null;
+  /** Código de centro de costos (mayúsculas, máx. 15). */
+  centro_costos: string | null;
   activo: boolean;
   creado_en: string;
   /** Foto de perfil del Usuario App (la misma que se ve en /users). */
@@ -156,6 +158,7 @@ export interface CompanyLink {
   active: boolean;
   cargo: string | null;
   area: string | null;
+  centro_costos: string | null;
 }
 
 export interface CompanyOption {
@@ -174,8 +177,16 @@ export interface CollaboratorInput {
   city: string;
   cargo?: string | null;
   area?: string | null;
+  /** Obligatorio. Solo A-Z / 0-9, máx 15; se guarda en mayúsculas. */
+  centro_costos: string;
   password: string;
 }
+
+export type CollaboratorCompanyDataInput = {
+  cargo?: string | null;
+  area?: string | null;
+  centro_costos: string;
+};
 
 export type CompanyBookingStatus =
   | "PENDING"
@@ -421,6 +432,11 @@ export const CompaniesService = {
     impl().createCollaborator(companyId, input),
   setCollaboratorActive: (companyId: string, collaboratorId: string, active: boolean): Promise<void> =>
     impl().setCollaboratorActive(companyId, collaboratorId, active),
+  updateCollaborator: (
+    companyId: string,
+    collaboratorId: string,
+    input: CollaboratorCompanyDataInput
+  ): Promise<void> => impl().updateCollaborator(companyId, collaboratorId, input),
   /** Busca Usuarios App existentes por cédula, correo o teléfono (coincidencia exacta). */
   findExistingAppUsers: (companyId: string, input: Partial<CollaboratorInput>): Promise<ExistingAppUser[]> =>
     impl().findExistingAppUsers(companyId, input),

@@ -13,7 +13,7 @@ import {
   type CustomerLite,
 } from "@/services/bookings.service";
 import { CORPORATE_PAYMENT_MODE } from "@/services/companies.service";
-import { isNearAirport } from "@/utils/airports";
+import { isNearAirport, snapElDoradoDestination } from "@/utils/airports";
 import {
   DELTA_AEROPUERTO,
   DELTA_PROGRAMADO,
@@ -152,7 +152,7 @@ export default function AddBookingPage({
   }, []);
 
   const handleDestinationChange = useCallback((loc: Location | null) => {
-    setDestLoc(loc);
+    setDestLoc(loc ? snapElDoradoDestination(loc) : null);
   }, []);
 
   const handleRouteInfo = useCallback((info: RouteInfo | null) => {

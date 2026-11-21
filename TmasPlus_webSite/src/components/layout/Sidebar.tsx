@@ -18,6 +18,8 @@ type Props = {
   profileImage?: string | null;
   defaultProfileImage: string;
   handleLogout: () => void;
+  /** Contadores por ruta (p. ej. casos que requieren atención); 0 no se muestra. */
+  badges?: Record<string, number>;
 };
 
 /** Ancho del menú contraído / expandido (px). El layout usa estos valores para el padding. */
@@ -32,12 +34,14 @@ function NavItem({
   label,
   expanded,
   onNavigate,
+  badge = 0,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   expanded: boolean;
   onNavigate?: () => void;
+  badge?: number;
 }) {
   const { pathname } = useLocation();
   const isActive = pathname === to || pathname.startsWith(`${to}/`);
@@ -55,7 +59,12 @@ function NavItem({
         )}
       >
         {isActive && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-sky-500" />}
-        <span className={classNames("shrink-0", isActive ? "text-sky-600" : "text-sky-500 group-hover:text-sky-600")}>{icon}</span>
+        <span className={classNames("relative shrink-0", isActive ? "text-sky-600" : "text-sky-500 group-hover:text-sky-600")}>
+          {icon}
+          {badge > 0 && !expanded && (
+            <span className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
+          )}
+        </span>
         <span
           className={classNames(
             "truncate whitespace-nowrap transition-all duration-200",
@@ -64,6 +73,14 @@ function NavItem({
         >
           {label}
         </span>
+        {badge > 0 && expanded && (
+          <span
+            className="ml-auto rounded-full bg-rose-500 px-1.5 text-[11px] font-bold leading-5 text-white"
+            title={`${badge} por revisar`}
+          >
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
       </Link>
     </li>
   );
@@ -112,6 +129,7 @@ export const Sidebar: React.FC<Props> = ({
   profileImage,
   defaultProfileImage,
   handleLogout,
+  badges,
 }) => {
   const [hovered, setHovered] = useState(false);
   const expanded = pinned || hovered || open;
@@ -213,7 +231,15 @@ export const Sidebar: React.FC<Props> = ({
                     {items.map((item) => {
                       const Icon = item.icon;
                       return (
-                        <NavItem key={item.to} to={item.to} icon={<Icon size={ICON} />} label={item.label} expanded={expanded} onNavigate={closeMobile} />
+                        <NavItem
+                          key={item.to}
+                          to={item.to}
+                          icon={<Icon size={ICON} />}
+                          label={item.label}
+                          expanded={expanded}
+                          onNavigate={closeMobile}
+                          badge={badges?.[item.to]}
+                        />
                       );
                     })}
                   </ul>

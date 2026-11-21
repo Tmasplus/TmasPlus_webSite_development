@@ -29,12 +29,16 @@ export const UserCompaniesModal: React.FC<Props> = ({ user, links, companies, on
   const [companyId, setCompanyId] = useState("");
   const [cargo, setCargo] = useState("");
   const [area, setArea] = useState("");
+  const [centroCostos, setCentroCostos] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+
+  const normCentro = (v: string) => v.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 15);
 
   useEffect(() => {
     setCompanyId("");
     setCargo("");
     setArea("");
+    setCentroCostos("");
     setBusy(null);
   }, [user?.id]);
 
@@ -50,17 +54,24 @@ export const UserCompaniesModal: React.FC<Props> = ({ user, links, companies, on
     if (!user || !companyId) return;
     setBusy("link");
     try {
+      const centro = normCentro(centroCostos);
+      if (!centro) {
+        toast.error("El centro de costos es obligatorio.");
+        return;
+      }
       await CompaniesService.linkExistingAppUser(companyId, user.id, {
         email: user.email ?? undefined,
         mobile: user.mobile ?? undefined,
         document_number: user.document_number ?? undefined,
         cargo,
         area,
+        centro_costos: centro,
       });
       toast.success(`${user.name} quedó vinculado a ${companies.find((c) => c.id === companyId)?.name ?? "la empresa"}.`);
       setCompanyId("");
       setCargo("");
       setArea("");
+      setCentroCostos("");
       onChanged();
     } catch (e) {
       toast.error(errorMessage(e, "No se pudo vincular a la empresa"));
@@ -105,7 +116,7 @@ export const UserCompaniesModal: React.FC<Props> = ({ user, links, companies, on
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-800">{l.companyName}</p>
                     <p className="text-xs text-slate-500">
-                      {[l.cargo, l.area].filter(Boolean).join(" · ") || "Sin cargo ni área"}
+                      {[l.cargo, l.area, l.centro_costos].filter(Boolean).join(" · ") || "Sin cargo ni área"}
                       {!l.companyActive && " · empresa inactiva"}
                     </p>
                   </div>
@@ -159,8 +170,19 @@ export const UserCompaniesModal: React.FC<Props> = ({ user, links, companies, on
                 <label className="block text-xs font-medium text-slate-500 mb-1">Área (opcional)</label>
                 <Input value={area} onChange={(e) => setArea(e.target.value)} />
               </div>
-              <div className="flex items-end">
-                <Button className="w-full !py-2" disabled={!companyId || !!busy} onClick={link}>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Centro de costos <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  value={centroCostos}
+                  onChange={(e) => setCentroCostos(normCentro(e.target.value))}
+                  placeholder="Ej. G2105"
+                  maxLength={15}
+                />
+              </div>
+              <div className="flex items-end md:col-span-3">
+                <Button className="w-full !py-2" disabled={!companyId || !centroCostos || !!busy} onClick={link}>
                   {busy === "link" ? "Vinculando..." : "Vincular"}
                 </Button>
               </div>

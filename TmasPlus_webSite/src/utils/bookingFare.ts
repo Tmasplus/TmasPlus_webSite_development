@@ -66,12 +66,50 @@ export type FareQuote = {
   source: "reserva" | "snapshot" | "precio_estimado" | null;
 };
 
+/** Viaje pedido por un conductor para un cliente: tarifa fija, sin rango. */
+export function isRecommendedBooking(booking: BookingRecord, reserva?: ReservaRow | null): boolean {
+  const mode = String(booking.payment_mode ?? reserva?.modo_pago ?? "").toLowerCase();
+  return mode === "recomendado" || mode === "recommended";
+}
+
+/** Viaje empresarial: la empresa ve el costo facturable, sin rango min–max. */
+export function isCorporateBooking(booking: BookingRecord, reserva?: ReservaRow | null): boolean {
+  const mode = String(booking.payment_mode ?? reserva?.modo_pago ?? "").toLowerCase().trim();
+  if (
+    mode === "empresarial" ||
+    mode === "corporate" ||
+    mode === "corp" ||
+    mode === "empresa" ||
+    mode === "company"
+  ) {
+    return true;
+  }
+  // Señales de viaje empresarial aunque el modo de pago venga vacío o legacy.
+  const anyBooking = booking as BookingRecord & {
+    company_id?: string | null;
+    empresa_id?: string | null;
+    booking_from?: string | null;
+  };
+  if (anyBooking.company_id || anyBooking.empresa_id) return true;
+  const from = String(anyBooking.booking_from || "").toLowerCase();
+  if (from.includes("empresa") || from.includes("company") || from.includes("corp")) return true;
+  const reservaAny = reserva as (ReservaRow & { empresa_id?: string | null; company_id?: string | null }) | null;
+  if (reservaAny?.empresa_id || reservaAny?.company_id) return true;
+  return false;
+}
+
 export function resolveQuote(
   booking: BookingRecord,
   reserva: ReservaRow | null,
   snapshots: ServiceSnapshot[]
 ): FareQuote {
   const cols = fareColumns(booking, reserva);
+
+  // Recomendados y empresariales: un solo valor (nunca rango ni máximo derivado).
+  if (isRecommendedBooking(booking, reserva) || isCorporateBooking(booking, reserva)) {
+    const fixed = firstPositive(cols.trip_cost, cols.driver_share, cols.price, cols.estimate);
+    return { min: fixed, max: fixed, minDerived: false, source: fixed ? "reserva" : null };
+  }
 
   if (!isCompletedStatus(booking.status)) {
     const min = firstPositive(cols.trip_cost, cols.driver_share, cols.price, cols.estimate);

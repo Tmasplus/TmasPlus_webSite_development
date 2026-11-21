@@ -34,6 +34,8 @@ import {
   maxFromMinConductor,
   isBookingCancelled,
   isCompletedStatus,
+  isCorporateBooking,
+  isRecommendedBooking,
   positiveNumber,
   resolveFinalFare,
   resolveQuote,
@@ -234,6 +236,7 @@ export function BookingDetailBody({
   className = "",
   hideChat = false,
   loadExtras,
+  forceCorporate = false,
 }: {
   booking: BookingRecord;
   className?: string;
@@ -241,6 +244,8 @@ export function BookingDetailBody({
   hideChat?: boolean;
   /** Origen alternativo de los datos del detalle (p. ej. la RPC del portal de empresas). */
   loadExtras?: LoadBookingExtras;
+  /** Portal empresa / admin: fuerza vista de tarifa = factura (sin rango). */
+  forceCorporate?: boolean;
 }) {
   const { categories: carTypes } = useCarTypeCatalog();
   const { data, loading } = useBookingDetailExtras(booking, loadExtras);
@@ -285,8 +290,19 @@ export function BookingDetailBody({
   const quotedKm = created?.distance ?? getNumberValue(booking.distance);
   const quotedMin = created?.duration ? created.duration / 60 : getNumberValue(booking.duration);
 
-  const quote = useMemo(() => resolveQuote(booking, reserva, snapshots), [booking, reserva, snapshots]);
+  const recommended = isRecommendedBooking(booking, reserva);
+  const corporate = forceCorporate || isCorporateBooking(booking, reserva);
+  const quote = useMemo(() => {
+    const q = resolveQuote(booking, reserva, snapshots);
+    // Empresariales: un solo valor (costo del viaje = lo de factura), nunca rango.
+    if (corporate || recommended) {
+      const v = q.min ?? q.max;
+      return { ...q, min: v, max: v };
+    }
+    return q;
+  }, [booking, reserva, snapshots, corporate, recommended]);
   const finalFare = resolveFinalFare(booking, reserva);
+  const singleFare = recommended || corporate;
 
   return (
     <main className={`${styles.body} ${className}`}>
@@ -300,17 +316,37 @@ export function BookingDetailBody({
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi
-            label="Cotización inicial"
+            label={corporate ? "Costo del viaje" : recommended ? "Tarifa del viaje" : "Cotización inicial"}
             value={quote.min || quote.max ? <QuoteRange quote={quote} /> : "—"}
-            hint={quote.min ? `Se cobraría el mínimo: ${formatMoney(quote.min)}` : undefined}
+            hint={
+              corporate
+                ? quote.min
+                  ? "Mismo valor que en factura (costo del viaje)"
+                  : undefined
+                : recommended
+                  ? quote.min
+                    ? "Precio fijo · sin recálculo al finalizar"
+                    : undefined
+                  : quote.min
+                    ? `Se cobraría el mínimo: ${formatMoney(quote.min)}`
+                    : undefined
+            }
           />
           <Kpi
             label="Valor cobrado"
             value={finalFare ? formatMoney(finalFare) : cancelled ? "Cancelada" : "Pendiente"}
             hint={
-              finalFare
-                ? `Mínimo del rango final ${formatRange(finalFare, maxFromMinConductor(finalFare))}`
-                : "Se calcula al finalizar el viaje"
+              corporate
+                ? finalFare
+                  ? "Alineado con la factura del servicio"
+                  : "Se confirma al finalizar el viaje"
+                : recommended
+                  ? finalFare
+                    ? "Mismo valor fijo acordado al pedir el viaje"
+                    : "Se confirma al finalizar el viaje"
+                  : finalFare
+                    ? `Mínimo del rango final ${formatRange(finalFare, maxFromMinConductor(finalFare))}`
+                    : "Se calcula al finalizar el viaje"
             }
             accent={!!finalFare}
           />
@@ -436,6 +472,8 @@ export function BookingDetailBody({
             cancelled={cancelled}
             booking={booking}
             reserva={reserva}
+            fixedFare={singleFare}
+            corporate={corporate}
           />
           <SectionCard title="Pago" icon={<CreditCard size={18} />}>
             <InfoRow label="Forma de pago" value={paymentLabel(booking.payment_mode ?? reserva?.modo_pago)} />
@@ -561,6 +599,8 @@ function FareSection({
   booking,
   reserva,
   className,
+  fixedFare = false,
+  corporate = false,
 }: {
   quote: FareQuote;
   finalFare: number | null;
@@ -569,10 +609,50 @@ function FareSection({
   booking: BookingRecord;
   reserva: ReservaRow | null;
   className?: string;
+  fixedFare?: boolean;
+  corporate?: boolean;
 }) {
-  const finalMax = finalFare ? maxFromMinConductor(finalFare) : null;
+  const finalMax = finalFare && !fixedFare ? maxFromMinConductor(finalFare) : null;
   const diff = finalFare && quote.min ? finalFare - quote.min : null;
   const diffPct = diff != null && quote.min ? Math.round((diff / quote.min) * 100) : null;
+
+  if (fixedFare) {
+    return (
+      <SectionCard title="Tarifa" icon={<CircleDollarSign size={18} />} className={className}>
+        <p className="-mt-1 mb-4 text-xs leading-relaxed text-slate-500">
+          {corporate
+            ? "Viaje empresarial: se muestra el mismo costo del viaje que verás en la factura (sin rango)."
+            : "Viaje recomendado: precio fijo acordado al pedir el servicio. No hay rango ni recálculo por km/tiempo."}
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-blue-700">
+              {corporate ? "Cotización · factura" : "Al solicitar"}
+            </p>
+            <div className="mt-3 space-y-2">
+              <FareLine label={corporate ? "Costo del viaje" : "Tarifa"} value={formatMoney(quote.min)} strong />
+            </div>
+          </div>
+          <div
+            className={`rounded-xl border p-4 ${
+              finalFare ? "border-emerald-100 bg-emerald-50/50" : "border-slate-200 bg-slate-50/70"
+            }`}
+          >
+            <p className={`text-xs font-bold uppercase tracking-wide ${finalFare ? "text-emerald-700" : "text-slate-500"}`}>
+              Al finalizar
+            </p>
+            <div className="mt-3 space-y-2">
+              <FareLine
+                label={corporate ? "Costo del viaje" : "Valor cobrado"}
+                value={finalFare ? formatMoney(finalFare) : "Pendiente"}
+                strong
+              />
+            </div>
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="Tarifa" icon={<CircleDollarSign size={18} />} className={className}>

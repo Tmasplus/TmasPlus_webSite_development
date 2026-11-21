@@ -275,8 +275,8 @@ function seedDemoCompany(store: Store, email: string): StoredCompany {
   const base = { id_empresa: company.id, document_type: "CC", city: "Bogotá", activo: true, creado_en: new Date().toISOString() };
   store.companies.unshift(company);
   store.collaborators.unshift(
-    { ...base, id: crypto.randomUUID(), first_name: "Andrés", last_name: "Pérez", email: "andres.perez@empresademo.test", mobile: "3001234567", document_number: "80123456", cargo: "Gerente comercial", area: "Comercial" },
-    { ...base, id: crypto.randomUUID(), first_name: "María", last_name: "Rodríguez", email: "maria.rodriguez@empresademo.test", mobile: "3109876543", document_number: "52987654", cargo: "Analista", area: "Operaciones" }
+    { ...base, id: crypto.randomUUID(), first_name: "Andrés", last_name: "Pérez", email: "andres.perez@empresademo.test", mobile: "3001234567", document_number: "80123456", cargo: "Gerente comercial", area: "Comercial", centro_costos: "G2105" },
+    { ...base, id: crypto.randomUUID(), first_name: "María", last_name: "Rodríguez", email: "maria.rodriguez@empresademo.test", mobile: "3109876543", document_number: "52987654", cargo: "Analista", area: "Operaciones", centro_costos: "2323" }
   );
   return company;
 }
@@ -446,6 +446,7 @@ export const CompaniesMock = {
       city: existing?.city ?? input.city,
       cargo: input.cargo?.trim() || null,
       area: input.area?.trim() || null,
+      centro_costos: String(input.centro_costos || "").trim().toUpperCase() || null,
       activo: true,
       creado_en: new Date().toISOString(),
     };
@@ -510,6 +511,7 @@ export const CompaniesMock = {
       id_empresa: companyId,
       cargo: input.cargo?.trim() || null,
       area: input.area?.trim() || null,
+      centro_costos: String(input.centro_costos || "").trim().toUpperCase() || null,
       activo: true,
       creado_en: new Date().toISOString(),
     };
@@ -523,6 +525,23 @@ export const CompaniesMock = {
     const store = load();
     store.collaborators = store.collaborators.map((c) =>
       c.id_empresa === companyId && c.id === collaboratorId ? { ...c, activo: active } : c
+    );
+    save(store);
+  },
+
+  async updateCollaborator(
+    companyId: string,
+    collaboratorId: string,
+    input: { cargo?: string | null; area?: string | null; centro_costos: string }
+  ): Promise<void> {
+    await latency();
+    const store = load();
+    const centro = String(input.centro_costos || "").trim().toUpperCase();
+    if (!centro) throw new Error("El centro de costos es obligatorio");
+    store.collaborators = store.collaborators.map((c) =>
+      c.id_empresa === companyId && c.id === collaboratorId
+        ? { ...c, cargo: input.cargo?.trim() || null, area: input.area?.trim() || null, centro_costos: centro }
+        : c
     );
     save(store);
   },

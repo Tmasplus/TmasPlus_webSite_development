@@ -19,6 +19,7 @@ export function BookingModal({
   extra,
   hideChat,
   loadExtras,
+  forceCorporate,
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,6 +31,8 @@ export function BookingModal({
   extra?: React.ReactNode;
   hideChat?: boolean;
   loadExtras?: LoadBookingExtras;
+  /** Fuerza cotización = factura sin rango (portal empresa). */
+  forceCorporate?: boolean;
 }) {
   if (!open || !booking) return null;
 
@@ -59,7 +62,12 @@ export function BookingModal({
 
         {extra ? (
           <div className="flex-1 overflow-y-auto">
-            <BookingDetailBody booking={booking} hideChat={hideChat} loadExtras={loadExtras} />
+            <BookingDetailBody
+              booking={booking}
+              hideChat={hideChat}
+              loadExtras={loadExtras}
+              forceCorporate={forceCorporate}
+            />
             {extra}
           </div>
         ) : (
@@ -68,6 +76,7 @@ export function BookingModal({
             className="flex-1 overflow-y-auto"
             hideChat={hideChat}
             loadExtras={loadExtras}
+            forceCorporate={forceCorporate}
           />
         )}
 

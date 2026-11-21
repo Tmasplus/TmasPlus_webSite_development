@@ -28,19 +28,23 @@ const emptyForm: CollaboratorInput = {
   city: "",
   cargo: "",
   area: "",
+  centro_costos: "",
   password: "",
 };
 
 type Errors = Partial<Record<keyof CollaboratorInput, string>>;
 
+const normCentroCostos = (v: string) => v.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 15);
+
 function validate(f: CollaboratorInput): Errors {
   const e: Errors = {};
   const required: (keyof CollaboratorInput)[] = [
-    "first_name", "last_name", "email", "mobile", "document_type", "document_number", "city", "password",
+    "first_name", "last_name", "email", "mobile", "document_type", "document_number", "city", "centro_costos", "password",
   ];
   for (const k of required) if (!String(f[k] ?? "").trim()) e[k] = "Campo obligatorio";
   if (f.email && !isValidEmail(f.email)) e.email = "Correo no válido";
   if (f.mobile && (onlyDigits(f.mobile).length < 7 || f.mobile.trim().length > 20)) e.mobile = "Teléfono no válido";
+  if (f.centro_costos && !/^[A-Z0-9]{1,15}$/.test(f.centro_costos)) e.centro_costos = "Solo letras/números, máx. 15";
   if (f.password && f.password.length < 8) e.password = "Mínimo 8 caracteres";
   return e;
 }
@@ -112,6 +116,7 @@ export const CollaboratorFormModal: React.FC<Props> = ({ open, onClose, companyI
         ...identity(form),
         cargo: form.cargo,
         area: form.area,
+        centro_costos: normCentroCostos(form.centro_costos),
       });
       toast.success(`${collaborator.first_name} ${collaborator.last_name} quedó vinculado como colaborador.`);
       onSaved(collaborator);
@@ -241,6 +246,15 @@ export const CollaboratorFormModal: React.FC<Props> = ({ open, onClose, companyI
             onChange={(e) => update("cargo", e.target.value)} />
           <FloatingInput id="col_area" label="Área" value={form.area ?? ""}
             onChange={(e) => update("area", e.target.value)} helpText="Ej. Comercial, Operaciones" />
+          <FloatingInput
+            id="col_centro_costos"
+            label="Centro de costos"
+            required
+            value={form.centro_costos}
+            onChange={(e) => update("centro_costos", normCentroCostos(e.target.value))}
+            error={err("centro_costos")}
+            helpText="Código interno (ej. G2105). Máx. 15 caracteres, solo mayúsculas."
+          />
 
           <SectionTitle>Acceso a la app</SectionTitle>
           <FloatingInput id="col_password" label="Contraseña" type="password" required autoComplete="new-password"

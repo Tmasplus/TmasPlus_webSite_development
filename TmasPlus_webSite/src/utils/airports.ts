@@ -21,6 +21,16 @@ interface Airport {
 
 const AIRPORTS: Airport[] = airportsData as Airport[];
 
+/**
+ * Punto fijo de destino para El Dorado (salidas / acceso público).
+ * Evita que el pin caiga en pista u otras zonas restringidas.
+ */
+export const EL_DORADO_FIXED_DESTINATION = {
+  latitude: 4.698252,
+  longitude: -74.141396,
+  title: "Aeropuerto El Dorado",
+} as const;
+
 const DEFAULT_RADIUS_KM = 1.0;
 
 // 1° de latitud ≈ 111 km. El delta del bounding-box deja ~11 km de holgura
@@ -73,4 +83,35 @@ export function isNearAirport(
     }
   }
   return null;
+}
+
+/** True si el texto o las coords apuntan al Aeropuerto El Dorado (Bogotá). */
+export function isElDoradoDestination(
+  lat?: number | null,
+  lng?: number | null,
+  title?: string | null,
+): boolean {
+  const name = String(title || "").toLowerCase();
+  if (
+    (name.includes("aeropuerto") && name.includes("dorado")) ||
+    (name.includes("el dorado") && (name.includes("aeropuerto") || name.includes("bogot")))
+  ) {
+    return true;
+  }
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return false;
+  const near = isNearAirport(Number(lat), Number(lng), 3);
+  return !!near && /dorado/i.test(near);
+}
+
+/** Si el destino es El Dorado, fuerza las coordenadas fijas de salidas. */
+export function snapElDoradoDestination<T extends { latitude: number; longitude: number; title?: string }>(
+  loc: T,
+): T {
+  if (!isElDoradoDestination(loc.latitude, loc.longitude, loc.title)) return loc;
+  return {
+    ...loc,
+    latitude: EL_DORADO_FIXED_DESTINATION.latitude,
+    longitude: EL_DORADO_FIXED_DESTINATION.longitude,
+    title: loc.title?.trim() || EL_DORADO_FIXED_DESTINATION.title,
+  };
 }
