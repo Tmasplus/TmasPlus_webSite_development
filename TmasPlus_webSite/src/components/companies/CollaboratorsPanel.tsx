@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Download, Plus, RefreshCw } from "lucide-react";
+import { CalendarPlus, Download, Pencil, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ActiveBadge } from "@/components/companies/CompanyUi";
 import { CollaboratorFormModal } from "@/components/companies/CollaboratorFormModal";
+import { CollaboratorEditModal } from "@/components/companies/CollaboratorEditModal";
 import { errorMessage, formatDate } from "@/components/companies/format";
 import { getDocumentTypeLabel } from "@/config/constants";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -36,6 +37,7 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("activos");
   const [openAdd, setOpenAdd] = useState(false);
+  const [editing, setEditing] = useState<Collaborator | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const dq = useDebounced(query, 250);
 
@@ -61,7 +63,7 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
       if (status === "activos" && !c.activo) return false;
       if (status === "inactivos" && c.activo) return false;
       if (!q) return true;
-      return [collaboratorFullName(c), c.email, c.mobile, c.document_number, c.cargo, c.area].some((v) =>
+      return [collaboratorFullName(c), c.email, c.mobile, c.document_number, c.cargo, c.area, c.centro_costos].some((v) =>
         norm(v).includes(q)
       );
     });
@@ -98,6 +100,7 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
       { header: "Ciudad", value: (c) => c.city },
       { header: "Cargo", value: (c) => c.cargo },
       { header: "Área", value: (c) => c.area },
+      { header: "Centro de costos", value: (c) => c.centro_costos },
       { header: "Estado", value: (c) => (c.activo ? "Activo" : "Inactivo") },
       { header: "Alta", value: (c) => c.creado_en },
     ]);
@@ -176,6 +179,7 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
                   <th className="px-3 py-2 font-medium">Correo</th>
                   <th className="px-3 py-2 font-medium">Teléfono</th>
                   <th className="px-3 py-2 font-medium">Cargo / Área</th>
+                  <th className="px-3 py-2 font-medium">Centro costos</th>
                   <th className="px-3 py-2 font-medium">Estado</th>
                   <th className="px-3 py-2 font-medium">Alta</th>
                   <th className="px-3 py-2 font-medium text-center">Acciones</th>
@@ -213,6 +217,7 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
                       <div className="text-slate-700">{c.cargo || "—"}</div>
                       {c.area && <div className="text-xs text-slate-400">{c.area}</div>}
                     </td>
+                    <td className="px-3 py-3 font-mono text-xs text-slate-700">{c.centro_costos || "—"}</td>
                     <td className="px-3 py-3">
                       <ActiveBadge active={c.activo} activeLabel="Activo" inactiveLabel="Inactivo" />
                     </td>
@@ -225,6 +230,15 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
                             Solicitar viaje
                           </Button>
                         )}
+                        <Button
+                          variant="secondary"
+                          className="!px-3 !py-1.5 !text-xs"
+                          onClick={() => setEditing(c)}
+                          title="Editar datos en la empresa"
+                        >
+                          <Pencil size={14} />
+                          Editar
+                        </Button>
                         <Button
                           variant="secondary"
                           onClick={() => toggleActive(c)}
@@ -251,6 +265,13 @@ export const CollaboratorsPanel: React.FC<Props> = ({ companyId, companyName, on
         open={openAdd}
         onClose={() => setOpenAdd(false)}
         companyId={companyId}
+        onSaved={() => load()}
+      />
+      <CollaboratorEditModal
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        companyId={companyId}
+        collaborator={editing}
         onSaved={() => load()}
       />
     </div>

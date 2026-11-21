@@ -200,6 +200,7 @@ function toCollaborator(row: Row): Collaborator {
     city: row.city ?? "",
     cargo: row.cargo,
     area: row.area,
+    centro_costos: row.centro_costos ?? null,
     activo: row.activo,
     creado_en: row.creado_en,
     profile_image: row.profile_image ?? null,
@@ -385,7 +386,7 @@ export const CompaniesCore = {
     for (let from = 0; ; from += 1000) {
       const { data, error } = await db
         .from("web_empresa_colaboradores")
-        .select("id,id_empresa,activo,cargo,area")
+        .select("id,id_empresa,activo,cargo,area,centro_costos")
         .order("id_vinculo")
         .range(from, from + 999);
       if (error) fail(error, "No se pudieron cargar los vínculos con empresas");
@@ -400,6 +401,7 @@ export const CompaniesCore = {
       active: r.activo,
       cargo: r.cargo,
       area: r.area,
+      centro_costos: r.centro_costos ?? null,
     }));
   },
 
@@ -498,6 +500,23 @@ export const CompaniesCore = {
       p_empresa: companyId,
       p_persona: collaboratorId,
       p_activo: active,
+    });
+    if (error) fail(error, "No se pudo actualizar el colaborador");
+  },
+
+  async updateCollaborator(
+    companyId: string,
+    collaboratorId: string,
+    input: { cargo?: string | null; area?: string | null; centro_costos: string }
+  ): Promise<void> {
+    const { error } = await db.rpc("web_empresa_actualizar_colaborador", {
+      p_empresa: companyId,
+      p_persona: collaboratorId,
+      p_input: {
+        cargo: input.cargo ?? null,
+        area: input.area ?? null,
+        centro_costos: String(input.centro_costos || "").trim().toUpperCase(),
+      },
     });
     if (error) fail(error, "No se pudo actualizar el colaborador");
   },

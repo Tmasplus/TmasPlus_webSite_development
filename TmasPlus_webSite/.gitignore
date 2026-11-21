@@ -30,3 +30,4 @@ backups/
 database/core_web/019_empresas.sql
 database/core_web/019_parche_*.sql
 database/core_web/020_reservas_recomendadas.sql
+database/core_web/020_parche_*.sql

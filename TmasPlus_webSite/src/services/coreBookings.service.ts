@@ -45,9 +45,14 @@ export type BookingListFilters = {
     invoiceStatus?: string | null;
     paymentStatus?: string | null;
   } | null;
+  /** Solo reservas recomendadas (vista web_bookings_recomendadas), filtradas por estado de la liquidación. */
+  recommended?: {
+    settlement?: 'abiertas' | 'soporte' | 'confirmadas' | 'resueltas' | 'sin_liquidacion' | null;
+  } | null;
 };
 
-const source = (f: BookingListFilters) => (f.corporate ? 'web_bookings_empresa' : 'web_bookings');
+const source = (f: BookingListFilters) =>
+  f.corporate ? 'web_bookings_empresa' : f.recommended ? 'web_bookings_recomendadas' : 'web_bookings';
 
 // Estados crudos de la vista que `normalize` traduce al nombre de la UI.
 const RAW_STATUSES: Record<string, string[]> = {
@@ -71,10 +76,18 @@ function applyFilters(query: any, f: BookingListFilters) {
   if (f.corporate?.companyId) q = q.eq('company_id', f.corporate.companyId);
   if (f.corporate?.invoiceStatus) q = q.eq('estado_facturacion', f.corporate.invoiceStatus);
   if (f.corporate?.paymentStatus) q = q.eq('estado_pago_conductor', f.corporate.paymentStatus);
+  switch (f.recommended?.settlement) {
+    case 'abiertas': q = q.in('settlement_status', ['pendiente', 'pago_reportado', 'en_disputa']); break;
+    case 'soporte': q = q.eq('needs_support', true); break;
+    case 'confirmadas': q = q.eq('settlement_status', 'confirmado'); break;
+    case 'resueltas': q = q.eq('settlement_status', 'resuelto'); break;
+    case 'sin_liquidacion': q = q.is('settlement_status', null); break;
+  }
   // PostgREST usa , ( ) como separadores del filtro `or`.
   const term = (f.search ?? '').replace(/[,()*%\\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (term) {
-    const ors = (f.corporate ? [...SEARCH_COLUMNS, 'company_name'] : SEARCH_COLUMNS).map((c) => `${c}.ilike.*${term}*`);
+    const extra = f.corporate ? ['company_name'] : f.recommended ? ['requester_name'] : [];
+    const ors = [...SEARCH_COLUMNS, ...extra].map((c) => `${c}.ilike.*${term}*`);
     if (/^[0-9a-f-]{36}$/i.test(term)) ors.push(`id.eq.${term}`);
     q = q.or(ors.join(','));
   }

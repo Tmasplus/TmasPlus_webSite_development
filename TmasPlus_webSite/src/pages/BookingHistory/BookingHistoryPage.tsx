@@ -21,6 +21,8 @@ import { ChevronLeft, ChevronRight, Eye } from "lucide-react";
 import { InvoiceStatusBadge, PaymentStatusBadge } from "@/components/companies/CompanyUi";
 import { BillingStatusModal, type BillingChange } from "@/components/companies/BillingStatusModal";
 import { CorporateBookingExtra } from "@/components/companies/CorporateBillingSection";
+import { RecommendedBookingExtra, SettlementBadge } from "@/components/recommendations/RecommendationUi";
+import { settlementLabel, type SettlementFilter } from "@/services/recommendations.service";
 import {
   CompaniesService,
   DRIVER_PAYMENT_STATUS_LABELS,
@@ -57,6 +59,16 @@ function formatDate(iso?: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
   return isNaN(+d) ? iso : d.toLocaleString();
+}
+
+/** Estado de la liquidación de una fila de web_bookings_recomendadas. */
+function recommendedSettlement(b: BookingRecord) {
+  return {
+    settlementStatus: b.settlement_status ?? null,
+    settlementOverdue: b.settlement_overdue === true,
+    needsSupport: b.needs_support === true,
+    resolution: b.resolution ?? null,
+  };
 }
 
 function formatMoney(v: string | number | null | undefined) {
@@ -213,6 +225,8 @@ function Pagination({
 type BookingHistoryViewProps = {
   /** Solo viajes empresariales; companyId null = todas las empresas. Agrega factura y pago al conductor. */
   corporate?: { companyId: string | null };
+  /** Solo reservas recomendadas: agrega quién la solicitó y la liquidación entre conductores. */
+  recommended?: boolean;
   /** Dentro de otra página: sin padding ni título principal. */
   embedded?: boolean;
 };
@@ -221,10 +235,12 @@ export default function BookingHistoryPage() {
   return <BookingHistoryView />;
 }
 
-export function BookingHistoryView({ corporate, embedded = false }: BookingHistoryViewProps) {
+export function BookingHistoryView({ corporate, recommended = false, embedded = false }: BookingHistoryViewProps) {
   const isCorporate = !!corporate;
+  const isRecommended = recommended && !isCorporate;
   const corporateCompanyId = corporate?.companyId ?? null;
   const showCompany = isCorporate && !corporateCompanyId;
+  const [settlementFilter, setSettlementFilter] = useState<SettlementFilter>("todas");
   const [invoiceFilter, setInvoiceFilter] = useState<InvoiceStatus | "">("");
   const [paymentFilter, setPaymentFilter] = useState<DriverPaymentStatus | "">("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -268,7 +284,9 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
   const [driverOptionsLoading, setDriverOptionsLoading] = useState(false);
   const [driverLabel, setDriverLabel] = useState("");
   const isMountedRef = useRef(true);
-  const channelNameRef = useRef(isCorporate ? "corporate-bookings-realtime" : "bookings-history-realtime");
+  const channelNameRef = useRef(
+    isCorporate ? "corporate-bookings-realtime" : isRecommended ? "recommended-bookings-realtime" : "bookings-history-realtime"
+  );
   const realtimeStatusRef = useRef(realtimeStatus);
   const selectedBookingRef = useRef<BookingRecord | null>(null);
   const requestSeqRef = useRef(0);
@@ -289,8 +307,9 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
       corporate: isCorporate
         ? { companyId: corporateCompanyId, invoiceStatus: invoiceFilter || null, paymentStatus: paymentFilter || null }
         : null,
+      recommended: isRecommended ? { settlement: settlementFilter === "todas" ? null : settlementFilter } : null,
     };
-  }, [debouncedSearch, statusFilter, driverFilter, categoryFilter, carTypes, dateFrom, dateTo, isCorporate, corporateCompanyId, invoiceFilter, paymentFilter]);
+  }, [debouncedSearch, statusFilter, driverFilter, categoryFilter, carTypes, dateFrom, dateTo, isCorporate, corporateCompanyId, invoiceFilter, paymentFilter, isRecommended, settlementFilter]);
 
   const filtersRef = useRef(filters);
   const pageRef = useRef(page);
@@ -472,6 +491,9 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
       "Completado",
       "Cancelado",
       ...(isCorporate ? ["Empresa", "Cobro empresa", "Factura", "N.° factura", "Pago conductor"] : []),
+      ...(isRecommended
+        ? ["Solicitó", "Tarifa", "Valor acordado", "Ganancia solicitante", "Liquidación", "Monto liquidación", "Plazo"]
+        : []),
     ];
 
     const rows = filteredBookings.map((b) => {
@@ -510,6 +532,17 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
               DRIVER_PAYMENT_STATUS_LABELS[b.estado_pago_conductor as DriverPaymentStatus] ?? "",
             ]
           : []),
+        ...(isRecommended
+          ? [
+              b.requester_name || "",
+              b.fare_source === "manual" ? "Manual" : "Recomendada",
+              b.agreed_value ?? "",
+              b.requester_margin ?? "",
+              settlementLabel(recommendedSettlement(b)),
+              b.settlement_amount ?? "",
+              b.settlement_due_at ? formatDate(b.settlement_due_at) : "",
+            ]
+          : []),
       ];
     });
 
@@ -529,7 +562,11 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = isCorporate ? "viajes_empresariales.csv" : "historial_reservas.csv";
+    a.download = isCorporate
+      ? "viajes_empresariales.csv"
+      : isRecommended
+      ? "reservas_recomendadas.csv"
+      : "historial_reservas.csv";
     a.click();
     URL.revokeObjectURL(url);
     } catch (e: any) {
@@ -676,14 +713,14 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
       setSavingBilling(false);
     }
   };
-  const columnCount = 14 + (isCorporate ? 3 : 0) + (showCompany ? 1 : 0);
+  const columnCount = 14 + (isCorporate ? 3 : 0) + (showCompany ? 1 : 0) + (isRecommended ? 2 : 0);
 
   return (
     <div className={embedded ? "" : "p-6"}>
       <div className={`flex items-center justify-between ${embedded ? "mb-4" : "mb-6"}`}>
         <div>
           <h1 className={embedded ? "text-lg font-semibold text-slate-900" : "text-2xl font-semibold text-slate-900"}>
-            {isCorporate ? "Viajes empresariales" : "Historial de reservas"}
+            {isCorporate ? "Viajes empresariales" : isRecommended ? "Viajes recomendados" : "Historial de reservas"}
           </h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
             <span
@@ -787,6 +824,21 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
             </select>
           </>
         )}
+        {isRecommended && (
+          <select
+            value={settlementFilter}
+            onChange={(e) => resetPage(setSettlementFilter)(e.target.value as SettlementFilter)}
+            className="p-2 border border-slate-300 rounded-lg"
+            aria-label="Liquidación entre conductores"
+          >
+            <option value="todas">Liquidación: todas</option>
+            <option value="abiertas">Abiertas (sin confirmar)</option>
+            <option value="soporte">En soporte (disputa o vencidas)</option>
+            <option value="confirmadas">Confirmadas</option>
+            <option value="resueltas">Resueltas por soporte</option>
+            <option value="sin_liquidacion">Sin liquidación (no completados)</option>
+          </select>
+        )}
       </div>
 
       {isCorporate && selected.size > 0 && (
@@ -825,16 +877,21 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
               <th>Creación</th>
               <th>Programada</th>
               <th>Ejecución</th>
+              {isRecommended && <th>Solicitó</th>}
               <th>Cliente</th>
               <th>Conductor / Placa</th>
               <th>Categoría</th>
               <th className="min-w-[150px]">
-                Estimado inicial cotizado
-                <span className="block font-normal normal-case tracking-normal text-slate-400">Mínimo · rango</span>
+                {isRecommended ? "Tarifa del viaje" : "Estimado inicial cotizado"}
+                <span className="block font-normal normal-case tracking-normal text-slate-400">
+                  {isRecommended ? "Valor fijo" : "Mínimo · rango"}
+                </span>
               </th>
               <th className="min-w-[150px]">
                 Precio final
-                <span className="block font-normal normal-case tracking-normal text-slate-400">Mínimo · rango</span>
+                <span className="block font-normal normal-case tracking-normal text-slate-400">
+                  {isRecommended ? "Valor fijo" : "Mínimo · rango"}
+                </span>
               </th>
               <th>Duración viaje</th>
               <th>Distancia cotizada</th>
@@ -842,6 +899,7 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
               <th className="text-center">OTP</th>
               {isCorporate && <th>Factura</th>}
               {isCorporate && <th>Pago conductor</th>}
+              {isRecommended && <th className="min-w-[150px]">Liquidación entre conductores</th>}
               <th className="text-center">Acciones</th>
             </tr>
           </thead>
@@ -891,6 +949,17 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
                     <td><DateCell iso={b.created_at} /></td>
                     <td><DateCell iso={b.booking_type === "SCHEDULED" ? b.booking_date : null} /></td>
                     <td><DateCell iso={executionIso(b)} /></td>
+                    {isRecommended && (
+                      <td className="max-w-[180px]">
+                        <div className="font-medium text-slate-800">{b.requester_name || "—"}</div>
+                        {b.agreed_value != null && (
+                          <div className="text-xs text-slate-500">
+                            Acordó {formatMoney(Number(b.agreed_value))}
+                            {b.requester_margin != null && ` · gana ${formatMoney(Number(b.requester_margin))}`}
+                          </div>
+                        )}
+                      </td>
+                    )}
                     <td className="max-w-[220px]">
                       <div className="font-medium text-slate-800">{b.customer_name || "—"}</div>
                       <div className="truncate text-xs text-slate-500" title={b.customer_email || ""}>
@@ -907,12 +976,16 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
                     </td>
                     <td className="whitespace-nowrap">{categoryNameForValue(carTypes, b.car_type)}</td>
                     <td>
-                      <FareCell min={quote.min} max={quote.max} empty="—" />
+                      <FareCell
+                        min={quote.min}
+                        max={isRecommended ? quote.min : quote.max}
+                        empty="—"
+                      />
                     </td>
                     <td>
                       <FareCell
                         min={finalFare}
-                        max={finalFare ? maxFromMinConductor(finalFare) : null}
+                        max={isRecommended ? finalFare : finalFare ? maxFromMinConductor(finalFare) : null}
                         empty={isCancelled ? "Cancelada" : "Pendiente"}
                       />
                     </td>
@@ -959,6 +1032,19 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
                           <span className="text-xs text-slate-400">—</span>
                         ) : (
                           <PaymentStatusBadge status={b.estado_pago_conductor ?? "sin_pagar"} />
+                        )}
+                      </td>
+                    )}
+                    {isRecommended && (
+                      <td>
+                        <SettlementBadge trip={recommendedSettlement(b)} />
+                        {b.settlement_amount != null && (
+                          <div className="mt-0.5 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-700">
+                            {formatMoney(Number(b.settlement_amount))}
+                          </div>
+                        )}
+                        {b.settlement_due_at && !["confirmado", "resuelto"].includes(b.settlement_status) && (
+                          <div className="text-[11px] text-slate-400">Plazo {formatDate(b.settlement_due_at)}</div>
                         )}
                       </td>
                     )}
@@ -1020,6 +1106,8 @@ export function BookingHistoryView({ corporate, embedded = false }: BookingHisto
         extra={
           isCorporate && selectedBooking ? (
             <CorporateBookingExtra bookingId={selectedBooking.id} onChanged={() => void loadBookings(true)} />
+          ) : isRecommended && selectedBooking ? (
+            <RecommendedBookingExtra bookingId={selectedBooking.id} onChanged={() => void loadBookings(true)} />
           ) : undefined
         }
       />

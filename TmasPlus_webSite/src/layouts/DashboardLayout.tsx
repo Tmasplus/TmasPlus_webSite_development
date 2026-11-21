@@ -7,6 +7,7 @@ import { navSectionsFor, type Portal } from "@/components/layout/navigation";
 import defaultProfileImage from "@/assets/perfil.png";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyScope } from "@/hooks/useCompanyScope";
+import { useRecommendationSummary } from "@/hooks/useRecommendationSummary";
 import { stopCompanyPreview } from "@/utils/companyPreview";
 
 const PIN_STORAGE_KEY = "tplus_sidebar_pinned";
@@ -31,6 +32,7 @@ export default function DashboardLayout() {
 
   const portal: Portal = mode === "company" || pathname.startsWith("/empresa/") ? "company" : "admin";
   const isCompanyAccount = mode === "company";
+  const recommendationSummary = useRecommendationSummary(portal === "admin" && !!profile?.es_admin);
   const displayName = [profile?.nombre, profile?.apellido].filter(Boolean).join(" ");
   const roleLabel = profile?.es_admin
     ? "Administrador"
@@ -93,6 +95,7 @@ export default function DashboardLayout() {
           profileImage={profile?.imagen_perfil}
           defaultProfileImage={defaultProfileImage}
           handleLogout={handleLogout}
+          badges={{ "/bookingRecommended": recommendationSummary?.needsAttention ?? 0 }}
         />
         <main className="transition-[padding] duration-200 md:pl-[var(--sidebar-offset)]">
           {portal === "company" && !isCompanyAccount && (

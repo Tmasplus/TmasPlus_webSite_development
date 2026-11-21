@@ -564,6 +564,7 @@ export const CompanyBookingsPanel: React.FC<Props> = ({ companyId, viewer, initi
           onClose={closeDetail}
           hideChat={!isAdmin}
           loadExtras={loadTripExtras}
+          forceCorporate
           onCancel={canCancelBooking(detail, viewer) ? () => openCancel(detail) : undefined}
           extra={
             <section className="mx-4 mb-6 rounded-2xl border border-sky-200 bg-white p-5 sm:mx-6">

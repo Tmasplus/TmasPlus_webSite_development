@@ -55,6 +55,21 @@ export interface RecommendedTrip {
   resolution: SettlementResolution | null;
   resolutionNote: string | null;
   resolvedAt: string | null;
+  /** Reporte a soporte de alguno de los dos conductores (null si no hay). */
+  supportRequestedAt: string | null;
+  supportRequestedBy: string | null;
+  supportNote: string | null;
+  supportAttendedAt: string | null;
+  supportResponse: string | null;
+  /** Solo el admin cierra el hilo; mientras sea null el chat sigue abierto. */
+  supportClosedAt: string | null;
+  /** Métodos del conductor que hizo el viaje (para liquidar sin efectivo). */
+  driverPayCash: boolean;
+  driverPayDaviplata: boolean;
+  driverDaviplataNumero: string | null;
+  driverPayNequi: boolean;
+  driverNequiNumero: string | null;
+  driverNequiBreb: string | null;
 }
 
 export interface RecommenderStats {
@@ -136,6 +151,18 @@ function toTrip(r: Row): RecommendedTrip {
     resolution: r.resolution ?? null,
     resolutionNote: r.resolution_note ?? null,
     resolvedAt: r.resolved_at ?? null,
+    supportRequestedAt: r.support_requested_at ?? null,
+    supportRequestedBy: r.support_requested_by ?? null,
+    supportNote: r.support_note ?? null,
+    supportAttendedAt: r.support_attended_at ?? null,
+    supportResponse: r.support_response ?? null,
+    supportClosedAt: r.support_closed_at ?? null,
+    driverPayCash: r.driver_pay_cash === true,
+    driverPayDaviplata: r.driver_pay_daviplata === true,
+    driverDaviplataNumero: r.driver_daviplata_numero ?? null,
+    driverPayNequi: r.driver_pay_nequi === true,
+    driverNequiNumero: r.driver_nequi_numero ?? null,
+    driverNequiBreb: r.driver_nequi_breb ?? null,
   };
 }
 
@@ -157,11 +184,13 @@ export const EVENT_LABELS: Record<string, string> = {
   creada: "Viaje solicitado",
   cancelada: "Viaje cancelado",
   liquidacion_abierta: "Liquidación abierta (24 h)",
-  monto_actualizado: "Monto ajustado al precio final",
+  monto_actualizado: "Monto ajustado (tarifa fija)",
   pago_reportado: "El solicitante reportó el pago",
   pago_recibido: "El conductor confirmó que recibió",
   pago_no_recibido: "El conductor reportó que no recibió",
   resuelta: "Resuelta por soporte",
+  soporte_reportado: "Un conductor escribió a soporte",
+  soporte_atendido: "Soporte respondió o cerró el caso",
 };
 
 export function settlementLabel(t: Pick<RecommendedTrip, "settlementStatus" | "settlementOverdue">): string {
@@ -170,6 +199,28 @@ export function settlementLabel(t: Pick<RecommendedTrip, "settlementStatus" | "s
 }
 
 export type SettlementFilter = "todas" | "abiertas" | "soporte" | "confirmadas" | "resueltas" | "sin_liquidacion";
+
+/** Liquidaciones entre conductores para el inicio y el contador del menú (solo admin). */
+export interface RecommendationSummary {
+  /** Pendientes de pago, aún dentro de las 24 h. */
+  unpaid: number;
+  unpaidOverdue: number;
+  /** El solicitante reportó el pago; falta que el otro conductor lo confirme. */
+  paidUnconfirmed: number;
+  paidUnconfirmedOverdue: number;
+  /** Confirmadas por ambos conductores. */
+  confirmed: number;
+  disputed: number;
+  resolved: number;
+  /** Viajes en disputa, vencidos o con chat de soporte abierto. */
+  needsAttention: number;
+  amountToPay: number;
+  amountPaid: number;
+  activeTrips: number;
+  totalTrips: number;
+  /** Chats de soporte aún abiertos (sin cerrar por admin). */
+  supportPending: number;
+}
 
 export const RecommendationsService = {
   async listTrips(): Promise<RecommendedTrip[]> {
@@ -180,6 +231,34 @@ export const RecommendationsService = {
       .limit(1000);
     if (error) throw new Error(error.message);
     return (data ?? []).map(toTrip);
+  },
+
+  async getTrip(bookingId: string): Promise<RecommendedTrip | null> {
+    const { data, error } = await db.from("web_reservas_recomendadas").select("*").eq("id", bookingId).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? toTrip(data) : null;
+  },
+
+  async getSummary(): Promise<RecommendationSummary | null> {
+    const { data, error } = await db.from("web_recomendaciones_resumen").select("*").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+    const n = (v: unknown) => Number(v) || 0;
+    return {
+      unpaid: n(data.sin_pagar),
+      unpaidOverdue: n(data.sin_pagar_vencidas),
+      paidUnconfirmed: n(data.pagadas_sin_confirmar),
+      paidUnconfirmedOverdue: n(data.pagadas_sin_confirmar_vencidas),
+      confirmed: n(data.confirmadas),
+      disputed: n(data.en_disputa),
+      resolved: n(data.resueltas),
+      needsAttention: n(data.requieren_atencion),
+      amountToPay: n(data.monto_por_pagar),
+      amountPaid: n(data.monto_pagado),
+      activeTrips: n(data.viajes_activos),
+      supportPending: n(data.soporte_pendiente),
+      totalTrips: n(data.viajes_total),
+    };
   },
 
   async listRecommenders(): Promise<RecommenderStats[]> {
@@ -246,6 +325,21 @@ export const RecommendationsService = {
     if (error) throw new Error(error.message);
     if (!data) throw new Error("No se encontró la reserva");
     return normalizeBooking(data);
+  },
+
+  /** Responde en el chat de soporte sin cerrarlo; le llega un push al conductor. */
+  async attendSupport(bookingId: string, response: string): Promise<void> {
+    const { error } = await db.rpc("web_admin_atender_soporte_recomendacion", { p_reserva: bookingId, p_nota: response });
+    if (error) throw new Error(error.message);
+  },
+
+  /** Cierra el hilo de soporte de este viaje (la app muestra "Soporte terminado"). */
+  async closeSupport(bookingId: string, note?: string): Promise<void> {
+    const { error } = await db.rpc("web_admin_cerrar_soporte_recomendacion", {
+      p_reserva: bookingId,
+      p_nota: note?.trim() || null,
+    });
+    if (error) throw new Error(error.message);
   },
 
   async resolve(bookingId: string, resolution: SettlementResolution, note: string): Promise<void> {

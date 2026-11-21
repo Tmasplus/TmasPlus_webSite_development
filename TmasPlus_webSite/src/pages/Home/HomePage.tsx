@@ -29,6 +29,8 @@ import { CarTypesService } from "@/services/carTypes.service";
 import { BookingsService } from "@/services/bookings.service";
 import { ComplaintsService } from "@/services/complaints.service";
 import { useAuth } from "@/hooks/useAuth";
+import { useRecommendationSummary } from "@/hooks/useRecommendationSummary";
+import { RecommendationsHomeSection } from "@/components/recommendations/RecommendationsHomeSection";
 import type { CarTypeRow } from "@/config/database.types";
 
 // Mismos grupos que el filtro de estado del historial (BookingHistoryPage → STATUS_GROUPS).
@@ -68,6 +70,7 @@ const settle = (p: Promise<number>) => p.catch(() => null);
 
 export default function HomePage() {
   const { profile } = useAuth();
+  const recommendationSummary = useRecommendationSummary(!!profile?.es_admin);
   const [openCategory, setOpenCategory] = useState(false);
   const [categories, setCategories] = useState<CarTypeRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -238,6 +241,8 @@ export default function HomePage() {
           />
         </div>
       </section>
+
+      <RecommendationsHomeSection summary={recommendationSummary} />
 
       {/* Tipos de servicio */}
       <section>
