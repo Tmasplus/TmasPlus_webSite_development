@@ -19,9 +19,11 @@ import {
   DRIVER_MANAGEMENT_OPTIONS,
   driverManagementOption,
 } from "@/utils/driverManagement";
+import { paymentCsvColumns } from "@/utils/driverPayments";
 import { supabase, supabaseSecondary } from "@/config/supabase";
 import {
   UsersSecondaryService,
+  type DriverPaymentMethods,
   type SecondaryUser,
   type UpdateUserInput,
 } from "@/services/usersSecondary.service";
@@ -132,6 +134,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
   const [cedulaFallbackMap, setCedulaFallbackMap] = useState<Record<string, string>>({});
   // Gestión manual (seguimiento comercial) por users.id; ausente = "Sin gestión".
   const [managementMap, setManagementMap] = useState<Record<string, string>>({});
+  const [paymentMap, setPaymentMap] = useState<Record<string, DriverPaymentMethods>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -179,7 +182,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
     setLoading(true);
     setError(null);
     try {
-      const [data, memberships, management] = await Promise.all([
+      const [data, memberships, management, payments] = await Promise.all([
         UsersSecondaryService.list(),
         MembershipsService.statusByConductor().catch(() => ({})),
         isAppDriversMode
@@ -188,8 +191,15 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
               return {} as Record<string, string>;
             })
           : Promise.resolve({} as Record<string, string>),
+        isAppDriversMode
+          ? UsersSecondaryService.paymentMethodsByDriver().catch((e) => {
+              console.warn("No se pudieron cargar los métodos de pago:", e);
+              return {} as Record<string, DriverPaymentMethods>;
+            })
+          : Promise.resolve({} as Record<string, DriverPaymentMethods>),
       ]);
       setManagementMap(management);
+      setPaymentMap(payments);
       const visibleRows = data.filter(isAppDriversMode ? isDriverUser : isClientUser);
       setUsers(visibleRows);
       setMembershipMap(memberships);
@@ -680,6 +690,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ mode = "clients" }) => {
       ...(isAppDriversMode
         ? [{ header: "Gestión", value: (u: SecondaryUser) => driverManagementOption(managementFor(u)).label }]
         : []),
+      ...(isAppDriversMode ? paymentCsvColumns<SecondaryUser>((u) => paymentMap[u.id]) : []),
       { header: "Alta", value: (u) => formatDate(u.created_at) },
     ]);
   };

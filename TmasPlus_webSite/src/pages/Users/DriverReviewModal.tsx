@@ -7,7 +7,7 @@ import { toast } from '@/utils/toast';
 import { formatReferralCode, REFERRAL_OWNER_NOT_FOUND, referralOwnerTypeLabel } from '@/utils/referralCode';
 import type { DriverProfile } from '@/config/database.types';
 import { DriverDocumentsService, DOC_DEFS, type DocDef } from '@/services/driverDocuments.service';
-import { UsersSecondaryService } from '@/services/usersSecondary.service';
+import { UsersSecondaryService, type DriverPaymentMethods } from '@/services/usersSecondary.service';
 import { CITIES, DOCUMENT_TYPE_OPTIONS, getDocumentTypeLabel } from '@/config/constants';
 import { useCarTypeCatalog } from '@/hooks/useCarTypeCatalog';
 import { useCarBrands } from '@/hooks/useCarBrands';
@@ -15,6 +15,25 @@ import { uploadProfilePhoto } from '@/services/profilePhoto.service';
 import { ProfilePhotoEditor } from './ProfilePhotoEditor';
 import { DRIVER_MANAGEMENT_OPTIONS, driverManagementOption } from '@/utils/driverManagement';
 import { activeCategoryOptions, categoryForValue, categoryNameForValue, legacyCategoryLabel } from '@/utils/carTypeCatalog';
+
+// Borrador editable de los métodos de pago (textos para los inputs).
+type PaymentForm = {
+    daviplata_numero: string;
+    nequi: boolean;
+    nequi_numero: string;
+    breb_activo: boolean;
+    nequi_breb: string;
+};
+
+const paymentFormFrom = (m: DriverPaymentMethods | null): PaymentForm => ({
+    daviplata_numero: m?.daviplata_numero ?? '',
+    nequi: m?.nequi ?? false,
+    nequi_numero: m?.nequi_numero ?? '',
+    breb_activo: m?.breb_activo ?? false,
+    nequi_breb: m?.nequi_breb ?? '',
+});
+
+const dashIfEmpty = (v: string | null | undefined) => ((v ?? '').trim() || '-');
 
 // 1. SOLUCIÓN TS: Exportamos el tipo extendido para unificar el modelo
 export type EnrichedDriverProfile = DriverProfile & { referrerName?: string };
@@ -219,6 +238,11 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const [fixingEmail, setFixingEmail] = useState(false);
     const [newEmail, setNewEmail] = useState('');
 
+    // Métodos de pago (solo conductores de la App): null = sin configurar o cargando.
+    const [payments, setPayments] = useState<DriverPaymentMethods | null>(null);
+    const [paymentsLoaded, setPaymentsLoaded] = useState(false);
+    const [payForm, setPayForm] = useState<PaymentForm>(paymentFormFrom(null));
+
     const loadSecondaryDocs = (id: string, email?: string | null) => {
         DriverDocumentsService.getSecondaryDocs(id, email)
             .then(setSecondaryDocs)
@@ -248,6 +272,22 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
         // `supabaseSecondary` es alias de core, así que aplica a ambos orígenes del modal.
         if ((driver.user_type || '').toLowerCase() !== 'customer') {
             UsersSecondaryService.getEmailStatus(driver.id).then(setEmailStatus).catch(() => setEmailStatus(null));
+        }
+
+        // Métodos de pago: solo conductores de la App (origen secundario/core).
+        setPayments(null);
+        setPaymentsLoaded(false);
+        setPayForm(paymentFormFrom(null));
+        let paymentsCancelled = false;
+        if (source === 'secondary' && (driver.user_type || '').toLowerCase() !== 'customer') {
+            UsersSecondaryService.getPaymentMethods(driver.id)
+                .then(m => {
+                    if (paymentsCancelled) return;
+                    setPayments(m);
+                    setPayForm(paymentFormFrom(m));
+                    setPaymentsLoaded(true);
+                })
+                .catch(() => { /* sin vista/permiso: la sección queda oculta */ });
         }
 
         // Tanto conductores como clientes tienen su propio código de referido en
@@ -287,7 +327,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                     setReferredByType(name ? referralOwnerTypeLabel(owner?.user_type) : '');
                 });
         }
-        return () => { cancelled = true; };
+        return () => { cancelled = true; paymentsCancelled = true; };
     }, [driver]);
 
     if (!open || !driver) return null;
@@ -296,6 +336,8 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
     const d = displayDriver ?? driver;
 
     const isCustomer = (d.user_type || '').toLowerCase() === 'customer';
+    // Solo si la vista de métodos de pago respondió (migración 025 aplicada).
+    const showPayments = source === 'secondary' && !isCustomer && paymentsLoaded;
     const carId = d.vehicle?.id ?? null;
 
     // Cédula a mostrar en modo lectura (desde la copia guardada, no desde el
@@ -399,6 +441,18 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                 (editForm as any).email = res.email;
                 toast.success(emailStatus?.confirmed ? `Correo actualizado a ${res.email}` : `Correo actualizado; confirmación enviada a ${res.email}`);
             }
+            // Primero los métodos de pago: si el dato es inválido, no se guarda nada a medias.
+            if (showPayments) {
+                const saved = await UsersSecondaryService.setPaymentMethods(driver.id, {
+                    daviplata_numero: payForm.daviplata_numero.trim() || null,
+                    nequi: payForm.nequi,
+                    nequi_numero: payForm.nequi_numero.trim() || null,
+                    breb_activo: payForm.breb_activo,
+                    nequi_breb: payForm.nequi_breb.trim() || null,
+                });
+                setPayments(saved);
+                setPayForm(paymentFormFrom(saved));
+            }
             await UsersSecondaryService.updateViaFunction(driver.id, userPayload, carPayload);
 
             let newPhotoUrl: string | null = null;
@@ -442,6 +496,7 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                             if (isEditing) {
                                 setEditForm(d);
                                 setPendingPhoto(null);
+                                setPayForm(paymentFormFrom(payments));
                             }
                             setIsEditing(!isEditing);
                         }}>
@@ -540,6 +595,66 @@ export const DriverReviewModal: React.FC<DriverReviewModalProps> = ({
                                             ))}
                                         </select>
                                         <p className="text-[11px] text-slate-400 mt-1">Se guarda al elegirla.</p>
+                                    </div>
+                                )}
+
+                                {showPayments && (
+                                    <div>
+                                        <span className="font-semibold text-slate-500 block">Métodos de pago:</span>
+                                        {isEditing ? (
+                                            <div className="mt-1 space-y-2 p-3 border rounded-lg bg-slate-50">
+                                                <p className="text-xs text-slate-500">Efectivo siempre está activo.</p>
+                                                <label className="block text-xs font-medium text-slate-600">
+                                                    Número DaviPlata (10 dígitos; vacío = sin DaviPlata)
+                                                    <input
+                                                        className="border p-1 rounded w-full mt-1 bg-white"
+                                                        inputMode="numeric"
+                                                        value={payForm.daviplata_numero}
+                                                        onChange={e => setPayForm({ ...payForm, daviplata_numero: e.target.value })}
+                                                    />
+                                                </label>
+                                                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={payForm.nequi}
+                                                        onChange={e => setPayForm({ ...payForm, nequi: e.target.checked })}
+                                                    />
+                                                    Nequi activo
+                                                </label>
+                                                {payForm.nequi && (
+                                                    <input
+                                                        className="border p-1 rounded w-full bg-white"
+                                                        inputMode="numeric"
+                                                        placeholder="Número Nequi (10 dígitos)"
+                                                        value={payForm.nequi_numero}
+                                                        onChange={e => setPayForm({ ...payForm, nequi_numero: e.target.value })}
+                                                    />
+                                                )}
+                                                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={payForm.breb_activo}
+                                                        onChange={e => setPayForm({ ...payForm, breb_activo: e.target.checked })}
+                                                    />
+                                                    Llave Bre-b activa
+                                                </label>
+                                                {payForm.breb_activo && (
+                                                    <input
+                                                        className="border p-1 rounded w-full bg-white"
+                                                        placeholder="Llave Bre-b"
+                                                        value={payForm.nequi_breb}
+                                                        onChange={e => setPayForm({ ...payForm, nequi_breb: e.target.value })}
+                                                    />
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="mt-1 space-y-0.5">
+                                                <p>Efectivo: {payments ? (payments.efectivo ? 'Sí' : 'No') : '-'}</p>
+                                                <p>DaviPlata: {dashIfEmpty(payments?.daviplata_numero)}</p>
+                                                <p>Nequi: {dashIfEmpty(payments?.nequi_numero)}</p>
+                                                <p>Llave Bre-b: {dashIfEmpty(payments?.nequi_breb)}</p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 

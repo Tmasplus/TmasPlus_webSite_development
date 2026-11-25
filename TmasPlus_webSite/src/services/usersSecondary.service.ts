@@ -20,6 +20,23 @@ export interface SecondaryUser {
   [key: string]: any;
 }
 
+/** Métodos de pago que el conductor configura en la app (tabla conductor_metodo_pago). */
+export interface DriverPaymentMethods {
+  efectivo: boolean;
+  daviplata: boolean;
+  daviplata_numero: string | null;
+  nequi: boolean;
+  nequi_numero: string | null;
+  nequi_breb: string | null;
+  breb_activo: boolean;
+}
+
+/** Lo que se envía al guardar; efectivo siempre queda activo y daviplata se deduce del número. */
+export type DriverPaymentMethodsInput = Pick<
+  DriverPaymentMethods,
+  'daviplata_numero' | 'nequi' | 'nequi_numero' | 'nequi_breb' | 'breb_activo'
+>;
+
 export interface UpdateUserInput {
   first_name?: string;
   last_name?: string;
@@ -104,6 +121,49 @@ export class UsersSecondaryService {
     await syncSession();
     const { error } = await sb.rpc('web_set_driver_management', { p_id: id, p_status: status });
     if (error) throw new Error(error.message || 'No se pudo guardar la gestión');
+  }
+
+  /** Métodos de pago de cada conductor (id → métodos). Pagina de a 1000 filas. */
+  static async paymentMethodsByDriver(): Promise<Record<string, DriverPaymentMethods>> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const map: Record<string, DriverPaymentMethods> = {};
+    const pageSize = 1000;
+    for (let from = 0; ; ) {
+      const { data, error } = await sb
+        .from('web_driver_payment_methods')
+        .select('id, efectivo, daviplata, daviplata_numero, nequi, nequi_numero, nequi_breb, breb_activo')
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error && (error as { code?: string }).code === 'PGRST103') break;
+      if (error) throw new Error(error.message || 'Error al obtener los métodos de pago');
+      const rows = (data || []) as Array<DriverPaymentMethods & { id: string }>;
+      if (rows.length === 0) break;
+      for (const { id, ...methods } of rows) map[id] = methods;
+      from += rows.length;
+    }
+    return map;
+  }
+
+  /** Métodos de pago de un conductor; null si nunca los configuró. */
+  static async getPaymentMethods(id: string): Promise<DriverPaymentMethods | null> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const { data, error } = await sb
+      .from('web_driver_payment_methods')
+      .select('efectivo, daviplata, daviplata_numero, nequi, nequi_numero, nequi_breb, breb_activo')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Error al obtener los métodos de pago');
+    return (data as DriverPaymentMethods | null) ?? null;
+  }
+
+  static async setPaymentMethods(id: string, input: DriverPaymentMethodsInput): Promise<DriverPaymentMethods> {
+    if (!sb) throw new Error('Cliente secundario no configurado');
+    await syncSession();
+    const { data, error } = await sb.rpc('web_set_driver_payment_methods', { p_id: id, p_input: input });
+    if (error) throw new Error(error.message || 'No se pudieron guardar los métodos de pago');
+    return data as DriverPaymentMethods;
   }
 
   static async create(input: CreateUserInput): Promise<SecondaryUser> {
